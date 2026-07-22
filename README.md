@@ -117,6 +117,22 @@ New and already-running agent processes are discovered automatically. Restarting
 an agent is only needed after the first hook installation if you want full
 lifecycle colors immediately.
 
+### APC40 mkII hardware
+
+Connect an Akai APC40 mkII before or after launching Vibe Controller. The app
+auto-detects its MIDI input and output ports and maps the first 40 live sessions
+to the 5x8 clip-launch grid in stable session order.
+
+- Green: agent working
+- Red: agent ready; blinking red has not been seen yet
+- Pulsing yellow: agent needs attention
+- Blue: last focused session
+
+Pressing a hardware pad uses the same terminal-focus path as clicking its
+on-screen pad. Connection state and a manual reconnect action are available in
+the menu-bar menu. The connector puts the device in Alternate Ableton mode so
+Vibe Controller owns the grid LEDs while it is running.
+
 ### Ghostty requirement
 
 Exact split targeting uses Ghostty's `terminal.tty` AppleScript property. Install

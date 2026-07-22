@@ -11,6 +11,7 @@ import { createUsageService } from './usage.js'
 import { createCompanionService } from './companions.js'
 import { loadPrefs, savePrefs } from './prefs.js'
 import { loadTaskCache, saveTaskCache } from './task-cache.js'
+import { createMidiController } from './midi-controller.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -29,6 +30,7 @@ let tray = null
 let discovery = null
 let pointerResize = null
 let lastFocusedSessionId = null
+let midiController = null
 
 function stopPointerResize () {
   if (!pointerResize) return
@@ -312,6 +314,7 @@ function runInstaller () {
 function buildTrayMenu () {
   const loginItem = loginItemSettings()
   const zoom = savedZoom()
+  const midiStatus = midiController?.getStatus() || { connected: false }
   return Menu.buildFromTemplate([
     { label: 'Show / Hide', click: () => (win.isVisible() ? win.hide() : win.showInactive()) },
     { label: 'Dock top-right', click: snapTopRight },
@@ -333,6 +336,12 @@ function buildTrayMenu () {
         { label: 'Actual Size', accelerator: 'CommandOrControl+0', enabled: zoom !== 1, click: () => setInterfaceZoom(1) }
       ]
     },
+    { type: 'separator' },
+    {
+      label: midiStatus.connected ? `APC40: ${midiStatus.device}` : 'APC40: Not connected',
+      enabled: false
+    },
+    { label: 'Reconnect APC40', click: () => midiController?.reconnect() },
     { type: 'separator' },
     { label: 'Install / update agent hooks…', click: runInstaller },
     { label: 'Open hooks folder', click: () => shell.openPath(join(app.getPath('home'), '.claude-controller')) },
@@ -443,6 +452,7 @@ async function focusById (id) {
   console.log(`[focus] "${s.project}" pid=${s.term_pid} cwd=${s.cwd} -> via=${res.via} ok=${res.ok}${res.error ? ' err=' + res.error : ''}`)
   if (!res.ok && res.permission) { accessibilityGranted(true); openAccessibilitySettings() }
   if (res.ok) lastFocusedSessionId = id
+  if (res.ok) midiController?.select(id)
   return { ...res, companion }
 }
 
@@ -585,6 +595,7 @@ ipcMain.on('manual-resize-end', stopPointerResize)
 // ── lifecycle ───────────────────────────────────────────────────────────────
 store.on('change', () => pushState())
 store.on('change', () => pushCompanions())
+store.on('change', () => midiController?.render())
 store.on('task-cache', (records) => saveTaskCache(records))
 usage.on('change', () => pushUsage())
 companions.on('change', () => pushCompanions())
@@ -595,6 +606,12 @@ app.whenReady().then(() => {
   const loginItem = ensureLaunchAtLoginPreference()
   createWindow()
   createTray()
+  midiController = createMidiController(store, { onPadPress: queueFocus })
+  midiController.onStatus((status) => {
+    console.log(`[midi] APC40 ${status.connected ? `connected: ${status.device}` : `disconnected${status.error ? `: ${status.error}` : ''}`}`)
+    tray?.setContextMenu(buildTrayMenu())
+  })
+  midiController.start()
   startServer(store, {
     focusById: queueFocus,
     onTaskText: (id, text) => {
@@ -622,4 +639,4 @@ app.whenReady().then(() => {
 
 // Tray app — closing the window doesn't quit.
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); discovery?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); discovery?.stop(); midiController?.stop(); companions.stop(); usage.stop() })
