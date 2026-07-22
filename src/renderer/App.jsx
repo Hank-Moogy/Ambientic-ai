@@ -1,0 +1,497 @@
+import React, { useEffect, useRef, useState } from 'react'
+import { AgentIcon } from './AgentIcon.jsx'
+
+const AGENT = {
+  claude: { name: 'Claude Code' },
+  codex: { name: 'Codex' },
+  kimi: { name: 'Kimi' }
+}
+
+function agentMeta (a) {
+  return AGENT[a] || { name: a || 'agent' }
+}
+
+function fmtElapsed (ms) {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  const h = Math.floor(m / 60)
+  return `${h}h ${m % 60}m`
+}
+
+const STATE_HINT = {
+  running: 'working',
+  waiting: 'ready',
+  attention: 'ready',
+  idle: 'ready'
+}
+
+const STANDBY_STORAGE_KEY = 'standby-terminals-v1'
+const PAD_LAYOUT_STORAGE_KEY = 'pad-layout-v1'
+
+function loadStandbyKeys () {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(STANDBY_STORAGE_KEY) || '[]')
+    return new Set(Array.isArray(value) ? value : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function terminalKey (s) {
+  return s.tty || s.id
+}
+
+function normalizeProject (project) {
+  return String(project || '').trim().toLocaleLowerCase()
+}
+
+function loadPadLayout () {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(PAD_LAYOUT_STORAGE_KEY) || '{}')
+    const order = Array.isArray(value.order) ? [...new Set(value.order.filter((key) => typeof key === 'string'))] : []
+    const projects = new Map(Array.isArray(value.projects) ? value.projects : [])
+    return { order, projects }
+  } catch {
+    return { order: [], projects: new Map() }
+  }
+}
+
+function stableGroupSessions (sessions, layout) {
+  const byKey = new Map(sessions.map((session) => [terminalKey(session), session]))
+  const known = new Set(layout.order)
+  let changed = false
+
+  // A terminal receives its grouped slot exactly once. Live task, state, and
+  // cwd refreshes can update its content but never move the existing pad.
+  for (const session of sessions) {
+    const key = terminalKey(session)
+    if (known.has(key)) continue
+
+    const project = normalizeProject(session.project)
+    let insertAt = -1
+    for (let i = layout.order.length - 1; i >= 0; i--) {
+      if (layout.projects.get(layout.order[i]) === project) {
+        insertAt = i
+        break
+      }
+    }
+
+    const insertionIndex = insertAt >= 0 ? insertAt + 1 : layout.order.length
+    layout.order.splice(insertionIndex, 0, key)
+    layout.projects.set(key, project)
+    known.add(key)
+    changed = true
+  }
+
+  if (changed) {
+    window.localStorage.setItem(PAD_LAYOUT_STORAGE_KEY, JSON.stringify({
+      order: layout.order,
+      projects: [...layout.projects]
+    }))
+  }
+
+  return layout.order.map((key) => byKey.get(key)).filter(Boolean)
+}
+
+function stateHint (s) {
+  return STATE_HINT[s.state] || s.state
+}
+
+function taskMeta (s) {
+  if (s.task) return { text: s.task, placeholder: false }
+  return {
+    text: s.state === 'running' ? 'Capturing task…' : 'No task captured',
+    placeholder: true
+  }
+}
+
+function terminalName (project) {
+  const value = String(project || '').trim()
+  // Agent tools sometimes chdir into a versioned plugin cache. A bare version
+  // is implementation noise, never a useful terminal identity.
+  if (/^v?\d+(?:\.\d+){1,3}(?:[-+][a-z0-9.-]+)?$/i.test(value)) return ''
+  return value
+}
+
+const USAGE_PROVIDERS = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'kimi', label: 'Kimi' }
+]
+
+function shortQuotaLabel (label) {
+  if (/spark/i.test(label)) return 'Spark'
+  return String(label || 'Model').replace(/^GPT-[\w.-]+-/i, '').slice(0, 10)
+}
+
+function resetDescription (window) {
+  if (!window) return ''
+  if (window.resetAt) return `Resets ${new Date(window.resetAt * 1000).toLocaleString()}`
+  return window.resetText ? `Resets ${window.resetText}` : ''
+}
+
+function resetCountdown (window, now) {
+  if (!window || !Number.isFinite(window.usedPercent) || window.usedPercent <= 50 || !window.resetAt) return ''
+
+  const remainingMinutes = Math.max(0, Math.ceil((window.resetAt * 1000 - now) / 60000))
+  if (remainingMinutes === 0) return 'resetting now'
+
+  const days = Math.floor(remainingMinutes / (24 * 60))
+  const hours = Math.floor((remainingMinutes % (24 * 60)) / 60)
+  const minutes = remainingMinutes % 60
+
+  if (days > 0) return `reset in ${days}d${hours > 0 ? ` ${hours}h` : ''}`
+  if (hours > 0) return `reset in ${hours}h${minutes > 0 ? ` ${minutes}m` : ''}`
+  return `reset in ${remainingMinutes}m`
+}
+
+function UsageMeter ({ window, label, error }) {
+  const value = Number.isFinite(window?.usedPercent) ? Math.round(window.usedPercent) : null
+  const tone = value >= 90 ? 'critical' : value >= 70 ? 'warning' : 'normal'
+  const title = value === null
+    ? (error || `${label} usage unavailable`)
+    : `${label}: ${value}% used. ${resetDescription(window)}`.trim()
+  return (
+    <div
+      className="usage-meter"
+      data-tone={tone}
+      data-empty={value === null}
+      title={title}
+      aria-label={title}
+      style={{ '--usage-scale': value === null ? 0 : value / 100 }}
+    >
+      <span className="usage-meter__value">{value === null ? '—' : `${value}%`}</span>
+      <span className="usage-meter__track" aria-hidden="true"><span className="usage-meter__fill" /></span>
+    </div>
+  )
+}
+
+function UsageProviderRows ({ config, provider, now }) {
+  const windows = provider?.windows || []
+  const short = windows.find((window) => window.period === 'short')
+  const weekly = windows.find((window) => window.period === 'week' && /all models|weekly/i.test(window.label)) ||
+    windows.find((window) => window.period === 'week')
+  const extras = windows.filter((window) => window !== short && window !== weekly)
+  const unavailable = provider?.status === 'error' && provider.error
+  const primaryReset = resetCountdown(
+    [short, weekly].find((window) => Number.isFinite(window?.usedPercent) && window.usedPercent > 50 && window.resetAt),
+    now
+  )
+
+  return (
+    <>
+      <div className="usage-provider" title={unavailable || config.label}>
+        <AgentIcon agent={config.id} />
+        <span className="usage-provider__identity">
+          <span className="usage-provider__name">
+            {config.label}
+            {provider?.status === 'stale' && <span className="usage-provider__stale" aria-label="Last known value">•</span>}
+          </span>
+          {primaryReset && <span className="usage-provider__reset">{primaryReset}</span>}
+        </span>
+      </div>
+      <UsageMeter window={short} label={`${config.label} short window`} error={unavailable} />
+      <UsageMeter window={weekly} label={`${config.label} weekly`} error={unavailable} />
+
+      {extras.map((window) => {
+        const extraReset = resetCountdown(window, now)
+        return (
+          <React.Fragment key={window.id}>
+            <div className="usage-provider usage-provider--secondary">
+              <span className="usage-provider__identity">
+                <span className="usage-provider__name">{shortQuotaLabel(window.label)}</span>
+                {extraReset && <span className="usage-provider__reset">{extraReset}</span>}
+              </span>
+            </div>
+            <span />
+            <UsageMeter window={window} label={`${config.label} ${window.label}`} error={unavailable} />
+          </React.Fragment>
+        )
+      })}
+    </>
+  )
+}
+
+function UsageStrip ({ usage, now, onRefresh }) {
+  return (
+    <section className="usage-strip" aria-label="Account usage limits">
+      <div className="usage-grid usage-grid--header">
+        <span className="usage-strip__title">
+          limits
+          <button
+            className="usage-strip__refresh"
+            type="button"
+            aria-label="Refresh account usage"
+            title="Refresh account usage"
+            data-refreshing={Boolean(usage?.refreshing)}
+            onClick={onRefresh}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 4.8A5.8 5.8 0 1 0 13.7 10h-1.5A4.35 4.35 0 1 1 11.9 6H9.5V4.6H14V9h-1.4V6.2a6 6 0 0 0-.6-.8Z" /></svg>
+          </button>
+        </span>
+        <span>5h used</span>
+        <span>week</span>
+      </div>
+      <div className="usage-grid usage-grid--body">
+        {USAGE_PROVIDERS.map((config) => (
+          <UsageProviderRows key={config.id} config={config} provider={usage?.providers?.[config.id]} now={now} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function DisplayRoute ({ topology, onChoose }) {
+  const displays = topology?.displays || []
+  const terminal = displays.find((display) => display.controller)
+  const preview = displays.find((display) => display.preview)
+  const compactLabel = terminal
+    ? (preview ? `T${terminal.index} → P${preview.index}` : `T${terminal.index} only`)
+    : 'screens'
+  const description = terminal
+    ? (preview
+        ? `Terminal on ${terminal.label} (Display ${terminal.index}); preview on ${preview.label} (Display ${preview.index})`
+        : `Terminal on ${terminal.label} (Display ${terminal.index}). Connect another display for previews.`)
+    : 'Detecting displays'
+
+  return (
+    <button className="display-route" type="button" title={description} aria-label={`${description}. Click to choose the preview display.`} onClick={onChoose}>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 2.5h8.1c.7 0 1.2.5 1.2 1.2v5.1c0 .7-.5 1.2-1.2 1.2H7v1.3h1.8v1.2H3.7v-1.2h1.9V10H2.2C1.5 10 1 9.5 1 8.8V3.7c0-.7.5-1.2 1.2-1.2Zm.1 1.2v5.1h8V3.7h-8Zm10.1 2.1h1.4c.7 0 1.2.5 1.2 1.2v5.3c0 .7-.5 1.2-1.2 1.2h-3.2c-.7 0-1.2-.5-1.2-1.2v-.9h1.2v.9h3.2V7h-1.4V5.8Z" /></svg>
+      <span>{compactLabel}</span>
+    </button>
+  )
+}
+
+function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, onCompanions }) {
+  const meta = agentMeta(s.agent)
+  const task = taskMeta(s)
+  const name = terminalName(s.project)
+  const elapsed = fmtElapsed(now - s.since)
+  const displayState = standby ? 'standby' : stateHint(s)
+  const cls = ['pad', `pad--${s.state}`, standby ? 'pad--standby' : '', selected ? 'pad--selected' : '', s.unseen && !standby && !selected ? 'pad--unseen' : ''].join(' ').trim()
+  const activeCompanions = companion?.active || []
+  const candidateCount = companion?.availableCount ?? companion?.candidates?.length ?? 0
+  const suggestionCount = companion?.suggestionCount || 0
+  const companionLabel = activeCompanions.length
+    ? `${activeCompanions.length} linked preview${activeCompanions.length > 1 ? 's' : ''}: ${activeCompanions.map((item) => item.label).join(', ')}. Click to change.`
+    : suggestionCount
+      ? `${suggestionCount} preview suggestion${suggestionCount > 1 ? 's' : ''}. Click to attach.`
+      : candidateCount
+        ? `${candidateCount} previews available. Click to attach.`
+      : 'No preview detected. Click to scan or attach.'
+  return (
+    <div className="pad-shell">
+      <button
+        className={cls}
+        onClick={() => onFocus(s.id)}
+        title={`${meta.name}${name ? ` — ${name}` : ''}\n${task.text}\n${s.cwd || ''}\n${displayState} · ${elapsed}${s.summary ? `\n\n${s.summary}` : ''}`}
+      >
+        <span className="pad__light" />
+        <AgentIcon agent={s.agent} />
+        <span className="pad__content">
+          {name && <span className="pad__project">{name}</span>}
+          <span className={`pad__task${task.placeholder ? ' pad__task--placeholder' : ''}`}>{task.text}</span>
+        </span>
+        <span className="pad__meta">
+          <span className="pad__state">{displayState}</span>
+          <span className="pad__time">{elapsed}</span>
+        </span>
+      </button>
+      <button
+        className={`pad__companion${activeCompanions.length ? ' pad__companion--linked' : ''}${!activeCompanions.length && suggestionCount ? ' pad__companion--suggested' : ''}`}
+        type="button"
+        aria-label={companionLabel}
+        title={companionLabel}
+        onClick={() => onCompanions(s.id)}
+      >
+        <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2h10c.6 0 1 .4 1 1v6.2c0 .6-.4 1-1 1H8v1.1h2v1H4v-1h2v-1.1H2c-.6 0-1-.4-1-1V3c0-.6.4-1 1-1Zm0 1v6.2h10V3H2Z" /></svg>
+        {activeCompanions.length > 1 && <span>{activeCompanions.length}</span>}
+      </button>
+      <button
+        className={`pad__standby${standby ? ' pad__standby--active' : ''}`}
+        type="button"
+        aria-label={`${standby ? 'Resume live status for' : 'Put on standby:'} ${s.project}`}
+        aria-pressed={standby}
+        title={standby ? 'Resume live status' : 'Set to standby'}
+        onClick={() => onToggleStandby(terminalKey(s))}
+      >
+        <svg viewBox="0 0 12 12" aria-hidden="true">
+          <rect x="2" y="1" width="3" height="10" rx="1" />
+          <rect x="7" y="1" width="3" height="10" rx="1" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+export default function App () {
+  const [sessions, setSessions] = useState([])
+  const [usage, setUsage] = useState(null)
+  const [displays, setDisplays] = useState(null)
+  const [companions, setCompanions] = useState({ bySession: {} })
+  const [now, setNow] = useState(Date.now())
+  const [installMsg, setInstallMsg] = useState(null)
+  const [focusMsg, setFocusMsg] = useState(null)
+  const [needsAccess, setNeedsAccess] = useState(false)
+  const [standbyKeys, setStandbyKeys] = useState(loadStandbyKeys)
+  const [focusedId, setFocusedId] = useState(null)
+  const bodyRef = useRef(null)
+  const resizePointerRef = useRef(null)
+  const padLayoutRef = useRef(null)
+  if (!padLayoutRef.current) padLayoutRef.current = loadPadLayout()
+
+  useEffect(() => {
+    let un = () => {}
+    window.controller.getState().then(setSessions)
+    window.controller.getUsage().then(setUsage)
+    window.controller.getDisplays().then(setDisplays)
+    window.controller.getCompanions().then(setCompanions)
+    un = window.controller.onState(setSessions)
+    const unUsage = window.controller.onUsage(setUsage)
+    const unDisplays = window.controller.onDisplays(setDisplays)
+    const unCompanions = window.controller.onCompanions(setCompanions)
+    const unInstall = window.controller.onInstaller((p) => {
+      setInstallMsg(p.ok ? 'Hooks installed. Restart your agent sessions.' : 'Install failed — see terminal.')
+      setTimeout(() => setInstallMsg(null), 6000)
+    })
+    const unSys = window.controller.onSys((p) => setNeedsAccess(!p.accessibility))
+    return () => { un(); unUsage(); unDisplays(); unCompanions(); unInstall(); unSys() }
+  }, [])
+
+  // Ticking clock so elapsed times stay live.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(STANDBY_STORAGE_KEY, JSON.stringify([...standbyKeys]))
+  }, [standbyKeys])
+
+  // Keep the native window hugging its content until the user explicitly
+  // resizes it. ResizeObserver also catches grid reflow as the width changes.
+  useEffect(() => {
+    if (!bodyRef.current) return
+    const content = bodyRef.current
+    let frame = 0
+    const reportSize = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => window.controller.resize(content.scrollHeight))
+    }
+    const observer = new ResizeObserver(reportSize)
+    observer.observe(content)
+    reportSize()
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [])
+
+  const needy = sessions.filter((s) => s.state !== 'running').length
+  const groupedSessions = stableGroupSessions(sessions, padLayoutRef.current)
+
+  const onFocus = async (id) => {
+    // Optimistic: drop the unseen pulse immediately.
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, unseen: false } : s)))
+    const previousFocusedId = focusedId
+    setFocusedId(id)
+    const result = await window.controller.focus(id)
+    if (!result?.ok) {
+      setFocusedId((current) => current === id ? previousFocusedId : current)
+      if (result?.reason === 'session-ended') return
+      const msg = result?.reason === 'ghostty-mapping-pending'
+        ? 'Linking this pane — it will be ready on the agent’s next event.'
+        : 'Could not focus this terminal.'
+      setFocusMsg(msg)
+      setTimeout(() => setFocusMsg(null), 5000)
+    } else if (result?.companion?.results?.length && !result.companion.results.some((item) => item.ok)) {
+      setFocusMsg('Terminal focused; its linked preview could not be opened.')
+      setTimeout(() => setFocusMsg(null), 5000)
+    }
+  }
+
+  const onToggleStandby = (key) => {
+    setStandbyKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const onResizePointerDown = (event, edge) => {
+    event.preventDefault()
+    resizePointerRef.current = event.pointerId
+    event.currentTarget.setPointerCapture(event.pointerId)
+    window.controller.startManualResize(edge)
+  }
+
+  const onResizePointerEnd = (event) => {
+    if (resizePointerRef.current !== event.pointerId) return
+    resizePointerRef.current = null
+    window.controller.endManualResize()
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  return (
+    <div className="app">
+      <div className="app__content" ref={bodyRef}>
+        <div className="titlebar">
+          <span className="titlebar__dot" data-needy={needy > 0} />
+          <span className="titlebar__label">agents</span>
+          <DisplayRoute topology={displays} onChoose={() => window.controller.showDisplayMenu()} />
+          <span className="titlebar__count">{sessions.length}{needy ? ` · ${needy}!` : ''}</span>
+        </div>
+
+        {needsAccess && (
+          <button className="banner" onClick={() => window.controller.requestAccessibility()}>
+            <b>Grant Accessibility</b> so pads can focus your terminal windows →
+          </button>
+        )}
+
+        <UsageStrip usage={usage} now={now} onRefresh={() => window.controller.refreshUsage()} />
+
+        {sessions.length === 0 ? (
+          <div className="empty">
+            <p className="empty__title">No sessions yet</p>
+            <p className="empty__body">Install the hooks, then restart your Claude&nbsp;Code / Codex / Kimi terminals.</p>
+            <button className="empty__btn" onClick={() => window.controller.installHooks()}>Install hooks</button>
+          </div>
+        ) : (
+          <div className="grid">
+            {groupedSessions.map((s) => (
+              <Pad
+                key={terminalKey(s)}
+                s={s}
+                now={now}
+                standby={standbyKeys.has(terminalKey(s))}
+                selected={focusedId === s.id}
+                companion={companions?.bySession?.[s.id]}
+                onFocus={onFocus}
+                onToggleStandby={onToggleStandby}
+                onCompanions={(id) => window.controller.showCompanionMenu(id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {installMsg && <div className="toast">{installMsg}</div>}
+        {focusMsg && <div className="toast">{focusMsg}</div>}
+      </div>
+      <span
+        className="resize-grip resize-grip--left"
+        aria-hidden="true"
+        onPointerDown={(event) => onResizePointerDown(event, 'left')}
+        onPointerUp={onResizePointerEnd}
+      />
+      <span
+        className="resize-grip resize-grip--right"
+        aria-hidden="true"
+        onPointerDown={(event) => onResizePointerDown(event, 'right')}
+        onPointerUp={onResizePointerEnd}
+      />
+    </div>
+  )
+}
