@@ -264,7 +264,7 @@ function DisplayRoute ({ topology, onChoose }) {
   )
 }
 
-function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, onCompanionPress, onCompanions }) {
+function Pad ({ s, now, standby, selected, companion, capturing, onFocus, onCapture, onToggleStandby, onCompanionPress, onCompanions }) {
   const meta = agentMeta(s.agent)
   const task = taskMeta(s)
   const name = terminalName(s.project)
@@ -304,12 +304,26 @@ function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, 
           <span className="pad__time">{elapsed}</span>
         </span>
       </button>
+      {configuredCompanions.length > 0 && (
+        <button
+          className={`pad__capture${capturing ? ' pad__capture--busy' : ''}`}
+          type="button"
+          aria-label={`Capture ${configuredCompanions.length > 1 ? 'linked previews' : 'linked preview'} and attach ${configuredCompanions.length > 1 ? 'them' : 'it'} to ${meta.name}`}
+          title={`Capture ${configuredCompanions.length > 1 ? 'linked previews' : 'linked preview'} and attach without sending`}
+          disabled={capturing}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => { event.stopPropagation(); onCapture(s.id) }}
+        >
+          <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M4.5 2.2 5.3 1h3.4l.8 1.2H12c.7 0 1.2.5 1.2 1.2v7.4c0 .7-.5 1.2-1.2 1.2H2c-.7 0-1.2-.5-1.2-1.2V3.4c0-.7.5-1.2 1.2-1.2h2.5ZM2 3.4v7.4h10V3.4H8.9l-.8-1.2H5.9l-.8 1.2H2ZM7 4.5a2.6 2.6 0 1 1 0 5.2 2.6 2.6 0 0 1 0-5.2Zm0 1.1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" /></svg>
+        </button>
+      )}
       <button
         className={`pad__companion${activeCompanions.length ? ' pad__companion--linked' : ''}${companion?.disabled ? ' pad__companion--disabled' : ''}${!activeCompanions.length && !companion?.disabled && suggestionCount ? ' pad__companion--suggested' : ''}`}
         type="button"
         aria-label={companionLabel}
         title={companionLabel}
-        onClick={() => onCompanionPress(s.id, companion)}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); onCompanionPress(s.id, companion) }}
         onContextMenu={(event) => { event.preventDefault(); onCompanions(s.id) }}
       >
         <span className={`pad__companion-icons${hasWebCompanion && hasPhoneCompanion ? ' pad__companion-icons--mixed' : ''}`} aria-hidden="true">
@@ -326,7 +340,8 @@ function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, 
         aria-label={`${standby ? 'Resume live status for' : 'Put on standby:'} ${s.project}`}
         aria-pressed={standby}
         title={standby ? 'Resume live status' : 'Set to standby'}
-        onClick={() => onToggleStandby(terminalKey(s))}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); onToggleStandby(terminalKey(s)) }}
       >
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <rect x="2" y="1" width="3" height="10" rx="1" />
@@ -348,6 +363,7 @@ export default function App () {
   const [needsAccess, setNeedsAccess] = useState(false)
   const [standbyKeys, setStandbyKeys] = useState(loadStandbyKeys)
   const [focusedId, setFocusedId] = useState(null)
+  const [capturingId, setCapturingId] = useState(null)
   const bodyRef = useRef(null)
   const resizePointerRef = useRef(null)
   const padLayoutRef = useRef(null)
@@ -432,6 +448,25 @@ export default function App () {
     })
   }
 
+  const onCapture = async (id) => {
+    if (capturingId) return
+    setCapturingId(id)
+    const result = await window.controller.capturePreview(id)
+    setCapturingId(null)
+    if (result?.ok) {
+      setFocusedId(id)
+      setFocusMsg(`${result.count > 1 ? `${result.count} screenshots` : 'Screenshot'} attached. Type your prompt, then press Enter.`)
+    } else {
+      const msg = result?.screenPermission === 'denied' || result?.screenPermission === 'restricted'
+        ? 'Grant Screen Recording access, then try the camera again.'
+        : result?.reason === 'no-companion'
+          ? 'No linked preview to capture.'
+          : 'Could not capture this linked preview.'
+      setFocusMsg(msg)
+    }
+    setTimeout(() => setFocusMsg(null), 6000)
+  }
+
   const onResizePointerDown = (event, edge) => {
     event.preventDefault()
     resizePointerRef.current = event.pointerId
@@ -480,7 +515,9 @@ export default function App () {
                 standby={standbyKeys.has(terminalKey(s))}
                 selected={focusedId === s.id}
                 companion={companions?.bySession?.[s.id]}
+                capturing={capturingId === s.id}
                 onFocus={onFocus}
+                onCapture={onCapture}
                 onToggleStandby={onToggleStandby}
                 onCompanionPress={(id, state) => {
                   if (state?.disabled || state?.activeCount > 0) window.controller.toggleCompanion(id)

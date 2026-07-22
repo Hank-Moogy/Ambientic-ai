@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { basename, join, normalize, sep } from 'node:path'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { loadPrefs, savePrefs } from './prefs.js'
 import { terminalContexts } from './terminal-context.js'
 
@@ -453,17 +453,142 @@ end tell
 `
 }
 
+function boundsResultScript (body) {
+  return `
+tell application "System Events"
+  ${body}
+end tell
+return "not-found"
+`
+}
+
+function windowBoundsLines () {
+  return `
+set windowPosition to position of targetWindow
+set windowSize to size of targetWindow
+return (item 1 of windowPosition as text) & "|" & (item 2 of windowPosition as text) & "|" & (item 1 of windowSize as text) & "|" & (item 2 of windowSize as text)`
+}
+
+function browserBoundsScript (pid, candidate) {
+  const url = appleScriptEscape(candidate.url)
+  return boundsResultScript(`
+  set matches to every process whose unix id is ${Number(pid)}
+  if matches is {} then return "not-found"
+  set p to item 1 of matches
+  repeat with w in windows of p
+    set docText to ""
+    try
+      set docText to value of attribute "AXDocument" of w as text
+    end try
+    if docText is "${url}" then
+      set targetWindow to w
+      ${windowBoundsLines()}
+    end if
+  end repeat`)
+}
+
+function processBoundsScript (pid) {
+  return boundsResultScript(`
+  set matches to every process whose unix id is ${Number(pid)}
+  if matches is {} then return "not-found"
+  set p to item 1 of matches
+  set targetWindow to missing value
+  set largestArea to 0
+  repeat with w in windows of p
+    try
+      set windowSize to size of w
+      set windowArea to (item 1 of windowSize) * (item 2 of windowSize)
+      if windowArea > largestArea then
+        set largestArea to windowArea
+        set targetWindow to w
+      end if
+    end try
+  end repeat
+  if targetWindow is missing value then return "not-found"
+  ${windowBoundsLines()}`)
+}
+
+function simulatorBoundsScript (pid, candidate) {
+  const device = appleScriptEscape(candidate.label)
+  return boundsResultScript(`
+  set matches to every process whose unix id is ${Number(pid)}
+  if matches is {} then return "not-found"
+  set p to item 1 of matches
+  repeat with w in windows of p
+    try
+      set windowName to name of w as text
+      if windowName is "${device}" or windowName starts with "${device} –" then
+        set targetWindow to w
+        ${windowBoundsLines()}
+      end if
+    end try
+  end repeat`)
+}
+
+function parseBounds (value) {
+  const [x, y, width, height] = String(value || '').trim().split('|').map(Number)
+  if (![x, y, width, height].every(Number.isFinite) || width < 2 || height < 2) return null
+  return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) }
+}
+
+async function candidateBounds (candidate) {
+  let pid = candidate.pid
+  let script = ''
+  if (candidate.type === 'browser') {
+    pid = await defaultChromePid()
+    if (pid) script = browserBoundsScript(pid, candidate)
+  } else if (candidate.type === 'ios') {
+    pid = pid || await currentSimulatorPid()
+    if (pid) script = simulatorBoundsScript(pid, candidate)
+  } else if (pid) {
+    script = processBoundsScript(pid)
+  }
+  if (!script) return null
+  return parseBounds(await run('/usr/bin/osascript', ['-e', script], 5000).catch(() => ''))
+}
+
+function safeCaptureName (value) {
+  return String(value || 'preview').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'preview'
+}
+
+async function captureCandidate (candidate, slot, outputDirectory, index) {
+  const presented = await presentCandidate(candidate, slot, { allowLaunch: false })
+  if (!presented.ok) return { ...presented, captured: false }
+  await new Promise((resolve) => setTimeout(resolve, 180))
+  const bounds = await candidateBounds(candidate)
+  if (!bounds) return { ...presented, captured: false, reason: 'window-bounds-not-found' }
+
+  await mkdir(outputDirectory, { recursive: true })
+  const path = join(outputDirectory, `${Date.now()}-${index + 1}-${safeCaptureName(candidate.label)}.png`)
+  try {
+    await run('/usr/sbin/screencapture', [
+      '-x',
+      '-R', `${bounds.x},${bounds.y},${bounds.width},${bounds.height}`,
+      path
+    ], 12_000)
+    const info = await stat(path)
+    if (info.size < 512) return { ...presented, captured: false, reason: 'empty-screenshot' }
+    return { ...presented, captured: true, path, label: candidate.label, bounds }
+  } catch (error) {
+    return { ...presented, captured: false, reason: error.message || 'capture-failed' }
+  }
+}
+
 async function defaultChromePid () {
   const processes = await scanProcesses()
   return processes.find((process) => process.command === CHROME_BINARY)?.pid || null
 }
 
-async function chromeProfilePreview (candidate, slot) {
+async function chromeProfilePreview (candidate, slot, { allowLaunch = true } = {}) {
   let pid = await defaultChromePid()
   if (pid) {
     const existing = await run('/usr/bin/osascript', ['-e', chromeWindowScript(pid, candidate, slot)], 5000).catch(() => '')
     if (existing.trim() === 'browser') return { ok: true, via: 'chrome-profile' }
   }
+
+  // Capturing is observational. If the exact linked route is not already
+  // open, never create or navigate a Chrome window merely to screenshot it.
+  if (!allowLaunch) return { ok: false, via: 'chrome-profile', reason: 'window-not-open' }
 
   await run(CHROME_BINARY, [
     `--profile-directory=${candidate.chromeProfile || 'Default'}`,
@@ -575,16 +700,17 @@ async function currentSimulatorPid () {
   return processes.find((process) => process.command.includes('/Simulator.app/Contents/MacOS/Simulator'))?.pid || null
 }
 
-async function presentCandidate (candidate, slot) {
+async function presentCandidate (candidate, slot, { allowLaunch = true } = {}) {
   try {
     if (candidate.type === 'browser') {
-      const result = await chromeProfilePreview(candidate, slot)
+      const result = await chromeProfilePreview(candidate, slot, { allowLaunch })
       return { id: candidate.id, type: candidate.type, ...result }
     }
 
     let pid = candidate.pid
     if (candidate.type === 'ios') {
       if (!pid) {
+        if (!allowLaunch) return { ok: false, id: candidate.id, type: candidate.type, reason: 'not-running' }
         await run('/usr/bin/open', ['-a', SIMULATOR_PATH], 5000)
         await new Promise((resolve) => setTimeout(resolve, 850))
         pid = await currentSimulatorPid()
@@ -860,6 +986,20 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
     return { ok: results.some((result) => result.ok), results }
   }
 
+  async function capture (session, display, outputDirectory) {
+    if (!display?.workArea) return { ok: false, reason: 'no-display', results: [] }
+    // Capturing is an explicit user action, so it uses configured links even
+    // when automatic presentation is toggled off for normal pad taps.
+    const linked = configuredFor(session)
+    if (!linked.length) return { ok: false, reason: 'no-companion', results: [] }
+    const results = []
+    for (let index = 0; index < linked.length; index++) {
+      const slot = displaySlot(display, index, linked.length)
+      results.push(await captureCandidate(linked[index], slot, outputDirectory, index))
+    }
+    return { ok: results.some((result) => result.captured), results }
+  }
+
   function start () {
     void refresh()
     timer = setInterval(refresh, intervalMs)
@@ -881,6 +1021,7 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
     toggle,
     toggleEnabled,
     present,
+    capture,
     on: (...args) => events.on(...args)
   }
 }

@@ -342,3 +342,16 @@ export async function focusSession (s, display) {
 
   return runAppleScript(buildScript(s))
 }
+
+// Claude Code, Codex, and Kimi all accept an image from the clipboard with
+// Ctrl+V in their interactive composer. This deliberately does not press
+// Enter, so the user can type the instruction that should accompany it.
+export function pasteClipboardImage () {
+  return runAppleScript(`
+tell application "System Events"
+  key code 9 using {control down}
+end tell
+delay 0.12
+return "clipboard-image"
+`, 3000)
+}

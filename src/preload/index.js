@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('controller', {
   getCompanions: () => ipcRenderer.invoke('get-companions'),
   refreshUsage: () => ipcRenderer.invoke('refresh-usage'),
   focus: (id) => ipcRenderer.invoke('focus', id),
+  capturePreview: (id) => ipcRenderer.invoke('capture-preview', id),
   showDisplayMenu: () => ipcRenderer.invoke('show-display-menu'),
   showCompanionMenu: (id) => ipcRenderer.invoke('show-companion-menu', id),
   toggleCompanion: (id) => ipcRenderer.invoke('toggle-companion', id),

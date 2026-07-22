@@ -70,7 +70,7 @@ async function remoteLabel (text, fallback) {
     headers: {
       authorization: `Bearer ${key}`,
       'content-type': 'application/json',
-      'x-title': 'Claude Controller'
+      'x-title': 'Vibe Controller'
     },
     body: JSON.stringify({
       model: MODEL,

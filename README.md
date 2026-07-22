@@ -1,4 +1,4 @@
-# Claude Controller
+# Vibe Controller
 
 A floating, always-on-top **APC40-style pad grid** that monitors every coding-agent
 terminal you have open — Claude Code, Codex, and Kimi — and lets you jump straight
@@ -34,7 +34,7 @@ Credentials remain in each CLI's own local credential store.
 
 The packaged macOS app enables **Launch at Login** on its first run, so the
 controller returns automatically after a restart. The setting can be toggled
-from the Claude Controller menu-bar menu.
+from the Vibe Controller menu-bar menu.
 
 The controller window is resizable from any edge or corner. Pads reflow into
 content-driven columns as the window grows, and both the chosen window size and
@@ -69,7 +69,7 @@ panes, or guess from duplicated project names.
 With two or more displays connected, a pad press can arrange the project beside
 its terminal:
 
-- The exact Ghostty pane moves to the display holding Claude Controller and
+- The exact Ghostty pane moves to the display holding Vibe Controller and
   remains focused for typing.
 - A matching localhost page or emulator is shown on the configured preview
   display first, so it remains visible when Ghostty receives keyboard focus.
@@ -84,6 +84,9 @@ its terminal:
 - Browser previews reuse an exact-route Chrome window when one exists, or open
   one with the same Chrome profile on the preview display. Chrome does not need
   an extension, so the preview keeps the user's existing login and cookies.
+- The camera control on a linked pad captures only that page or emulator,
+  focuses the exact terminal pane, and pastes the image into Claude Code,
+  Codex, or Kimi without submitting the prompt.
 - Ambiguous emulators stay suggestions. Use the monitor button on a pad to
   attach one or more previews manually; those choices are remembered by
   project.

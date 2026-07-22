@@ -306,7 +306,7 @@ html, body {
   -webkit-app-region: no-drag;
   position: absolute;
   top: 5px;
-  right: 5px;
+  right: 34px;
   z-index: 5;
   display: grid;
   place-items: center;
@@ -343,7 +343,7 @@ html, body {
 .pad__companion {
   -webkit-app-region: no-drag;
   position: absolute;
-  top: 34px;
+  top: 5px;
   right: 5px;
   z-index: 5;
   display: grid;
@@ -415,6 +415,39 @@ html, body {
   fill: currentColor;
   filter: drop-shadow(0 0 2px var(--bg-solid));
 }
+
+.pad__capture {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: auto;
+  bottom: 5px;
+  right: 5px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid oklch(0.76 0.09 225 / 0.24);
+  border-radius: 7px;
+  background: oklch(0.76 0.09 225 / 0.08);
+  color: oklch(0.79 0.08 225);
+  cursor: pointer;
+  opacity: .82;
+  transition: color 160ms ease-out, background 160ms ease-out, border-color 160ms ease-out, opacity 160ms ease-out, transform 90ms cubic-bezier(.22, 1, .36, 1);
+}
+.pad__capture svg { width: 12px; height: 12px; fill: currentColor; }
+.pad__capture:hover {
+  color: oklch(0.88 0.07 225);
+  background: oklch(0.76 0.09 225 / 0.16);
+  border-color: oklch(0.76 0.09 225 / 0.42);
+  opacity: 1;
+}
+.pad__capture:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; opacity: 1; }
+.pad__capture:active { transform: scale(.88); }
+.pad__capture:disabled { cursor: progress; opacity: .45; }
+.pad__capture--busy svg { animation: capture-breathe 760ms ease-in-out infinite alternate; }
+@keyframes capture-breathe { to { opacity: .3; transform: scale(.82); } }
 
 /* Uniform hardware-style state light. Every edge has the same visual weight. */
 .pad__light {
@@ -490,6 +523,7 @@ html, body {
   justify-content: space-between;
   gap: 4px;
   min-width: 0;
+  padding-right: 29px;
 }
 .pad__state {
   font-size: 9.5px; font-weight: 680; letter-spacing: .018em;
@@ -625,8 +659,10 @@ html, body {
   .pad__task { font-size: 10.5px; }
   .pad__state { font-size: 10.5px; }
   .pad__time { font-size: 10px; }
-  .pad__standby { width: 28px; height: 28px; }
-  .pad__companion { top: 38px; width: 28px; height: 24px; }
+  .pad__standby { right: 37px; width: 28px; height: 28px; }
+  .pad__companion { top: 5px; width: 28px; height: 28px; }
+  .pad__capture { top: auto; bottom: 7px; width: 28px; height: 24px; }
+  .pad__meta { padding-right: 33px; }
 }
 
 @container (min-width: 480px) {
@@ -649,11 +685,13 @@ html, body {
   .pad__task { font-size: 12px; line-height: 1.2; }
   .pad__state { font-size: 11.5px; }
   .pad__time { font-size: 11px; }
-  .pad__standby { top: 7px; right: 7px; width: 31px; height: 31px; }
-  .pad__companion { top: 43px; right: 7px; width: 31px; height: 27px; }
+  .pad__standby { top: 7px; right: 43px; width: 31px; height: 31px; }
+  .pad__companion { top: 7px; right: 7px; width: 31px; height: 31px; }
+  .pad__capture { top: auto; bottom: 7px; right: 7px; width: 31px; height: 27px; }
+  .pad__meta { padding-right: 38px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pad--unseen, .titlebar__dot[data-needy="true"], .usage-strip__refresh svg { animation: none; }
+  .pad--unseen, .titlebar__dot[data-needy="true"], .usage-strip__refresh svg, .pad__capture--busy svg { animation: none; }
   .usage-meter__fill { transition: none; }
 }

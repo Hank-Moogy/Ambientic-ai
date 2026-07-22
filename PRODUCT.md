@@ -10,7 +10,7 @@ Developers and operators running several Claude Code, Codex, and Kimi sessions a
 
 ## Product Purpose
 
-Claude Controller is an always-visible hardware-controller-inspired status surface for coding agents. It makes every live terminal legible at a glance, communicates whether an agent is working or waiting, summarizes its current task, and turns one pad press into exact window and pane focus. Success means the user can notice, identify, and reach the right agent in under a second.
+Vibe Controller is an always-visible hardware-controller-inspired status surface for coding agents. It makes every live terminal legible at a glance, communicates whether an agent is working or waiting, summarizes its current task, and turns one pad press into exact window and pane focus. Success means the user can notice, identify, and reach the right agent in under a second.
 
 ## Brand Personality
 

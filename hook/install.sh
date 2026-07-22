@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Controller hook installer.
+# Vibe Controller hook installer.
 # Registers the lifecycle hook into every coding agent found on this machine:
 #   Claude Code (~/.claude/settings.json), Codex CLI (~/.codex/hooks.json),
 #   Kimi Code CLI (~/.kimi-code/config.toml).
@@ -130,7 +130,7 @@ if "kimi" in agents:
         missing = kimi_missing(existing)
         if missing:
             backup(cfg)
-            blocks = ["\n# Claude Controller hooks"]
+            blocks = ["\n# Vibe Controller hooks"]
             for ev in missing:
                 blocks.append("\n[[hooks]]\nevent = \"%s\"\ncommand = '%s --agent kimi'\ntimeout = 5"
                               % (ev, hook))

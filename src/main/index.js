@@ -1,10 +1,10 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, Tray, Menu, clipboard, ipcMain, nativeImage, screen, shell, systemPreferences } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { SessionStore, STATE } from './sessions.js'
 import { startServer } from './server.js'
-import { focusSession } from './focus.js'
+import { focusSession, pasteClipboardImage } from './focus.js'
 import { startDiscovery } from './discovery.js'
 import { createTaskSummarizer } from './summarizer.js'
 import { createUsageService } from './usage.js'
@@ -28,6 +28,7 @@ let win = null
 let tray = null
 let discovery = null
 let pointerResize = null
+let lastFocusedSessionId = null
 
 function stopPointerResize () {
   if (!pointerResize) return
@@ -267,7 +268,7 @@ function updateTray () {
   tray.setToolTip(
     total
       ? `${total} session${total > 1 ? 's' : ''}${needy ? ` · ${needy} need you` : ''}`
-      : 'Claude Controller — no sessions'
+      : 'Vibe Controller — no sessions'
   )
 }
 
@@ -336,7 +337,7 @@ function buildTrayMenu () {
     { label: 'Install / update agent hooks…', click: runInstaller },
     { label: 'Open hooks folder', click: () => shell.openPath(join(app.getPath('home'), '.claude-controller')) },
     { type: 'separator' },
-    { label: 'Quit Claude Controller', click: () => { app.isQuitting = true; app.quit() } }
+    { label: 'Quit Vibe Controller', click: () => { app.isQuitting = true; app.quit() } }
   ])
 }
 
@@ -357,6 +358,10 @@ function accessibilityGranted (prompt = false) {
 
 function openAccessibilitySettings () {
   shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility')
+}
+
+function openScreenRecordingSettings () {
+  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
 }
 
 function controllerDisplay () {
@@ -424,10 +429,12 @@ async function focusById (id) {
     return { ok: false, permission: true }
   }
 
-  // Arrange the companion surface first, then focus Ghostty last. That leaves
-  // the exact terminal pane ready for typing while the preview remains visible
-  // on the other display.
-  const companion = await companions.present(s, previewDisplay())
+  // The first tap arranges this pad's preview. A repeat tap on the selected
+  // pad only refocuses its terminal, so a correct browser route cannot be
+  // replaced or reloaded by another context-ranking pass.
+  const companion = lastFocusedSessionId === id
+    ? { ok: true, skipped: 'already-focused', results: [] }
+    : await companions.present(s, previewDisplay())
   const res = await focusSession(s, controllerDisplay())
   if (!res.ok && res.reason === 'terminal-not-found') {
     store.remove(id)
@@ -435,6 +442,7 @@ async function focusById (id) {
   }
   console.log(`[focus] "${s.project}" pid=${s.term_pid} cwd=${s.cwd} -> via=${res.via} ok=${res.ok}${res.error ? ' err=' + res.error : ''}`)
   if (!res.ok && res.permission) { accessibilityGranted(true); openAccessibilitySettings() }
+  if (res.ok) lastFocusedSessionId = id
   return { ...res, companion }
 }
 
@@ -447,7 +455,54 @@ function queueFocus (id) {
   return next
 }
 
+async function captureById (id) {
+  const s = store.list().find((candidate) => candidate.id === id)
+  if (!s) return { ok: false, reason: 'not-found' }
+  if (!accessibilityGranted(false)) {
+    accessibilityGranted(true)
+    openAccessibilitySettings()
+    return { ok: false, permission: 'accessibility' }
+  }
+
+  const captureDisplay = previewDisplay() || controllerDisplay()
+  // The linked preview normally lives on another display, so the controller
+  // never needs to hide or change opacity while the screenshot is taken.
+  // Keeping this window untouched avoids the distracting disappear/reappear
+  // flash and preserves its always-visible hardware-controller behavior.
+  const captured = await companions.capture(s, captureDisplay, join(app.getPath('userData'), 'captures'))
+
+  const images = (captured?.results || []).filter((result) => result.captured && result.path)
+  if (!images.length) {
+    let status = 'granted'
+    try { status = process.platform === 'darwin' ? systemPreferences.getMediaAccessStatus('screen') : 'granted' } catch {}
+    if (status !== 'granted') openScreenRecordingSettings()
+    return { ok: false, reason: captured?.reason || captured?.results?.[0]?.reason || 'capture-failed', screenPermission: status }
+  }
+
+  const focused = await focusSession(s, controllerDisplay())
+  if (!focused.ok) return { ...focused, reason: focused.reason || 'focus-failed' }
+  for (const capture of images) {
+    const image = nativeImage.createFromPath(capture.path)
+    if (image.isEmpty()) return { ok: false, reason: 'invalid-screenshot' }
+    clipboard.writeImage(image)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    const pasted = await pasteClipboardImage()
+    if (!pasted.ok) return { ...pasted, reason: 'paste-failed' }
+    await new Promise((resolve) => setTimeout(resolve, 180))
+  }
+
+  lastFocusedSessionId = id
+  return { ok: true, count: images.length, paths: images.map((image) => image.path) }
+}
+
+function queueCapture (id) {
+  const next = focusQueue.catch(() => {}).then(() => captureById(id))
+  focusQueue = next
+  return next
+}
+
 ipcMain.handle('focus', (_e, id) => queueFocus(id))
+ipcMain.handle('capture-preview', (_e, id) => queueCapture(id))
 ipcMain.handle('get-displays', () => displayTopology())
 ipcMain.handle('get-companions', () => companions.getState())
 ipcMain.handle('toggle-companion', (_e, id) => {

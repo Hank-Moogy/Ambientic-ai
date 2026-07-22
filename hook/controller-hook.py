@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Controller agent hook — Claude Code, Codex CLI, and Kimi Code CLI.
+"""Vibe Controller agent hook — Claude Code, Codex CLI, and Kimi Code CLI.
 
 All three CLIs fire near-identical lifecycle hooks with JSON on stdin. This
 script maps each event to a pad state and fires a detached, best-effort curl to

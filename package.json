@@ -1,6 +1,6 @@
 {
   "name": "claude-controller",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Floating APC40-style controller that monitors your Claude Code / Codex / Kimi terminal sessions and lets you jump to the one that needs you.",
   "author": "findmecreators",
   "main": "out/main/index.js",
@@ -25,7 +25,7 @@
   },
   "build": {
     "appId": "com.findmecreators.claudecontroller",
-    "productName": "Claude Controller",
+    "productName": "Vibe Controller",
     "directories": { "output": "release" },
     "files": ["out/**/*"],
     "extraResources": [
