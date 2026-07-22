@@ -450,6 +450,12 @@ function queueFocus (id) {
 ipcMain.handle('focus', (_e, id) => queueFocus(id))
 ipcMain.handle('get-displays', () => displayTopology())
 ipcMain.handle('get-companions', () => companions.getState())
+ipcMain.handle('toggle-companion', (_e, id) => {
+  const session = store.list().find((candidate) => candidate.id === id)
+  if (!session) return false
+  companions.toggleEnabled(session)
+  return true
+})
 ipcMain.handle('show-display-menu', () => {
   const topology = displayTopology()
   const choices = topology.displays.filter((display) => !display.controller)
@@ -536,10 +542,16 @@ app.whenReady().then(() => {
   createTray()
   startServer(store, {
     focusById: queueFocus,
-    onTaskText: (id, text) => summarizer.enqueue(id, text)
+    onTaskText: (id, text) => {
+      store.updateContext(id, text)
+      summarizer.enqueue(id, text)
+    }
   })
   discovery = startDiscovery(store, {
-    onTaskText: (id, text) => summarizer.enqueue(id, text)
+    onTaskText: (id, text) => {
+      store.updateContext(id, text)
+      summarizer.enqueue(id, text)
+    }
   })
   companions.start()
   usage.start()

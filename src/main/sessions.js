@@ -111,11 +111,13 @@ export class SessionStore extends EventEmitter {
         term_pid: e.term_pid || null,
         agent_pid: e.agent_pid || null,
         ghostty_terminal_id: e.ghostty_terminal_id || '',
+        transcriptPath: e.transcript_path || '',
         state: STATE.IDLE,
         since: now,
         lastSeen: now,
         summary: '',
         task: '',
+        contextText: '',
         taskFingerprint: '',
         taskSource: '',
         unseen: false,
@@ -137,6 +139,7 @@ export class SessionStore extends EventEmitter {
     if (e.term_pid) s.term_pid = e.term_pid
     if (e.agent_pid) s.agent_pid = e.agent_pid
     if (e.ghostty_terminal_id) s.ghostty_terminal_id = e.ghostty_terminal_id
+    if (e.transcript_path) s.transcriptPath = String(e.transcript_path).slice(0, 1000)
     if (e.summary) s.summary = String(e.summary).slice(0, 200)
     s.lastSeen = now
 
@@ -199,7 +202,9 @@ export class SessionStore extends EventEmitter {
         since: now,
         lastSeen: now,
         summary: 'Detected from the live terminal process; waiting for its next lifecycle event.',
+        transcriptPath: '',
         task: '',
+        contextText: '',
         taskFingerprint: '',
         taskSource: '',
         unseen: false,
@@ -255,6 +260,14 @@ export class SessionStore extends EventEmitter {
       this.emit('task-cache', this.taskCacheSnapshot())
     }
     if (changed) this.emit('change', this.list())
+  }
+
+  updateContext (id, text) {
+    const s = this.map.get(id)
+    const next = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 4000)
+    if (!s || !next || s.contextText === next) return
+    s.contextText = next
+    this.emit('change', this.list())
   }
 
   taskFingerprint (id) {

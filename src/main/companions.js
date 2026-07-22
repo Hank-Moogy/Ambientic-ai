@@ -1,8 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
-import { basename, normalize, sep } from 'node:path'
+import { basename, join, normalize, sep } from 'node:path'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { loadPrefs, savePrefs } from './prefs.js'
+import { terminalContexts } from './terminal-context.js'
 
 const SCAN_INTERVAL_MS = 10_000
 const RECORD_SEPARATOR = String.fromCharCode(30)
@@ -10,6 +12,8 @@ const FIELD_SEPARATOR = String.fromCharCode(31)
 const CONTROLLER_PORT = 47600
 const ADAPTER_PATH = `${homedir()}/Library/Android/sdk/platform-tools/adb`
 const SIMULATOR_PATH = '/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app'
+const CHROME_DATA_PATH = join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome')
+const CHROME_BINARY = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 const CHROME_TABS_SCRIPT = `
 if application "Google Chrome" is not running then return ""
@@ -66,6 +70,10 @@ export function pathAffinity (left, right) {
 
 function sessionProjectKey (session) {
   return cleanPath(session?.terminalCwd || session?.cwd) || `project:${String(session?.project || '').toLowerCase()}`
+}
+
+function sessionTerminalKey (session) {
+  return session?.tty ? `tty:${session.tty}` : `session:${session?.id || ''}`
 }
 
 function localUrl (raw) {
@@ -168,6 +176,83 @@ async function scanChromeTabs () {
   try { return parseChromeTabs(await run('/usr/bin/osascript', ['-e', CHROME_TABS_SCRIPT], 5000)) } catch { return [] }
 }
 
+function mergeChromeTabs (tabs) {
+  const merged = []
+  const seen = new Set()
+  for (const tab of tabs) {
+    if (seen.has(tab.url)) continue
+    seen.add(tab.url)
+    merged.push(tab)
+  }
+  return merged
+}
+
+function sessionPageUrl (raw) {
+  const local = localUrl(raw)
+  if (!local) return ''
+  const url = local.url
+  if (/^\/(?:api|_next|sockjs-node|__vite|assets)(?:\/|$)/i.test(url.pathname)) return ''
+  if (/\.(?:js|css|map|json|png|jpe?g|gif|svg|ico|woff2?|ttf)(?:$|\?)/i.test(url.pathname)) return ''
+  const sensitive = /^(?:code|token|access_token|refresh_token|id_token|state|key|api_key|session)$/i
+  for (const key of [...url.searchParams.keys()]) if (sensitive.test(key)) url.searchParams.delete(key)
+  url.hash = ''
+  return url.toString()
+}
+
+async function chromeSessionTabs () {
+  try {
+    const profiles = (await readdir(CHROME_DATA_PATH, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && /^(?:Default|Profile \d+|Guest Profile)$/.test(entry.name))
+    const files = []
+    for (const profile of profiles) {
+      const directory = join(CHROME_DATA_PATH, profile.name, 'Sessions')
+      try {
+        const entries = await readdir(directory, { withFileTypes: true })
+        const recent = await Promise.all(entries
+          .filter((entry) => entry.isFile() && /^(?:Session|Tabs)_/.test(entry.name))
+          .map(async (entry) => {
+            const path = join(directory, entry.name)
+            return { path, modified: (await stat(path)).mtimeMs }
+          }))
+        files.push(...recent.sort((left, right) => right.modified - left.modified).slice(0, 4))
+      } catch {}
+    }
+
+    const found = []
+    for (const file of files.sort((left, right) => right.modified - left.modified)) {
+      let body = ''
+      try { body = (await readFile(file.path)).toString('latin1') } catch { continue }
+      const matches = body.match(/https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/[A-Za-z0-9\-._~%!$&'()*+,;=:@/?#]*/g) || []
+      for (let index = 0; index < matches.length; index++) {
+        const url = sessionPageUrl(matches[index])
+        const local = localUrl(url)
+        if (!url || !local) continue
+        found.push({
+          windowId: 0,
+          windowOrder: 999,
+          tabIndex: 0,
+          active: false,
+          url,
+          title: decodeURIComponent(local.url.pathname).replace(/^\//, '') || `localhost:${local.port}`,
+          port: local.port,
+          lastActivatedAt: file.modified + index,
+          source: 'terminal-context',
+          profile: basename(join(file.path, '..', '..'))
+        })
+      }
+    }
+
+    const unique = new Map()
+    for (const tab of found) {
+      const previous = unique.get(tab.url)
+      if (!previous || tab.lastActivatedAt > previous.lastActivatedAt) unique.set(tab.url, tab)
+    }
+    return [...unique.values()]
+  } catch {
+    return []
+  }
+}
+
 async function scanProcesses () {
   try { return parsePs(await run('/bin/ps', ['-axo', 'pid=,command='])) } catch { return [] }
 }
@@ -186,7 +271,7 @@ async function scanBrowserCandidates (processes, tabs) {
     const cwd = cwds.get(listener.pid) || ''
     if (!cwd) continue
     const matchingTabs = tabs.filter((tab) => tab.port === listener.port).sort((a, b) => (
-      Number(b.active) - Number(a.active) || a.windowOrder - b.windowOrder
+      Number(b.active) - Number(a.active) || (b.lastActivatedAt || 0) - (a.lastActivatedAt || 0) || a.windowOrder - b.windowOrder
     ))
     const command = processByPid.get(listener.pid) || listener.commandName
     const isMetro = /(?:^|\s|\/)(?:expo|metro)(?:\s|$)|react-native/i.test(command)
@@ -207,7 +292,10 @@ async function scanBrowserCandidates (processes, tabs) {
         detail: tab.title || basename(cwd) || 'Browser preview',
         url: tab.url,
         port: listener.port,
-        priority: (tab.active ? 2000 : 1000) - (Number(tab.windowOrder) || 999),
+        priority: 1000 + (tab.active ? 500 : 0),
+        lastActivatedAt: tab.lastActivatedAt || 0,
+        source: tab.source || 'applescript',
+        chromeProfile: tab.profile || 'Default',
         projectCwd: cwd
       })
     }
@@ -216,8 +304,11 @@ async function scanBrowserCandidates (processes, tabs) {
 
   // A localhost tab remains manually attachable even when its server process
   // cannot be inspected (Docker, a remote tunnel, or a briefly restarting dev server).
+  const unlinkedUrls = new Set()
   for (const tab of tabs) {
     if (seenPorts.has(tab.port)) continue
+    if (unlinkedUrls.has(tab.url)) continue
+    unlinkedUrls.add(tab.url)
     candidates.push({
       id: `browser:${tab.port}:${encodeURIComponent(tab.url)}`,
       type: 'browser',
@@ -225,10 +316,12 @@ async function scanBrowserCandidates (processes, tabs) {
       detail: tab.title || tab.url,
       url: tab.url,
       port: tab.port,
-      priority: (tab.active ? 2000 : 1000) - (Number(tab.windowOrder) || 999),
+      priority: 1000 + (tab.active ? 500 : 0),
+      lastActivatedAt: tab.lastActivatedAt || 0,
+      source: tab.source || 'applescript',
+      chromeProfile: tab.profile || 'Default',
       projectCwd: ''
     })
-    seenPorts.add(tab.port)
   }
 
   return candidates
@@ -295,7 +388,8 @@ async function scanAndroidCandidates (processes, launchHints) {
 }
 
 async function discoverCandidates () {
-  const [processes, tabs] = await Promise.all([scanProcesses(), scanChromeTabs()])
+  const [processes, appleTabs, sessionTabs] = await Promise.all([scanProcesses(), scanChromeTabs(), chromeSessionTabs()])
+  const tabs = mergeChromeTabs([...appleTabs, ...sessionTabs])
   const launchProcesses = processes.filter((process) => /(?:expo\s+run:|react-native\s+run-)(?:ios|android)/i.test(process.command))
   const launchCwds = await processCwds(launchProcesses.map((process) => process.pid))
   const launchHints = launchProcesses.map((process) => ({
@@ -334,34 +428,53 @@ function displaySlot (display, index, count) {
   }
 }
 
-function chromePreviewScript (candidate, slot) {
+function chromeWindowScript (pid, candidate, slot) {
   const url = appleScriptEscape(candidate.url)
-  const portNeedle = `:${candidate.port}`
-  const left = slot.x
-  const top = slot.y
-  const right = slot.x + slot.width
-  const bottom = slot.y + slot.height
   return `
-tell application "Google Chrome"
-  set targetWindow to missing value
-  repeat with w in windows
+tell application "System Events"
+  set matches to every process whose unix id is ${Number(pid)}
+  if matches is {} then return "not-found"
+  set p to item 1 of matches
+  repeat with w in windows of p
+    set docText to ""
     try
-      if (count tabs of w) is 1 and (URL of active tab of w contains "${portNeedle}") then
-        set targetWindow to w
-        exit repeat
-      end if
+      set docText to value of attribute "AXDocument" of w as text
     end try
+    if docText is "${url}" then
+      set position of w to {${slot.x}, ${slot.y}}
+      set size of w to {${slot.width}, ${slot.height}}
+      set frontmost of p to true
+      perform action "AXRaise" of w
+      return "browser"
+    end if
   end repeat
-  if targetWindow is missing value then
-    set targetWindow to make new window
-  end if
-  set URL of active tab of targetWindow to "${url}"
-  set bounds of targetWindow to {${left}, ${top}, ${right}, ${bottom}}
-  set index of targetWindow to 1
-  activate
-  return "browser"
+  return "not-found"
 end tell
 `
+}
+
+async function defaultChromePid () {
+  const processes = await scanProcesses()
+  return processes.find((process) => process.command === CHROME_BINARY)?.pid || null
+}
+
+async function chromeProfilePreview (candidate, slot) {
+  let pid = await defaultChromePid()
+  if (pid) {
+    const existing = await run('/usr/bin/osascript', ['-e', chromeWindowScript(pid, candidate, slot)], 5000).catch(() => '')
+    if (existing.trim() === 'browser') return { ok: true, via: 'chrome-profile' }
+  }
+
+  await run(CHROME_BINARY, [
+    `--profile-directory=${candidate.chromeProfile || 'Default'}`,
+    '--new-window',
+    candidate.url
+  ], 8000).catch(() => '')
+  await new Promise((resolve) => setTimeout(resolve, 900))
+  pid = await defaultChromePid()
+  if (!pid) return { ok: false, via: 'chrome-profile', reason: 'chrome-not-running' }
+  const result = await run('/usr/bin/osascript', ['-e', chromeWindowScript(pid, candidate, slot)], 6000).catch(() => '')
+  return { ok: result.trim() === 'browser', via: 'chrome-profile', reason: result.trim() === 'browser' ? '' : 'window-not-found' }
 }
 
 function moveProcessScript (pid, slot) {
@@ -465,8 +578,8 @@ async function currentSimulatorPid () {
 async function presentCandidate (candidate, slot) {
   try {
     if (candidate.type === 'browser') {
-      const result = await run('/usr/bin/osascript', ['-e', chromePreviewScript(candidate, slot)], 9000)
-      return { ok: result.trim() === 'browser', id: candidate.id, type: candidate.type }
+      const result = await chromeProfilePreview(candidate, slot)
+      return { id: candidate.id, type: candidate.type, ...result }
     }
 
     let pid = candidate.pid
@@ -489,6 +602,59 @@ async function presentCandidate (candidate, slot) {
   }
 }
 
+const ROUTE_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'app', 'build', 'code', 'current', 'do', 'for', 'from', 'get', 'http', 'https',
+  'i', 'in', 'is', 'it', 'localhost', 'make', 'on', 'page', 'please', 'project', 'task', 'the', 'this',
+  'to', 'update', 'want', 'website', 'with', 'work', 'working', 'www'
+])
+
+function routeWords (value) {
+  return (String(value || '').toLowerCase().normalize('NFKD').match(/[a-z0-9]{2,}/g) || [])
+    .filter((word) => !ROUTE_STOP_WORDS.has(word) && !/^\d+$/.test(word))
+}
+
+export function routeScore (session, candidate) {
+  if (candidate.type !== 'browser') return 0
+  let url
+  try { url = new URL(candidate.url) } catch { return 0 }
+  const directQuery = new Set(routeWords([
+    session?.contextText,
+    session?.task,
+    session?.summary,
+    session?.project,
+    session?.terminalDirectContext
+  ].join(' ')))
+  const transcript = String(session?.transcriptContext || '').toLowerCase()
+  const changedFiles = new Set(routeWords(session?.changedFilesContext || ''))
+  const pathWords = new Set(routeWords(decodeURIComponent(`${url.pathname} ${url.search}`)))
+  const titleWords = new Set(routeWords(candidate.detail))
+  let relevance = 0
+  for (const word of new Set([...pathWords, ...titleWords])) {
+    // Current prompt/task is authoritative. A route-specific changed filename
+    // (for example map-aya-*.sql) is the next strongest local signal.
+    if (directQuery.has(word)) relevance += pathWords.has(word) ? 24_000 : 4200
+    if (changedFiles.has(word)) relevance += pathWords.has(word) ? 18_000 : 2600
+    const last = transcript.lastIndexOf(word)
+    if (last >= 0) {
+      // Later transcript/tool/file evidence is more representative of what is
+      // on screen now than an older mention from the same long session.
+      relevance += Math.round((last / Math.max(1, transcript.length)) * (pathWords.has(word) ? 7000 : 1800))
+      const recent = transcript.slice(-12_000)
+      const occurrences = recent.split(word).length - 1
+      relevance += Math.min(2000, occurrences * (pathWords.has(word) ? 350 : 120))
+    }
+  }
+  const decodedPath = decodeURIComponent(url.pathname).toLowerCase().replace(/\/$/, '')
+  const recentTranscript = transcript.slice(-16_000)
+  const exactRouteIndex = decodedPath && decodedPath !== '/' ? recentTranscript.lastIndexOf(decodedPath) : -1
+  if (exactRouteIndex >= 0) relevance += 12_000 + Math.round((exactRouteIndex / Math.max(1, recentTranscript.length)) * 5000)
+  const nonRoot = url.pathname && url.pathname !== '/'
+  if (nonRoot) relevance += 80
+  const age = Math.max(0, Date.now() - (candidate.lastActivatedAt || 0))
+  const recency = candidate.lastActivatedAt ? Math.max(0, 1000 - Math.floor(age / 60_000)) : 0
+  return relevance + recency + (candidate.priority || 0)
+}
+
 export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS } = {}) {
   const events = new EventEmitter()
   let candidates = []
@@ -496,6 +662,21 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
   let timer = null
   let stopped = false
   let scannedAt = 0
+  let contexts = new Map()
+
+  function enrichedSession (session) {
+    const context = contexts.get(session.id) || {}
+    // Accept the old string shape during hot reloads, but all fresh scans use
+    // the structured context so prompt, transcript, and file evidence retain
+    // their different confidence levels.
+    if (typeof context === 'string') return { ...session, transcriptContext: context }
+    return {
+      ...session,
+      terminalDirectContext: context.direct || '',
+      transcriptContext: context.transcript || '',
+      changedFilesContext: context.changedFiles || ''
+    }
+  }
 
   function savedLinks () {
     const value = loadPrefs().companionLinks
@@ -511,6 +692,10 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
           candidates: saved.candidates && typeof saved.candidates === 'object' ? saved.candidates : {}
         }
       : { mode: 'auto', ids: [], candidates: {} }
+  }
+
+  function disabledFor (session) {
+    return Boolean(loadPrefs().companionDisabled?.[sessionTerminalKey(session)])
   }
 
   function optionsFor (session) {
@@ -530,7 +715,8 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
     })).filter(({ candidate, affinity }) => affinity > 0 || !candidate.projectCwd || candidate.type !== 'browser')
   }
 
-  function activeFor (session) {
+  function configuredFor (session) {
+    const routeSession = enrichedSession(session)
     const config = configFor(session)
     const options = optionsFor(session)
     if (config.mode === 'manual') {
@@ -543,22 +729,32 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
     const automatic = options.filter(({ affinity }) => affinity === 100)
     const browser = automatic
       .filter(({ candidate }) => candidate.type === 'browser')
-      .sort((left, right) => (right.candidate.priority || 0) - (left.candidate.priority || 0))[0]
+      .sort((left, right) => routeScore(routeSession, right.candidate) - routeScore(routeSession, left.candidate))[0]
     const emulators = automatic.filter(({ candidate }) => candidate.type !== 'browser')
     return [...(browser ? [browser.candidate] : []), ...emulators.map(({ candidate }) => candidate)]
   }
 
+  function activeFor (session) {
+    return disabledFor(session) ? [] : configuredFor(session)
+  }
+
   function sessionState (session) {
+    const routeSession = enrichedSession(session)
     const config = configFor(session)
     const active = activeFor(session)
+    const configured = configuredFor(session)
     const activeIds = new Set(active.map((candidate) => candidate.id))
-    const options = optionsFor(session).sort((a, b) => b.affinity - a.affinity || a.candidate.label.localeCompare(b.candidate.label))
+    const options = optionsFor(session).sort((a, b) => (
+      b.affinity - a.affinity || routeScore(routeSession, b.candidate) - routeScore(routeSession, a.candidate) || a.candidate.label.localeCompare(b.candidate.label)
+    ))
     return {
       mode: config.mode,
+      disabled: disabledFor(session),
       activeCount: active.length,
       availableCount: options.length,
       suggestionCount: options.filter(({ affinity }) => affinity > 0 && affinity < 100).length,
       active: active.map((candidate) => candidateSummary(candidate, config.mode === 'manual' ? 'remembered' : 'automatic')),
+      configured: configured.map((candidate) => candidateSummary(candidate, config.mode === 'manual' ? 'remembered' : 'automatic')),
       candidates: options.map(({ candidate, affinity }) => ({
         ...candidateSummary(candidate, affinity === 100 ? 'automatic' : 'suggested'),
         selected: activeIds.has(candidate.id)
@@ -585,8 +781,12 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
   async function refresh () {
     if (stopped) return getState()
     if (scanning) return scanning
-    scanning = discoverCandidates().then((next) => {
+    scanning = Promise.all([
+      discoverCandidates(),
+      terminalContexts(store.list())
+    ]).then(([next, nextContexts]) => {
       candidates = next
+      contexts = nextContexts
       scannedAt = Date.now()
       scanning = null
       events.emit('change', getState())
@@ -600,12 +800,28 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
   }
 
   function useAutomatic (session) {
+    setEnabled(session, true, false)
     persistConfig(session, { mode: 'auto', ids: [], candidates: {} })
   }
 
+  function setEnabled (session, enabled, emit = true) {
+    const prefs = loadPrefs()
+    const disabled = { ...(prefs.companionDisabled || {}) }
+    const key = sessionTerminalKey(session)
+    if (enabled) delete disabled[key]
+    else disabled[key] = true
+    savePrefs({ ...prefs, companionDisabled: disabled })
+    if (emit) events.emit('change', getState())
+  }
+
+  function toggleEnabled (session) {
+    setEnabled(session, disabledFor(session))
+  }
+
   function toggle (session, candidateId) {
+    setEnabled(session, true, false)
     const config = configFor(session)
-    const automatic = activeFor(session)
+    const automatic = configuredFor(session)
     const baseIds = config.mode === 'manual' ? config.ids : automatic.map((candidate) => candidate.id)
     const ids = new Set(baseIds)
     const snapshots = { ...config.candidates }
@@ -627,9 +843,18 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
     if (!display?.workArea) return { ok: true, skipped: 'single-display', results: [] }
     const active = activeFor(session)
     if (!active.length) return { ok: true, skipped: 'no-companion', results: [] }
+    const routeSession = enrichedSession(session)
+    const routeDiagnostics = optionsFor(session)
+      .filter(({ candidate, affinity }) => candidate.type === 'browser' && affinity === 100)
+      .map(({ candidate }) => ({ url: candidate.url, score: routeScore(routeSession, candidate) }))
+      .sort((left, right) => right.score - left.score)
+    if (routeDiagnostics.length) console.log(`[route] "${session.project}" ${JSON.stringify(routeDiagnostics.slice(0, 6))}`)
     const results = []
     for (let index = 0; index < active.length; index++) {
       const slot = displaySlot(display, index, active.length)
+      if (active[index].type === 'browser') {
+        console.log(`[preview] "${session.project}" -> ${active[index].url} via=${active[index].source || 'applescript'}`)
+      }
       results.push(await presentCandidate(active[index], slot))
     }
     return { ok: results.some((result) => result.ok), results }
@@ -654,6 +879,7 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
     sessionState,
     useAutomatic,
     toggle,
+    toggleEnabled,
     present,
     on: (...args) => events.on(...args)
   }

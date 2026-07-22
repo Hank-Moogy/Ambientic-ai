@@ -359,8 +359,15 @@ html, body {
   opacity: .48;
   transition: color 160ms ease-out, background 160ms ease-out, border-color 160ms ease-out, opacity 160ms ease-out, transform 90ms cubic-bezier(.22, 1, .36, 1);
 }
-.pad__companion svg { width: 11px; height: 11px; fill: currentColor; }
-.pad__companion > span {
+.pad__companion-icons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.pad__companion-icons svg { width: 12px; height: 12px; fill: currentColor; }
+.pad__companion-icons--mixed svg { width: 9px; height: 9px; }
+.pad__companion-count {
   position: absolute;
   right: -3px;
   bottom: -3px;
@@ -393,6 +400,20 @@ html, body {
   color: var(--orange);
   background: oklch(0.76 0.17 65 / 0.09);
   opacity: .9;
+}
+.pad__companion--disabled {
+  color: var(--text-dim);
+  background: oklch(0.18 0.01 260 / 0.28);
+  border-color: oklch(0.92 0.01 255 / 0.09);
+  opacity: .62;
+}
+.pad__companion-slash {
+  position: absolute;
+  inset: 4px;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  fill: currentColor;
+  filter: drop-shadow(0 0 2px var(--bg-solid));
 }
 
 /* Uniform hardware-style state light. Every edge has the same visual weight. */

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('controller', {
   focus: (id) => ipcRenderer.invoke('focus', id),
   showDisplayMenu: () => ipcRenderer.invoke('show-display-menu'),
   showCompanionMenu: (id) => ipcRenderer.invoke('show-companion-menu', id),
+  toggleCompanion: (id) => ipcRenderer.invoke('toggle-companion', id),
   dismiss: (id) => ipcRenderer.invoke('dismiss', id),
   installHooks: () => ipcRenderer.invoke('install-hooks'),
   resize: (height) => ipcRenderer.send('resize', height),

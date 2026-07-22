@@ -167,6 +167,7 @@ def main(agent):
         "cwd": cwd,
         "project": os.path.basename(cwd.rstrip("/")) or cwd,
         "term_program": os.environ.get("TERM_PROGRAM", ""),
+        "transcript_path": str(hook.get("transcript_path") or "")[:1000],
         "ts": int(time.time() * 1000),
     }
 

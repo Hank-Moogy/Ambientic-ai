@@ -1,6 +1,6 @@
 {
   "name": "claude-controller",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "description": "Floating APC40-style controller that monitors your Claude Code / Codex / Kimi terminal sessions and lets you jump to the one that needs you.",
   "author": "findmecreators",
   "main": "out/main/index.js",

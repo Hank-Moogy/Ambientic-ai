@@ -76,6 +76,14 @@ its terminal:
 - Localhost pages auto-link by tracing the listening port back to its process
   working directory. Expo-launched simulators auto-link when the device and
   project are explicit in the launch command.
+- The route resolver reads the agent's local prompt/transcript context and the
+  localhost routes already recorded in Chrome's local session files. It ranks
+  those routes by task, tool, file, title, and URL-path evidence. A terminal
+  working on `Aya` therefore selects `/expansion/aya` instead of the project
+  root or another expansion.
+- Browser previews reuse an exact-route Chrome window when one exists, or open
+  one with the same Chrome profile on the preview display. Chrome does not need
+  an extension, so the preview keeps the user's existing login and cookies.
 - Ambiguous emulators stay suggestions. Use the monitor button on a pad to
   attach one or more previews manually; those choices are remembered by
   project.

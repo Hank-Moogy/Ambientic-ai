@@ -264,7 +264,7 @@ function DisplayRoute ({ topology, onChoose }) {
   )
 }
 
-function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, onCompanions }) {
+function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, onCompanionPress, onCompanions }) {
   const meta = agentMeta(s.agent)
   const task = taskMeta(s)
   const name = terminalName(s.project)
@@ -272,10 +272,15 @@ function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, 
   const displayState = standby ? 'standby' : stateHint(s)
   const cls = ['pad', `pad--${s.state}`, standby ? 'pad--standby' : '', selected ? 'pad--selected' : '', s.unseen && !standby && !selected ? 'pad--unseen' : ''].join(' ').trim()
   const activeCompanions = companion?.active || []
+  const configuredCompanions = companion?.configured?.length ? companion.configured : activeCompanions
+  const hasWebCompanion = configuredCompanions.some((item) => item.type === 'browser')
+  const hasPhoneCompanion = configuredCompanions.some((item) => item.type === 'ios' || item.type === 'android')
   const candidateCount = companion?.availableCount ?? companion?.candidates?.length ?? 0
   const suggestionCount = companion?.suggestionCount || 0
-  const companionLabel = activeCompanions.length
-    ? `${activeCompanions.length} linked preview${activeCompanions.length > 1 ? 's' : ''}: ${activeCompanions.map((item) => item.label).join(', ')}. Click to change.`
+  const companionLabel = companion?.disabled
+    ? `Preview routing is off for this terminal. Click to turn it on; right-click to change the link.`
+    : activeCompanions.length
+    ? `${activeCompanions.length} linked preview${activeCompanions.length > 1 ? 's' : ''}: ${activeCompanions.map((item) => item.label).join(', ')}. Click to turn off for this terminal; right-click to change.`
     : suggestionCount
       ? `${suggestionCount} preview suggestion${suggestionCount > 1 ? 's' : ''}. Click to attach.`
       : candidateCount
@@ -300,14 +305,20 @@ function Pad ({ s, now, standby, selected, companion, onFocus, onToggleStandby, 
         </span>
       </button>
       <button
-        className={`pad__companion${activeCompanions.length ? ' pad__companion--linked' : ''}${!activeCompanions.length && suggestionCount ? ' pad__companion--suggested' : ''}`}
+        className={`pad__companion${activeCompanions.length ? ' pad__companion--linked' : ''}${companion?.disabled ? ' pad__companion--disabled' : ''}${!activeCompanions.length && !companion?.disabled && suggestionCount ? ' pad__companion--suggested' : ''}`}
         type="button"
         aria-label={companionLabel}
         title={companionLabel}
-        onClick={() => onCompanions(s.id)}
+        onClick={() => onCompanionPress(s.id, companion)}
+        onContextMenu={(event) => { event.preventDefault(); onCompanions(s.id) }}
       >
-        <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2h10c.6 0 1 .4 1 1v6.2c0 .6-.4 1-1 1H8v1.1h2v1H4v-1h2v-1.1H2c-.6 0-1-.4-1-1V3c0-.6.4-1 1-1Zm0 1v6.2h10V3H2Z" /></svg>
-        {activeCompanions.length > 1 && <span>{activeCompanions.length}</span>}
+        <span className={`pad__companion-icons${hasWebCompanion && hasPhoneCompanion ? ' pad__companion-icons--mixed' : ''}`} aria-hidden="true">
+          {hasWebCompanion && <svg viewBox="0 0 14 14"><path d="M7 1a6 6 0 1 1 0 12A6 6 0 0 1 7 1Zm3.5 3H9.2c.2.7.3 1.5.4 2.3h2.1A4.7 4.7 0 0 0 10.5 4ZM7 2.2c-.4 0-1.1 1.5-1.3 4.1h2.6C8.1 3.7 7.4 2.2 7 2.2ZM3.5 4a4.7 4.7 0 0 0-1.2 2.3h2.1c.1-.8.2-1.6.4-2.3H3.5Zm-1.2 3.5c.1.9.5 1.7 1.2 2.4h1.3a11 11 0 0 1-.4-2.4H2.3ZM7 11.8c.4 0 1.1-1.5 1.3-4.3H5.7c.2 2.8.9 4.3 1.3 4.3Zm3.5-1.9a4.8 4.8 0 0 0 1.2-2.4H9.6c-.1.9-.2 1.7-.4 2.4h1.3Z" /></svg>}
+          {hasPhoneCompanion && <svg viewBox="0 0 14 14"><path d="M4.2 1h5.6c.8 0 1.4.6 1.4 1.4v9.2c0 .8-.6 1.4-1.4 1.4H4.2c-.8 0-1.4-.6-1.4-1.4V2.4C2.8 1.6 3.4 1 4.2 1Zm0 1.2c-.1 0-.2.1-.2.2v8.1h6V2.4c0-.1-.1-.2-.2-.2H4.2ZM7 12c.3 0 .5-.2.5-.5S7.3 11 7 11s-.5.2-.5.5.2.5.5.5Z" /></svg>}
+          {!hasWebCompanion && !hasPhoneCompanion && <svg viewBox="0 0 14 14"><path d="M2 2h10c.6 0 1 .4 1 1v6.2c0 .6-.4 1-1 1H8v1.1h2v1H4v-1h2v-1.1H2c-.6 0-1-.4-1-1V3c0-.6.4-1 1-1Zm0 1v6.2h10V3H2Z" /></svg>}
+        </span>
+        {companion?.disabled && <svg className="pad__companion-slash" viewBox="0 0 14 14" aria-hidden="true"><path d="m2.1 1.3 10.6 10.6-.8.8L1.3 2.1l.8-.8Z" /></svg>}
+        {!companion?.disabled && activeCompanions.length > 1 && <span className="pad__companion-count">{activeCompanions.length}</span>}
       </button>
       <button
         className={`pad__standby${standby ? ' pad__standby--active' : ''}`}
@@ -471,6 +482,10 @@ export default function App () {
                 companion={companions?.bySession?.[s.id]}
                 onFocus={onFocus}
                 onToggleStandby={onToggleStandby}
+                onCompanionPress={(id, state) => {
+                  if (state?.disabled || state?.activeCount > 0) window.controller.toggleCompanion(id)
+                  else window.controller.showCompanionMenu(id)
+                }}
                 onCompanions={(id) => window.controller.showCompanionMenu(id)}
               />
             ))}
