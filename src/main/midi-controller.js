@@ -68,7 +68,9 @@ export function createMidiController (store, { onPadPress } = {}) {
         const pad = padForMessage(message)
         if (pad === null) return
         const session = gridSessions(store.list())[pad]
-        if (session && onPadPress) {
+        if (!session) {
+          console.log(`[midi] pad ${pad + 1} pressed (unassigned)`)
+        } else if (onPadPress) {
           Promise.resolve(onPadPress(session.id)).catch((error) => {
             console.error(`[midi] could not focus pad ${pad + 1}: ${error.message}`)
           })
