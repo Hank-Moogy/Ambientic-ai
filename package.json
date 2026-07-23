@@ -1,7 +1,7 @@
 {
-  "name": "claude-controller",
+  "name": "agentbase",
   "version": "0.8.1",
-  "description": "Floating APC40-style controller that monitors your Claude Code / Codex / Kimi terminal sessions and lets you jump to the one that needs you.",
+  "description": "Local-first APC40 MKII control surface for Claude Code, Codex, and Hermes agent sessions.",
   "author": "findmecreators",
   "main": "out/main/index.js",
   "scripts": {
@@ -26,8 +26,8 @@
     "react-dom": "^18.3.1"
   },
   "build": {
-    "appId": "com.findmecreators.claudecontroller",
-    "productName": "Vibe Controller",
+    "appId": "com.findmecreators.agentbase",
+    "productName": "AgentBase",
     "npmRebuild": false,
     "directories": { "output": "release" },
     "files": ["out/**/*"],
@@ -37,7 +37,10 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": ["dmg"],
-      "extendInfo": { "LSUIElement": true }
+      "extendInfo": {
+        "LSUIElement": false,
+        "NSMicrophoneUsageDescription": "AgentBase records voice prompts locally when you press Record on your APC40 MKII."
+      }
     }
   }
 }

@@ -126,6 +126,7 @@ html, body {
   transition: color 160ms ease-out, background 160ms ease-out, border-color 160ms ease-out;
 }
 .display-route svg { width: 12px; height: 12px; flex: none; fill: currentColor; }
+.display-route > span { display: none; }
 .display-route:hover {
   color: var(--text-secondary);
   border-color: oklch(0.92 0.01 255 / 0.17);
@@ -133,9 +134,144 @@ html, body {
 }
 .display-route:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .titlebar__count {
-  margin-left: auto; font-size: 11px; color: var(--text-dim);
+  display: none;
+  margin-left: 0; font-size: 11px; color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
+.titlebar__midi {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: rgba(255,255,255,.035);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 8px;
+  font-weight: 720;
+  cursor: pointer;
+}
+.titlebar__midi > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--red);
+}
+.titlebar__midi[data-connected="true"] { color: var(--text-secondary); }
+.titlebar__midi[data-connected="true"] > span { background: var(--green); box-shadow: 0 0 7px color-mix(in oklch, var(--green) 65%, transparent); }
+.titlebar__midi:hover { color: var(--text); border-color: rgba(255,255,255,.18); }
+
+/* ── local agent connections ───────────────────────────────────── */
+.connectors {
+  -webkit-app-region: no-drag;
+  padding: 8px 10px 9px;
+  border-bottom: 1px solid var(--edge);
+  background: rgba(255,255,255,.018);
+}
+.connectors__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.connectors__header button,
+.connector button,
+.midi-map button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.connectors__header button { font-size: 8px; text-transform: uppercase; opacity: .72; }
+.connectors__header button:hover { opacity: 1; color: var(--text); }
+.connectors__list { display: grid; gap: 5px; }
+.connectors__loading {
+  padding: 7px 6px;
+  color: var(--text-dim);
+  font-size: 8.5px;
+  line-height: 1.3;
+}
+.connector {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 6px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 8px;
+  background: rgba(0,0,0,.12);
+}
+.connector .agent-icon { width: 14px; height: 14px; color: var(--text-dim); }
+.connector[data-ready="true"] .agent-icon { color: var(--green); }
+.connector__identity { min-width: 0; display: grid; gap: 1px; }
+.connector__identity b { overflow: hidden; color: var(--text-secondary); font-size: 10px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.connector__identity span { overflow: hidden; color: var(--text-dim); font-size: 8px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.connector button {
+  padding: 4px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,.035);
+  font-size: 8.5px;
+  font-weight: 650;
+}
+.connector button:hover:not(:disabled) { color: var(--text); border-color: rgba(255,255,255,.18); }
+.connector button:disabled { cursor: default; opacity: .4; }
+
+/* ── Akai APC40 MKII mapping ───────────────────────────────────── */
+.midi-map {
+  -webkit-app-region: no-drag;
+  padding: 10px;
+}
+.midi-map__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.midi-map__header > button {
+  padding: 5px 8px;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  background: rgba(255,255,255,.04);
+  font-size: 9px;
+  font-weight: 700;
+}
+.midi-map__device { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.midi-map__device > span:last-child { display: grid; gap: 2px; min-width: 0; }
+.midi-map__device b { font-size: 10.5px; color: var(--text); }
+.midi-map__device small { overflow: hidden; color: var(--text-dim); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.midi-map__device-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--red); }
+.midi-map__device-dot[data-connected="true"] { background: var(--green); box-shadow: 0 0 8px color-mix(in oklch, var(--green) 65%, transparent); }
+.midi-map__hint { margin: 10px 0; color: var(--text-dim); font-size: 8.5px; line-height: 1.4; }
+.midi-map__actions { display: grid; gap: 5px; }
+.midi-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  padding: 6px 7px;
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 8px;
+  background: rgba(0,0,0,.14);
+}
+.midi-action[data-learning="true"] { border-color: color-mix(in oklch, var(--orange) 55%, transparent); background: color-mix(in oklch, var(--orange) 8%, transparent); }
+.midi-action > span { min-width: 0; display: grid; gap: 2px; }
+.midi-action b { color: var(--text-secondary); font-size: 9px; line-height: 1.2; }
+.midi-action small { overflow: hidden; color: var(--text-dim); font-size: 8px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.midi-action[data-learning="true"] small { color: var(--orange); }
+.midi-action button { padding: 4px 6px; border-radius: 6px; font-size: 8px; font-weight: 700; }
+.midi-action__clear { color: var(--text-dim) !important; }
+.midi-action__learn { min-width: 38px; border: 1px solid var(--edge) !important; color: var(--text-secondary) !important; background: rgba(255,255,255,.04) !important; }
+.midi-action__learn:disabled { cursor: default; opacity: .35; }
+.midi-map__reset { display: block; margin: 10px auto 0; color: var(--text-dim) !important; font-size: 8px !important; text-decoration: underline; text-underline-offset: 2px; }
 
 /* ── account limits instrument strip ────────────────────────────── */
 .usage-strip {
@@ -644,6 +780,7 @@ html, body {
   .titlebar { height: 38px; padding-inline: 14px; }
   .titlebar__label, .titlebar__count { font-size: 12px; }
   .display-route { height: 25px; padding-inline: 7px; font-size: 9.5px; }
+  .display-route > span, .titlebar__count { display: inline; }
   .usage-strip { padding: 10px 12px; }
   .usage-grid { grid-template-columns: minmax(0, 1fr) 60px 60px; column-gap: 9px; }
   .usage-grid--header { font-size: 8.5px; }

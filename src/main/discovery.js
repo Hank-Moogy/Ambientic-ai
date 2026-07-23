@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { basename } from 'node:path'
+import { discoverCodexDesktopSessions } from './codex-desktop.mjs'
 
 const SCAN_INTERVAL_MS = 5000
 
@@ -60,6 +61,7 @@ export function agentForCommand (command) {
   }
 
   if (/(^|\s)(?:\S*\/)?kimi(?:-code|-cli)?(?:\s|$)/i.test(c)) return 'kimi'
+  if (/(^|\s)(?:\S*\/)?hermes(?:\s|$)/i.test(c) && !lower.includes('hermes gateway')) return 'hermes'
   return ''
 }
 
@@ -114,7 +116,7 @@ function cleanGhosttyTitle (title, project) {
 
   if (!plain || plain.length < 3) return ''
   if (plain === projectName || projectName.startsWith(`${plain}.`)) return ''
-  if (/^(claude|claude code|codex|kimi|kimi code|kimi-code|terminal|shell)$/i.test(plain)) return ''
+  if (/^(claude|claude code|codex|kimi|kimi code|kimi-code|hermes|hermes agent|terminal|shell)$/i.test(plain)) return ''
   return clean.slice(0, 240)
 }
 
@@ -196,8 +198,15 @@ export function startDiscovery (store, { intervalMs = SCAN_INTERVAL_MS, onTaskTe
     if (stopped || scanning) return
     scanning = true
     try {
-      const terminals = await discoverAgentTerminals({ includeTitles: !seededTitles })
+      const [terminals, codexDesktop] = await Promise.all([
+        discoverAgentTerminals({ includeTitles: !seededTitles }),
+        discoverCodexDesktopSessions().catch((error) => {
+          console.error('[agentbase] Codex desktop discovery failed:', error.message)
+          return []
+        })
+      ])
       store.syncDiscovered(terminals)
+      store.syncExternal('codex-desktop', codexDesktop)
       if (!seededTitles && onTaskText) {
         for (const terminal of terminals) {
           if (!terminal.seedTaskText) continue
@@ -207,7 +216,7 @@ export function startDiscovery (store, { intervalMs = SCAN_INTERVAL_MS, onTaskTe
       }
       seededTitles = true
     } catch (err) {
-      console.error('[claude-controller] terminal discovery failed:', err.message)
+      console.error('[agentbase] terminal discovery failed:', err.message)
     } finally {
       scanning = false
     }

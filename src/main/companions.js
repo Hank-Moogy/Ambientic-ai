@@ -918,7 +918,7 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
       events.emit('change', getState())
       return getState()
     }).catch((error) => {
-      console.error('[claude-controller] companion discovery failed:', error.message)
+      console.error('[agentbase] companion discovery failed:', error.message)
       scanning = null
       return getState()
     })

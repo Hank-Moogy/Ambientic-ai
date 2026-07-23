@@ -2,9 +2,10 @@ import { app, BrowserWindow, Tray, Menu, clipboard, ipcMain, nativeImage, screen
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
+import { writeFile } from 'node:fs/promises'
 import { SessionStore, STATE } from './sessions.js'
 import { startServer } from './server.js'
-import { focusSession, pasteClipboardImage } from './focus.js'
+import { focusSession, pasteClipboardImage, pasteClipboardText, submitTerminalPrompt } from './focus.js'
 import { startDiscovery } from './discovery.js'
 import { createTaskSummarizer } from './summarizer.js'
 import { createUsageService } from './usage.js'
@@ -12,6 +13,9 @@ import { createCompanionService } from './companions.js'
 import { loadPrefs, savePrefs } from './prefs.js'
 import { loadTaskCache, saveTaskCache } from './task-cache.js'
 import { createMidiController } from './midi-controller.js'
+import { connectorState, openAgentTerminal } from './connectors.js'
+import { createVoiceInput } from './voice-input.mjs'
+import { WorkspaceService } from './workspace-service.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -26,11 +30,21 @@ const usage = createUsageService()
 const companions = createCompanionService(store)
 
 let win = null
+let workspaceWin = null
 let tray = null
 let discovery = null
 let pointerResize = null
 let lastFocusedSessionId = null
 let midiController = null
+let voiceInput = null
+let connectors = []
+let workspace = null
+
+function sendToWindows (channel, payload) {
+  for (const target of [win, workspaceWin]) {
+    if (target && !target.isDestroyed()) target.webContents.send(channel, payload)
+  }
+}
 
 function stopPointerResize () {
   if (!pointerResize) return
@@ -78,7 +92,7 @@ function setLaunchAtLogin (enabled) {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled), type: 'mainAppService' })
     savePrefs({ ...loadPrefs(), launchAtLogin: Boolean(enabled) })
   } catch (error) {
-    console.error(`[claude-controller] could not update login item: ${error.message}`)
+    console.error(`[agentbase] could not update login item: ${error.message}`)
   }
   return loginItemSettings()
 }
@@ -185,10 +199,18 @@ function createWindow () {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenSpaces: true })
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
-  if (rendererUrl) win.loadURL(rendererUrl)
-  else win.loadFile(join(__dirname, '../renderer/index.html'))
+  if (rendererUrl) win.loadURL(`${rendererUrl}?surface=controller`)
+  else win.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'controller' } })
 
-  win.once('ready-to-show', () => win.showInactive())
+  win.webContents.on('console-message', (_event, level, message) => {
+    if (level >= 2) console.error(`[agentbase:renderer] ${message}`)
+  })
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[agentbase:renderer] process gone: ${details.reason}`)
+  })
+
+  // The compact hardware view remains available from the workspace and tray,
+  // but the full workspace is the default first-run surface.
 
   win.on('moved', () => {
     const b = win.getBounds()
@@ -203,6 +225,27 @@ function createWindow () {
     pushUsage()
     pushDisplays()
     pushCompanions()
+    pushMidi()
+    pushVoice()
+    pushConnectors()
+    const smokeScreenshot = process.env.AGENTBASE_SMOKE_SCREENSHOT
+    if (smokeScreenshot && process.env.AGENTBASE_SMOKE_VIEW !== 'workspace') {
+      setTimeout(async () => {
+        try {
+          if (process.env.AGENTBASE_SMOKE_VIEW === 'midi') {
+            await win.webContents.executeJavaScript('document.querySelector(".titlebar__midi")?.click()')
+            await new Promise((resolve) => setTimeout(resolve, 250))
+          }
+          const image = await win.webContents.capturePage()
+          await writeFile(smokeScreenshot, image.toPNG())
+          console.log(`[agentbase] smoke screenshot: ${smokeScreenshot}`)
+        } catch (error) {
+          console.error(`[agentbase] smoke screenshot failed: ${error.message}`)
+        } finally {
+          if (process.env.AGENTBASE_SMOKE_QUIT === '1') app.quit()
+        }
+      }, 2500)
+    }
   })
 
   // `will-resize` is emitted for direct user resizing, not our content-fit
@@ -238,28 +281,96 @@ function createWindow () {
   })
 }
 
+function createWorkspaceWindow () {
+  workspaceWin = new BrowserWindow({
+    width: 1420,
+    height: 880,
+    minWidth: 820,
+    minHeight: 600,
+    title: 'AgentBase',
+    backgroundColor: '#0b0c0f',
+    show: false,
+    fullscreenable: true,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      sandbox: false
+    }
+  })
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  if (rendererUrl) workspaceWin.loadURL(`${rendererUrl}?surface=workspace`)
+  else workspaceWin.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'workspace' } })
+  workspaceWin.once('ready-to-show', () => workspaceWin.show())
+  workspaceWin.webContents.on('did-finish-load', () => {
+    pushState(); pushSys(); pushUsage(); pushDisplays(); pushCompanions(); pushMidi(); pushVoice(); pushConnectors()
+    const smokeScreenshot = process.env.AGENTBASE_SMOKE_SCREENSHOT
+    if (smokeScreenshot && process.env.AGENTBASE_SMOKE_VIEW === 'workspace') {
+      setTimeout(async () => {
+        try {
+          const image = await workspaceWin.webContents.capturePage()
+          await writeFile(smokeScreenshot, image.toPNG())
+          console.log(`[agentbase] workspace smoke screenshot: ${smokeScreenshot}`)
+        } catch (error) {
+          console.error(`[agentbase] workspace smoke screenshot failed: ${error.message}`)
+        } finally {
+          if (process.env.AGENTBASE_SMOKE_QUIT === '1') app.quit()
+        }
+      }, 11_000)
+    }
+  })
+  workspaceWin.on('closed', () => { workspaceWin = null })
+}
+
 function pushState () {
   const list = store.list()
-  if (win && !win.isDestroyed()) win.webContents.send('state', list)
+  sendToWindows('state', list)
+  void pushWorkspaceThreads()
   updateTray()
 }
 
+async function pushWorkspaceThreads (force = false) {
+  if (!workspace) return
+  try { sendToWindows('workspace-threads', await workspace.list({ force })) } catch (error) { console.error('[agentbase] workspace index failed:', error.message) }
+}
+
 function pushSys () {
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('sys', { accessibility: accessibilityGranted(false) })
-  }
+  sendToWindows('sys', { accessibility: accessibilityGranted(false) })
+}
+
+function voiceStatus () {
+  const status = voiceInput?.getStatus() || { recording: false, transcribing: false, sessionId: '', error: '', transcript: '', toolsReady: false }
+  const session = store.list().find((candidate) => candidate.id === status.sessionId)
+  return { ...status, sessionLabel: session?.task || session?.project || session?.agent || '' }
+}
+
+function pushVoice () {
+  sendToWindows('voice', voiceStatus())
 }
 
 function pushUsage () {
-  if (win && !win.isDestroyed()) win.webContents.send('usage', usage.getState())
+  sendToWindows('usage', usage.getState())
 }
 
 function pushDisplays () {
-  if (win && !win.isDestroyed()) win.webContents.send('displays', displayTopology())
+  sendToWindows('displays', displayTopology())
 }
 
 function pushCompanions () {
-  if (win && !win.isDestroyed()) win.webContents.send('companions', companions.getState())
+  sendToWindows('companions', companions.getState())
+}
+
+function pushMidi () {
+  sendToWindows('midi', midiController?.getStatus() || { connected: false, model: 'Akai APC40 MKII' })
+}
+
+function pushConnectors () {
+  sendToWindows('connectors', connectors)
+}
+
+async function refreshConnectors () {
+  connectors = await connectorState()
+  pushConnectors()
+  return connectors
 }
 
 function updateTray () {
@@ -270,7 +381,7 @@ function updateTray () {
   tray.setToolTip(
     total
       ? `${total} session${total > 1 ? 's' : ''}${needy ? ` · ${needy} need you` : ''}`
-      : 'Vibe Controller — no sessions'
+      : 'AgentBase — no sessions'
   )
 }
 
@@ -298,6 +409,23 @@ function snapTopRight () {
   savePrefs({ ...loadPrefs(), x: nb.x, y: nb.y })
 }
 
+function showWorkspace (sessionId = '') {
+  if (!workspaceWin || workspaceWin.isDestroyed()) createWorkspaceWindow()
+  workspaceWin.show()
+  workspaceWin.focus()
+  if (sessionId) workspaceWin.webContents.send('workspace-select', sessionId)
+  return true
+}
+
+function selectWorkspaceSession (id) {
+  const session = store.list().find((candidate) => candidate.id === id)
+  if (!session) return false
+  store.acknowledge(id)
+  lastFocusedSessionId = id
+  midiController?.select(id)
+  return showWorkspace(id)
+}
+
 function runInstaller () {
   const hookRoot = app.isPackaged
     ? join(process.resourcesPath, 'hook')
@@ -305,9 +433,8 @@ function runInstaller () {
   const script = join(hookRoot, 'install.sh')
   execFile('/bin/sh', [script], { timeout: 20_000 }, (err, stdout, stderr) => {
     const body = (stdout || '') + (stderr || '') + (err ? `\n${err.message}` : '')
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('installer', { ok: !err, output: body.trim() })
-    }
+    sendToWindows('installer', { ok: !err, output: body.trim() })
+    void refreshConnectors()
   })
 }
 
@@ -316,7 +443,8 @@ function buildTrayMenu () {
   const zoom = savedZoom()
   const midiStatus = midiController?.getStatus() || { connected: false }
   return Menu.buildFromTemplate([
-    { label: 'Show / Hide', click: () => (win.isVisible() ? win.hide() : win.showInactive()) },
+    { label: 'Open AgentBase workspace', click: () => showWorkspace() },
+    { label: 'Show / Hide compact controller', click: () => (win.isVisible() ? win.hide() : win.showInactive()) },
     { label: 'Dock top-right', click: snapTopRight },
     {
       label: 'Launch at Login',
@@ -338,15 +466,15 @@ function buildTrayMenu () {
     },
     { type: 'separator' },
     {
-      label: midiStatus.connected ? `APC40: ${midiStatus.device}` : 'APC40: Not connected',
+      label: midiStatus.connected ? `APC40 MKII: ${midiStatus.device}` : 'APC40 MKII: Not connected',
       enabled: false
     },
     { label: 'Reconnect APC40', click: () => midiController?.reconnect() },
     { type: 'separator' },
     { label: 'Install / update agent hooks…', click: runInstaller },
-    { label: 'Open hooks folder', click: () => shell.openPath(join(app.getPath('home'), '.claude-controller')) },
+    { label: 'Open AgentBase data folder', click: () => shell.openPath(join(app.getPath('home'), '.agentbase')) },
     { type: 'separator' },
-    { label: 'Quit Vibe Controller', click: () => { app.isQuitting = true; app.quit() } }
+    { label: 'Quit AgentBase', click: () => { app.isQuitting = true; app.quit() } }
   ])
 }
 
@@ -358,8 +486,29 @@ function createTray () {
 
 // ── IPC ───────────────────────────────────────────────────────────────────
 ipcMain.handle('get-state', () => store.list())
+ipcMain.handle('get-workspace-threads', () => workspace.list())
 ipcMain.handle('get-usage', () => usage.getState())
 ipcMain.handle('refresh-usage', () => usage.refresh())
+ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
+ipcMain.handle('refresh-connectors', () => refreshConnectors())
+ipcMain.handle('open-agent-setup', (_event, agentId) => openAgentTerminal(agentId))
+ipcMain.handle('get-midi', () => midiController?.getStatus() || { connected: false, model: 'Akai APC40 MKII' })
+ipcMain.handle('midi-learn', (_event, actionId) => midiController?.learn(actionId) || false)
+ipcMain.handle('midi-cancel-learn', () => { midiController?.cancelLearn(); return true })
+ipcMain.handle('midi-clear-action', (_event, actionId) => midiController?.clearAction(actionId) || false)
+ipcMain.handle('midi-reset-mappings', () => { midiController?.resetMappings(); return true })
+ipcMain.handle('get-thread', (_event, id) => workspace.read(id))
+ipcMain.handle('send-thread-prompt', (_event, id, text) => workspace.send(id, text))
+ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
+ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))
+ipcMain.handle('resolve-approval', (_event, id, allow, remember) => workspace.resolveApproval(id, allow, remember))
+ipcMain.handle('copy-text', (_event, text) => {
+  clipboard.writeText(String(text || '').slice(0, 2 * 1024 * 1024))
+  return true
+})
+ipcMain.handle('show-controller', () => { win.showInactive(); return true })
+ipcMain.handle('show-workspace', (_event, id) => showWorkspace(id))
+ipcMain.handle('open-artifact', (_event, path) => shell.openPath(path))
 
 function accessibilityGranted (prompt = false) {
   try { return systemPreferences.isTrustedAccessibilityClient(prompt) } catch { return true }
@@ -427,6 +576,13 @@ async function focusById (id) {
   const s = store.list().find((x) => x.id === id)
   if (!s) return { ok: false, reason: 'not-found' }
   store.acknowledge(id)
+
+  if (s.deepLink) {
+    await shell.openExternal(s.deepLink)
+    lastFocusedSessionId = id
+    midiController?.select(id)
+    return { ok: true, via: 'provider-deep-link' }
+  }
 
   // AX window control requires Accessibility permission for THIS app (in dev:
   // "Electron"). If it's missing, prompt + open the pane instead of silently
@@ -505,13 +661,106 @@ async function captureById (id) {
   return { ok: true, count: images.length, paths: images.map((image) => image.path) }
 }
 
+async function sendVoicePrompt (id, text) {
+  const session = store.list().find((candidate) => candidate.id === id)
+  if (!session) throw new Error('The selected agent is no longer available.')
+
+  // Provider-managed and Codex desktop sessions can receive the prompt
+  // directly through the normalized workspace bridge. Live terminal sessions
+  // remain safest through their existing interactive process.
+  if (!session.tty) {
+    await workspace.send(id, text)
+    showWorkspace(id)
+    return { ok: true, via: 'workspace' }
+  }
+
+  const focused = await queueFocus(id)
+  if (!focused?.ok) throw new Error('Could not focus the selected agent.')
+  if (session.deepLink) await new Promise((resolve) => setTimeout(resolve, 500))
+  clipboard.writeText(text)
+  const pasted = await pasteClipboardText()
+  if (!pasted.ok) throw new Error('Could not paste the transcript into the selected agent.')
+  const submitted = await submitTerminalPrompt()
+  if (!submitted.ok) throw new Error('Could not submit the transcript to the selected agent.')
+  return { ok: true, via: 'terminal' }
+}
+
+async function startVoicePrompt (sessionId = lastFocusedSessionId) {
+  if (!voiceInput) return false
+  if (voiceInput.getStatus().transcribing) throw new Error('The previous voice prompt is still transcribing.')
+  try {
+    const selected = store.list().find((session) => session.id === sessionId)
+    if (!selected) throw new Error('Select a live agent pad before recording a prompt.')
+    if (voiceInput.getStatus().recording) return { ok: true, recording: true, sessionId }
+    if (process.platform === 'darwin') {
+      const granted = await systemPreferences.askForMediaAccess('microphone')
+      if (!granted) throw new Error('Microphone permission is required for voice prompts.')
+    }
+    return voiceInput.start(sessionId)
+  } catch (error) {
+    voiceInput.reportError(error)
+    throw error
+  }
+}
+
+async function stopVoicePrompt () {
+  if (!voiceInput) return false
+  try { return await voiceInput.stop() } catch (error) { voiceInput.reportError(error); throw error }
+}
+
+async function toggleVoicePrompt () {
+  return voiceInput?.getStatus().recording ? stopVoicePrompt() : startVoicePrompt()
+}
+
 function queueCapture (id) {
   const next = focusQueue.catch(() => {}).then(() => captureById(id))
   focusQueue = next
   return next
 }
 
+function relativeSession (direction, predicate = () => true) {
+  const sessions = store.list().filter(predicate)
+  if (!sessions.length) return null
+  const index = sessions.findIndex((session) => session.id === lastFocusedSessionId)
+  const next = index < 0 ? 0 : (index + direction + sessions.length) % sessions.length
+  return sessions[next]
+}
+
+async function handleMidiAction (actionId) {
+  const selected = store.list().find((session) => session.id === lastFocusedSessionId)
+  if (actionId === 'focus-next') { const session = relativeSession(1); return session ? queueFocus(session.id) : false }
+  if (actionId === 'focus-previous') { const session = relativeSession(-1); return session ? queueFocus(session.id) : false }
+  if (actionId === 'focus-next-attention') {
+    const session = relativeSession(1, (candidate) => candidate.state !== STATE.RUNNING)
+    return session ? queueFocus(session.id) : false
+  }
+  if (actionId === 'focus-selected') return selected ? queueFocus(selected.id) : false
+  if (actionId === 'acknowledge-selected') { if (selected) store.acknowledge(selected.id); return Boolean(selected) }
+  if (actionId === 'capture-selected') return selected ? queueCapture(selected.id) : false
+  if (actionId.startsWith('launch-')) return openAgentTerminal(actionId.slice('launch-'.length))
+  if (actionId === 'toggle-controller') {
+    if (!win || win.isDestroyed()) return false
+    if (win.isVisible()) win.hide()
+    else win.showInactive()
+    return true
+  }
+  return false
+}
+
 ipcMain.handle('focus', (_e, id) => queueFocus(id))
+ipcMain.handle('select-session', (_event, id) => {
+  const session = store.list().find((candidate) => candidate.id === id)
+  if (!session) {
+    lastFocusedSessionId = null
+    midiController?.select(null)
+    return false
+  }
+  lastFocusedSessionId = id
+  midiController?.select(id)
+  return true
+})
+ipcMain.handle('get-voice', () => voiceStatus())
+ipcMain.handle('toggle-voice', () => toggleVoicePrompt())
 ipcMain.handle('capture-preview', (_e, id) => queueCapture(id))
 ipcMain.handle('get-displays', () => displayTopology())
 ipcMain.handle('get-companions', () => companions.getState())
@@ -602,16 +851,41 @@ companions.on('change', () => pushCompanions())
 
 app.whenReady().then(() => {
   store.hydrateTasks(loadTaskCache())
-  if (app.dock) app.dock.hide() // menu-bar utility, no dock icon
+  if (app.dock) app.dock.show()
   const loginItem = ensureLaunchAtLoginPreference()
+  workspace = new WorkspaceService(store, () => connectors)
+  workspace.on('change', (snapshot) => sendToWindows('thread', snapshot))
   createWindow()
+  createWorkspaceWindow()
   createTray()
-  midiController = createMidiController(store, { onPadPress: queueFocus })
+  const prefs = loadPrefs()
+  voiceInput = createVoiceInput({
+    tempRoot: app.getPath('temp'),
+    onTranscript: sendVoicePrompt
+  })
+  voiceInput.onStatus((status) => {
+    midiController?.setVoiceActive(status.recording)
+    pushVoice()
+  })
+  midiController = createMidiController(store, {
+    onPadPress: selectWorkspaceSession,
+    onAction: handleMidiAction,
+    onRecordStart: startVoicePrompt,
+    onRecordStop: stopVoicePrompt,
+    onRecordUnavailable: ({ column }) => {
+      voiceInput?.reportError(new Error(`Record Arm ${column + 1} has no selected live agent. Select a blue, green, or red APC pad in that column first.`))
+    },
+    mappings: prefs.apc40Mappings,
+    onMappingsChange: (apc40Mappings) => savePrefs({ ...loadPrefs(), apc40Mappings })
+  })
   midiController.onStatus((status) => {
-    console.log(`[midi] APC40 ${status.connected ? `connected: ${status.device}` : `disconnected${status.error ? `: ${status.error}` : ''}`}`)
+    console.log(`[midi] APC40 MKII ${status.connected ? `connected: ${status.device}` : `disconnected${status.error ? `: ${status.error}` : ''}`}`)
     tray?.setContextMenu(buildTrayMenu())
+    pushMidi()
   })
   midiController.start()
+  pushVoice()
+  void refreshConnectors()
   startServer(store, {
     focusById: queueFocus,
     onTaskText: (id, text) => {
@@ -627,11 +901,13 @@ app.whenReady().then(() => {
   })
   companions.start()
   usage.start()
-  console.log(`[claude-controller] accessibility granted: ${accessibilityGranted(false)}`)
-  console.log(`[claude-controller] launch at login: ${loginItem.openAtLogin} (${loginItem.status})`)
+  console.log(`[agentbase] accessibility granted: ${accessibilityGranted(false)}`)
+  console.log(`[agentbase] launch at login: ${loginItem.openAtLogin} (${loginItem.status})`)
   // Reflect permission changes (user granting it in Settings) into the UI.
   const sysTimer = setInterval(pushSys, 3000)
   if (sysTimer.unref) sysTimer.unref()
+  const historyTimer = setInterval(() => pushWorkspaceThreads(true), 30_000)
+  if (historyTimer.unref) historyTimer.unref()
   screen.on('display-added', pushDisplays)
   screen.on('display-removed', pushDisplays)
   screen.on('display-metrics-changed', pushDisplays)
@@ -639,4 +915,5 @@ app.whenReady().then(() => {
 
 // Tray app — closing the window doesn't quit.
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); discovery?.stop(); midiController?.stop(); companions.stop(); usage.stop() })
+app.on('activate', () => showWorkspace())
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); companions.stop(); usage.stop() })

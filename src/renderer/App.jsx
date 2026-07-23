@@ -1,15 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { AgentIcon } from './AgentIcon.jsx'
-
-const AGENT = {
-  claude: { name: 'Claude Code' },
-  codex: { name: 'Codex' },
-  kimi: { name: 'Kimi' }
-}
-
-function agentMeta (a) {
-  return AGENT[a] || { name: a || 'agent' }
-}
+import { sessionLabels } from './session-labels.mjs'
 
 function fmtElapsed (ms) {
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -99,26 +90,9 @@ function stateHint (s) {
   return STATE_HINT[s.state] || s.state
 }
 
-function taskMeta (s) {
-  if (s.task) return { text: s.task, placeholder: false }
-  return {
-    text: s.state === 'running' ? 'Capturing task…' : 'No task captured',
-    placeholder: true
-  }
-}
-
-function terminalName (project) {
-  const value = String(project || '').trim()
-  // Agent tools sometimes chdir into a versioned plugin cache. A bare version
-  // is implementation noise, never a useful terminal identity.
-  if (/^v?\d+(?:\.\d+){1,3}(?:[-+][a-z0-9.-]+)?$/i.test(value)) return ''
-  return value
-}
-
 const USAGE_PROVIDERS = [
   { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'kimi', label: 'Kimi' }
+  { id: 'codex', label: 'Codex' }
 ]
 
 function shortQuotaLabel (label) {
@@ -264,10 +238,81 @@ function DisplayRoute ({ topology, onChoose }) {
   )
 }
 
+function ConnectorStrip ({ connectors, onInstall, onOpen, onRefresh }) {
+  return (
+    <section className="connectors" aria-label="Local agent connections">
+      <div className="connectors__header">
+        <span>local agents</span>
+        <button type="button" onClick={onRefresh}>refresh</button>
+      </div>
+      <div className="connectors__list">
+        {connectors.length === 0 && <div className="connectors__loading">Checking Claude Code, Codex, and Hermes…</div>}
+        {connectors.map((connector) => (
+          <div className="connector" key={connector.id} data-ready={connector.ready}>
+            <AgentIcon agent={connector.id} />
+            <span className="connector__identity">
+              <b>{connector.label}</b>
+              <span>{connector.ready ? 'Connected' : connector.installed ? 'Needs AgentBase hook' : 'Not installed'}</span>
+            </span>
+            <button
+              type="button"
+              disabled={!connector.installed}
+              onClick={() => connector.ready ? onOpen(connector.id) : onInstall()}
+            >
+              {connector.ready ? 'Open' : connector.installed ? 'Connect' : 'Missing'}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function midiBindingLabel (key) {
+  const [type, channel, number] = String(key || '').split(':')
+  if (!type || number === undefined) return ''
+  return `${type === 'note' ? 'Note' : 'CC'} ${number} · Ch ${Number(channel) + 1}`
+}
+
+function MidiMappingPanel ({ midi, onClose }) {
+  const bindings = new Map()
+  for (const [key, action] of Object.entries(midi?.mappings || {})) bindings.set(action, midiBindingLabel(key))
+  return (
+    <section className="midi-map" aria-label="APC40 MKII mappings">
+      <div className="midi-map__header">
+        <span className="midi-map__device">
+          <span className="midi-map__device-dot" data-connected={Boolean(midi?.connected)} />
+          <span><b>Akai APC40 MKII</b><small>{midi?.connected ? 'Connected · Alternate Ableton mode' : 'Connect the APC40 MKII to begin'}</small></span>
+        </span>
+        <button type="button" onClick={onClose}>Done</button>
+      </div>
+      <p className="midi-map__hint">
+        The 5×8 clip grid selects sessions by default. Learn any other APC40 MKII button, knob, or fader to an AgentBase action.
+      </p>
+      <div className="midi-map__actions">
+        {(midi?.actions || []).map((action) => {
+          const learning = midi?.learningAction === action.id
+          const binding = bindings.get(action.id)
+          return (
+            <div className="midi-action" key={action.id} data-learning={learning}>
+              <span><b>{action.label}</b><small>{learning ? 'Touch a control on the APC40 MKII…' : binding || 'Unmapped'}</small></span>
+              {binding && !learning && <button type="button" className="midi-action__clear" onClick={() => window.controller.midiClearAction(action.id)}>Clear</button>}
+              <button type="button" className="midi-action__learn" disabled={!midi?.connected} onClick={() => learning ? window.controller.midiCancelLearn() : window.controller.midiLearn(action.id)}>
+                {learning ? 'Cancel' : 'Learn'}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      {Object.keys(midi?.mappings || {}).length > 0 && (
+        <button className="midi-map__reset" type="button" onClick={() => window.controller.midiResetMappings()}>Reset learned mappings</button>
+      )}
+    </section>
+  )
+}
+
 function Pad ({ s, now, standby, selected, companion, capturing, onFocus, onCapture, onToggleStandby, onCompanionPress, onCompanions }) {
-  const meta = agentMeta(s.agent)
-  const task = taskMeta(s)
-  const name = terminalName(s.project)
+  const labels = sessionLabels(s)
   const elapsed = fmtElapsed(now - s.since)
   const displayState = standby ? 'standby' : stateHint(s)
   const cls = ['pad', `pad--${s.state}`, standby ? 'pad--standby' : '', selected ? 'pad--selected' : '', s.unseen && !standby && !selected ? 'pad--unseen' : ''].join(' ').trim()
@@ -291,13 +336,13 @@ function Pad ({ s, now, standby, selected, companion, capturing, onFocus, onCapt
       <button
         className={cls}
         onClick={() => onFocus(s.id)}
-        title={`${meta.name}${name ? ` — ${name}` : ''}\n${task.text}\n${s.cwd || ''}\n${displayState} · ${elapsed}${s.summary ? `\n\n${s.summary}` : ''}`}
+        title={`${labels.primary}\n${labels.secondary}\n${s.cwd || ''}\n${displayState} · ${elapsed}${s.summary ? `\n\n${s.summary}` : ''}`}
       >
         <span className="pad__light" />
         <AgentIcon agent={s.agent} />
         <span className="pad__content">
-          {name && <span className="pad__project">{name}</span>}
-          <span className={`pad__task${task.placeholder ? ' pad__task--placeholder' : ''}`}>{task.text}</span>
+          <span className="pad__project">{labels.primary}</span>
+          <span className={`pad__task${labels.placeholder ? ' pad__task--placeholder' : ''}`}>{labels.secondary}</span>
         </span>
         <span className="pad__meta">
           <span className="pad__state">{displayState}</span>
@@ -308,7 +353,7 @@ function Pad ({ s, now, standby, selected, companion, capturing, onFocus, onCapt
         <button
           className={`pad__capture${capturing ? ' pad__capture--busy' : ''}`}
           type="button"
-          aria-label={`Capture ${configuredCompanions.length > 1 ? 'linked previews' : 'linked preview'} and attach ${configuredCompanions.length > 1 ? 'them' : 'it'} to ${meta.name}`}
+          aria-label={`Capture ${configuredCompanions.length > 1 ? 'linked previews' : 'linked preview'} and attach ${configuredCompanions.length > 1 ? 'them' : 'it'} to ${labels.provider}`}
           title={`Capture ${configuredCompanions.length > 1 ? 'linked previews' : 'linked preview'} and attach without sending`}
           disabled={capturing}
           onPointerDown={(event) => event.stopPropagation()}
@@ -337,7 +382,7 @@ function Pad ({ s, now, standby, selected, companion, capturing, onFocus, onCapt
       <button
         className={`pad__standby${standby ? ' pad__standby--active' : ''}`}
         type="button"
-        aria-label={`${standby ? 'Resume live status for' : 'Put on standby:'} ${s.project}`}
+        aria-label={`${standby ? 'Resume live status for' : 'Put on standby:'} ${labels.primary}`}
         aria-pressed={standby}
         title={standby ? 'Resume live status' : 'Set to standby'}
         onPointerDown={(event) => event.stopPropagation()}
@@ -357,6 +402,10 @@ export default function App () {
   const [usage, setUsage] = useState(null)
   const [displays, setDisplays] = useState(null)
   const [companions, setCompanions] = useState({ bySession: {} })
+  const [connectors, setConnectors] = useState([])
+  const [midi, setMidi] = useState({ connected: false, model: 'Akai APC40 MKII', actions: [], mappings: {} })
+  const [voice, setVoice] = useState({ recording: false, transcribing: false, error: '', transcript: '' })
+  const [showMidiMap, setShowMidiMap] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [installMsg, setInstallMsg] = useState(null)
   const [focusMsg, setFocusMsg] = useState(null)
@@ -375,16 +424,22 @@ export default function App () {
     window.controller.getUsage().then(setUsage)
     window.controller.getDisplays().then(setDisplays)
     window.controller.getCompanions().then(setCompanions)
+    window.controller.getConnectors().then(setConnectors)
+    window.controller.getMidi().then(setMidi)
+    window.controller.getVoice().then(setVoice)
     un = window.controller.onState(setSessions)
     const unUsage = window.controller.onUsage(setUsage)
     const unDisplays = window.controller.onDisplays(setDisplays)
     const unCompanions = window.controller.onCompanions(setCompanions)
+    const unConnectors = window.controller.onConnectors(setConnectors)
+    const unMidi = window.controller.onMidi(setMidi)
+    const unVoice = window.controller.onVoice(setVoice)
     const unInstall = window.controller.onInstaller((p) => {
       setInstallMsg(p.ok ? 'Hooks installed. Restart your agent sessions.' : 'Install failed — see terminal.')
       setTimeout(() => setInstallMsg(null), 6000)
     })
     const unSys = window.controller.onSys((p) => setNeedsAccess(!p.accessibility))
-    return () => { un(); unUsage(); unDisplays(); unCompanions(); unInstall(); unSys() }
+    return () => { un(); unUsage(); unDisplays(); unCompanions(); unConnectors(); unMidi(); unVoice(); unInstall(); unSys() }
   }, [])
 
   // Ticking clock so elapsed times stay live.
@@ -418,6 +473,7 @@ export default function App () {
 
   const needy = sessions.filter((s) => s.state !== 'running').length
   const groupedSessions = stableGroupSessions(sessions, padLayoutRef.current)
+  const agentsReady = connectors.length > 0 && connectors.every((connector) => connector.ready)
 
   const onFocus = async (id) => {
     // Optimistic: drop the unseen pulse immediately.
@@ -486,8 +542,11 @@ export default function App () {
       <div className="app__content" ref={bodyRef}>
         <div className="titlebar">
           <span className="titlebar__dot" data-needy={needy > 0} />
-          <span className="titlebar__label">agents</span>
+          <span className="titlebar__label">AgentBase</span>
           <DisplayRoute topology={displays} onChoose={() => window.controller.showDisplayMenu()} />
+          <button className="titlebar__midi" type="button" data-connected={Boolean(midi?.connected)} onClick={() => setShowMidiMap((value) => !value)}>
+            APC40 <span />
+          </button>
           <span className="titlebar__count">{sessions.length}{needy ? ` · ${needy}!` : ''}</span>
         </div>
 
@@ -497,15 +556,27 @@ export default function App () {
           </button>
         )}
 
-        <UsageStrip usage={usage} now={now} onRefresh={() => window.controller.refreshUsage()} />
+        {showMidiMap ? (
+          <MidiMappingPanel midi={midi} onClose={() => { window.controller.midiCancelLearn(); setShowMidiMap(false) }} />
+        ) : (
+          <>
+            <ConnectorStrip
+              connectors={connectors}
+              onInstall={() => window.controller.installHooks()}
+              onOpen={(agentId) => window.controller.openAgentSetup(agentId)}
+              onRefresh={() => window.controller.refreshConnectors()}
+            />
+            <UsageStrip usage={usage} now={now} onRefresh={() => window.controller.refreshUsage()} />
+          </>
+        )}
 
-        {sessions.length === 0 ? (
+        {!showMidiMap && sessions.length === 0 ? (
           <div className="empty">
             <p className="empty__title">No sessions yet</p>
-            <p className="empty__body">Install the hooks, then restart your Claude&nbsp;Code / Codex / Kimi terminals.</p>
-            <button className="empty__btn" onClick={() => window.controller.installHooks()}>Install hooks</button>
+            <p className="empty__body">{agentsReady ? 'Your agents are connected. Open Claude Code, Codex, or Hermes above to create the first session.' : 'Connect your local agents, then open a Claude Code, Codex, or Hermes terminal.'}</p>
+            {!agentsReady && <button className="empty__btn" onClick={() => window.controller.installHooks()}>Connect local agents</button>}
           </div>
-        ) : (
+        ) : !showMidiMap && (
           <div className="grid">
             {groupedSessions.map((s) => (
               <Pad
@@ -531,6 +602,10 @@ export default function App () {
 
         {installMsg && <div className="toast">{installMsg}</div>}
         {focusMsg && <div className="toast">{focusMsg}</div>}
+        {voice.recording && <div className="toast">● Recording for {voice.sessionLabel || 'selected agent'} — release Record Arm to send.</div>}
+        {voice.transcribing && <div className="toast">Transcribing locally and sending the prompt…</div>}
+        {!voice.recording && !voice.transcribing && voice.error && <div className="toast">Voice prompt failed: {voice.error}</div>}
+        {!voice.recording && !voice.transcribing && voice.transcript && <div className="toast">Voice prompt sent to {voice.sessionLabel || 'the selected agent'}.</div>}
       </div>
       <span
         className="resize-grip resize-grip--left"

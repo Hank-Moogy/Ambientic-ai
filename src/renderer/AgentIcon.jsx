@@ -18,7 +18,7 @@ const ICONS = {
 
 export function AgentIcon ({ agent }) {
   const icon = ICONS[agent]
-  if (!icon) return <span className="agent-icon agent-icon--unknown" aria-label={agent || 'Agent'}>?</span>
+  if (!icon) return <span className="agent-icon agent-icon--unknown" aria-label={agent || 'Agent'}>{String(agent || '?').slice(0, 1).toUpperCase()}</span>
   return (
     <svg className="agent-icon" viewBox="0 0 24 24" role="img" aria-label={icon.title}>
       <title>{icon.title}</title>

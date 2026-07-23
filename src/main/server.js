@@ -62,14 +62,14 @@ export function startServer (store, { focusById, onTaskText } = {}) {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`[claude-controller] port ${PORT} already in use — another instance running?`)
+      console.error(`[agentbase] port ${PORT} already in use — another instance running?`)
     } else {
-      console.error('[claude-controller] server error:', err.message)
+      console.error('[agentbase] server error:', err.message)
     }
   })
 
   server.listen(PORT, '127.0.0.1', () => {
-    console.log(`[claude-controller] ingest listening on http://127.0.0.1:${PORT}`)
+    console.log(`[agentbase] ingest listening on http://127.0.0.1:${PORT}`)
   })
 
   return server

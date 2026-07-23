@@ -1,20 +1,27 @@
 #!/bin/sh
-# Vibe Controller hook installer.
+# AgentBase hook installer.
 # Registers the lifecycle hook into every coding agent found on this machine:
 #   Claude Code (~/.claude/settings.json), Codex CLI (~/.codex/hooks.json),
-#   Kimi Code CLI (~/.kimi-code/config.toml).
-# Override auto-detection with CC_AGENTS=claude,codex,kimi (comma list).
+#   Kimi Code CLI (~/.kimi-code/config.toml), and Hermes Agent
+#   (~/.hermes/plugins/agentbase).
+# Override auto-detection with CC_AGENTS=claude,codex,kimi,hermes (comma list).
 set -e
 
 command -v python3 >/dev/null 2>&1 || { echo "✗ needs python3 on PATH"; exit 1; }
 
-CC_DIR="$HOME/.claude-controller"
-mkdir -p "$CC_DIR"
+AGENTBASE_DIR="$HOME/.agentbase"
+mkdir -p "$AGENTBASE_DIR"
 
 # Copy the hook next to a stable home so it survives the repo moving.
 SRC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cp "$SRC_DIR/controller-hook.py" "$CC_DIR/hook.py"
-chmod +x "$CC_DIR/hook.py"
+cp "$SRC_DIR/controller-hook.py" "$AGENTBASE_DIR/hook.py"
+chmod +x "$AGENTBASE_DIR/hook.py"
+
+# Hermes loads a small, explicit local plugin so its native lifecycle callbacks
+# feed the same normalized hook used by Claude and Codex.
+mkdir -p "$HOME/.hermes/plugins/agentbase"
+cp "$SRC_DIR/hermes-plugin/plugin.yaml" "$HOME/.hermes/plugins/agentbase/plugin.yaml"
+cp "$SRC_DIR/hermes-plugin/__init__.py" "$HOME/.hermes/plugins/agentbase/__init__.py"
 
 # ── which agents to hook up ──────────────────────────────────────────────────
 if [ -z "${CC_AGENTS:-}" ]; then
@@ -25,8 +32,10 @@ if [ -z "${CC_AGENTS:-}" ]; then
   if [ -d "$HOME/.codex" ] || command -v codex >/dev/null 2>&1; then
     CC_AGENTS="${CC_AGENTS:+$CC_AGENTS,}codex"
   fi
-  if [ -d "${KIMI_CODE_HOME:-$HOME/.kimi-code}" ] || command -v kimi >/dev/null 2>&1; then
-    CC_AGENTS="${CC_AGENTS:+$CC_AGENTS,}kimi"
+  # Kimi remains supported when explicitly requested through CC_AGENTS, but
+  # the personal AgentBase setup is intentionally Claude + Codex + Hermes.
+  if [ -d "$HOME/.hermes" ] || /bin/zsh -lic 'command -v hermes >/dev/null 2>&1'; then
+    CC_AGENTS="${CC_AGENTS:+$CC_AGENTS,}hermes"
   fi
   [ -n "$CC_AGENTS" ] || CC_AGENTS="claude"
 fi
@@ -34,8 +43,9 @@ fi
 CC_AGENTS="$CC_AGENTS" python3 - <<'PYEOF'
 import json, os, shutil
 
-cc_dir = os.path.join(os.path.expanduser("~"), ".claude-controller")
-hook = os.path.join(cc_dir, "hook.py")
+agentbase_dir = os.path.join(os.path.expanduser("~"), ".agentbase")
+hook = os.path.join(agentbase_dir, "hook.py")
+legacy_hook = os.path.join(os.path.expanduser("~"), ".claude-controller", "hook.py")
 quoted = '"%s"' % hook
 
 agents = [a.strip().lower() for a in os.environ.get("CC_AGENTS", "claude").split(",") if a.strip()]
@@ -60,6 +70,17 @@ def add_json_hooks(path, cmd):
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             settings = json.load(f)  # raises on bad JSON — we won't clobber it
+    original = settings
+    def migrate(value):
+        if isinstance(value, dict):
+            return {k: migrate(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [migrate(v) for v in value]
+        if isinstance(value, str):
+            return value.replace(legacy_hook, hook)
+        return value
+    settings = migrate(settings)
+    migrated = settings != original
     hooks = settings.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise RuntimeError('"hooks" is not an object — fix %s and re-run' % path)
@@ -77,7 +98,7 @@ def add_json_hooks(path, cmd):
         if not already:
             groups.append({"hooks": [{"type": "command", "command": cmd}]})
             added += 1
-    if added:
+    if added or migrated:
         backup(path)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2)
@@ -85,6 +106,7 @@ def add_json_hooks(path, cmd):
 
 
 def kimi_missing(existing):
+    existing = existing.replace(legacy_hook, hook)
     try:
         import tomllib
         ours = {h.get("event") for h in tomllib.loads(existing).get("hooks", [])
@@ -127,10 +149,16 @@ if "kimi" in agents:
         if os.path.exists(cfg):
             with open(cfg, encoding="utf-8") as f:
                 existing = f.read()
+        migrated = existing.replace(legacy_hook, hook)
+        if migrated != existing:
+            backup(cfg)
+            with open(cfg, "w", encoding="utf-8") as f:
+                f.write(migrated)
+            existing = migrated
         missing = kimi_missing(existing)
         if missing:
             backup(cfg)
-            blocks = ["\n# Vibe Controller hooks"]
+            blocks = ["\n# AgentBase hooks"]
             for ev in missing:
                 blocks.append("\n[[hooks]]\nevent = \"%s\"\ncommand = '%s --agent kimi'\ntimeout = 5"
                               % (ev, hook))
@@ -145,7 +173,23 @@ if "kimi" in agents:
     except Exception as e:
         print("  ✗ Kimi Code — %s" % e)
 
+if "hermes" in agents:
+    try:
+        plugin = os.path.expanduser("~/.hermes/plugins/agentbase/plugin.yaml")
+        if not os.path.exists(plugin):
+            raise RuntimeError("AgentBase Hermes plugin was not copied")
+        print("  ✓ Hermes — ~/.hermes/plugins/agentbase")
+        ok.append("hermes")
+    except Exception as e:
+        print("  ✗ Hermes — %s" % e)
+
 print("")
 print("✅ installed for: %s" % (", ".join(ok) if ok else "(none — see errors above)"))
 print("   restart any running agent sessions to pick up the hooks")
 PYEOF
+
+# Enabling through Hermes' own CLI lets Hermes update its YAML configuration
+# without AgentBase attempting to parse or rewrite unrelated user settings.
+if printf '%s' "$CC_AGENTS" | grep -q 'hermes' && /bin/zsh -lic 'command -v hermes >/dev/null 2>&1'; then
+  /bin/zsh -lic 'hermes plugins enable agentbase' >/dev/null 2>&1 || true
+fi

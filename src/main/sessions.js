@@ -31,7 +31,8 @@ function isTransientAgentCwd (cwd) {
   const value = String(cwd || '')
   return value.includes('/.codex/plugins/cache/') ||
     value.includes('/.claude/plugins/cache/') ||
-    value.includes('/.kimi-code/plugins/cache/')
+    value.includes('/.kimi-code/plugins/cache/') ||
+    value.includes('/.hermes/plugins/')
 }
 
 let SEQ = 0
@@ -221,6 +222,54 @@ export class SessionStore extends EventEmitter {
       const missingDiscoveredEntry = s.discovered && !liveDiscoveryIds.has(id)
       const missingHookTerminal = !s.discovered && s.tty && !liveTtys.has(s.tty)
       if (missingDiscoveredEntry || missingHookTerminal) {
+        this.map.delete(id)
+        changed = true
+      }
+    }
+
+    if (changed) this.emit('change', this.list())
+  }
+
+  syncExternal (source, sessions) {
+    const now = Date.now()
+    const liveIds = new Set(sessions.map((session) => session.id))
+    let changed = false
+
+    for (const incoming of sessions) {
+      const existing = this.map.get(incoming.id)
+      if (!existing) {
+        this.map.set(incoming.id, {
+          ...incoming,
+          seq: SEQ++,
+          since: incoming.updatedAt || now,
+          lastSeen: now,
+          terminalCwd: incoming.cwd || '',
+          transcriptPath: incoming.rolloutPath || '',
+          contextText: '',
+          taskFingerprint: '',
+          taskSource: 'provider-index',
+          unseen: incoming.state === STATE.WAITING || incoming.state === STATE.ATTENTION,
+          discovered: false,
+          externalSource: source
+        })
+        changed = true
+        continue
+      }
+
+      const previousState = existing.state
+      for (const [key, value] of Object.entries(incoming)) {
+        if (existing[key] !== value) { existing[key] = value; changed = true }
+      }
+      existing.lastSeen = now
+      existing.externalSource = source
+      if (previousState !== existing.state) {
+        existing.since = incoming.updatedAt || now
+        existing.unseen = existing.state === STATE.WAITING || existing.state === STATE.ATTENTION
+      }
+    }
+
+    for (const [id, session] of this.map) {
+      if (session.externalSource === source && !liveIds.has(id)) {
         this.map.delete(id)
         changed = true
       }

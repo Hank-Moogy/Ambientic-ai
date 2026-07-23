@@ -355,3 +355,25 @@ delay 0.12
 return "clipboard-image"
 `, 3000)
 }
+
+// Text prompts use the normal macOS paste shortcut. Callers choose whether to
+// leave them for review or follow with submitTerminalPrompt().
+export function pasteClipboardText () {
+  return runAppleScript(`
+tell application "System Events"
+  key code 9 using {command down}
+end tell
+delay 0.12
+return "clipboard-text"
+`, 3000)
+}
+
+export function submitTerminalPrompt () {
+  return runAppleScript(`
+tell application "System Events"
+  key code 36
+end tell
+delay 0.12
+return "prompt-submitted"
+`, 3000)
+}

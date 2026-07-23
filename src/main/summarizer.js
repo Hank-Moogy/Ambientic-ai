@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = process.env.CLAUDE_CONTROLLER_SUMMARY_MODEL || 'amazon/nova-micro-v1'
+const MODEL = process.env.AGENTBASE_SUMMARY_MODEL || process.env.CLAUDE_CONTROLLER_SUMMARY_MODEL || 'amazon/nova-micro-v1'
 const KEYCHAIN_SERVICE = 'com.findmecreators.claudecontroller.openrouter'
 
 let keyPromise = null
@@ -70,7 +70,7 @@ async function remoteLabel (text, fallback) {
     headers: {
       authorization: `Bearer ${key}`,
       'content-type': 'application/json',
-      'x-title': 'Vibe Controller'
+      'x-title': 'AgentBase'
     },
     body: JSON.stringify({
       model: MODEL,

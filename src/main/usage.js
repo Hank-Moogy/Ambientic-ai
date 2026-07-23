@@ -68,7 +68,7 @@ async function resolveCommand (name) {
   const { stdout } = await execFileAsync('/bin/zsh', [
     '-lc',
     'command -v -- "$1"',
-    'claude-controller-resolve',
+    'agentbase-resolve',
     name
   ], { timeout: 5000, maxBuffer: 64 * 1024 })
   const resolved = stdout.trim().split('\n').at(-1)
@@ -125,14 +125,32 @@ export function parseClaudeUsage (stdout) {
 
 async function collectClaude () {
   const command = await resolveCommand('claude')
-  const { stdout } = await execFileAsync(command, [
-    '--safe-mode',
+  const commonArguments = [
     '--no-session-persistence',
     '-p',
     '/usage',
     '--output-format',
     'json'
-  ], { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 })
+  ]
+  let stdout
+  try {
+    ;({ stdout } = await execFileAsync(command, [
+      '--safe-mode',
+      ...commonArguments
+    ], { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 }))
+  } catch (error) {
+    // Recent Claude Code builds removed --safe-mode. Keep the legacy path for
+    // installations that still expose /usage, then retry with an equivalent
+    // no-tools, no-persistence invocation on current builds.
+    if (!/unknown option ['‘’"]?--safe-mode/i.test(`${error?.stderr || ''}\n${error?.message || ''}`)) throw error
+    ;({ stdout } = await execFileAsync(command, [
+      '--permission-mode',
+      'dontAsk',
+      '--tools',
+      '',
+      ...commonArguments
+    ], { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 }))
+  }
   return parseClaudeUsage(stdout)
 }
 
@@ -228,7 +246,7 @@ async function requestCodexRateLimits (command) {
       id: 1,
       method: 'initialize',
       params: {
-        clientInfo: { name: 'claude-controller', version: CONTROLLER_VERSION },
+        clientInfo: { name: 'agentbase', version: CONTROLLER_VERSION },
         capabilities: {}
       }
     })
@@ -277,7 +295,7 @@ async function acquireKimiRefreshLock () {
 
 async function saveKimiCredentials (credentials) {
   const file = kimiCredentialPath()
-  const temporary = `${file}.claude-controller-${process.pid}.tmp`
+  const temporary = `${file}.agentbase-${process.pid}.tmp`
   await mkdir(dirname(file), { recursive: true })
   try {
     await writeFile(temporary, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600 })

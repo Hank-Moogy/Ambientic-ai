@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vibe Controller agent hook — Claude Code, Codex CLI, and Kimi Code CLI.
+"""AgentBase hook — Claude Code, Codex CLI, Kimi, and Hermes.
 
 All three CLIs fire near-identical lifecycle hooks with JSON on stdin. This
 script maps each event to a pad state and fires a detached, best-effort curl to
@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-PORT = int(os.environ.get("CLAUDE_CONTROLLER_PORT", "47600"))
+PORT = int(os.environ.get("AGENTBASE_PORT", os.environ.get("CLAUDE_CONTROLLER_PORT", "47600")))
 URL = "http://127.0.0.1:%d/event" % PORT
 
 # Lifecycle event name -> canonical pad event the controller understands.
@@ -26,6 +26,14 @@ EVENT_MAP = {
     "Notification": "notification",
     "Stop": "stop",
     "SessionEnd": "session_end",
+    # Hermes plugin hook names. Hermes fires on_session_end after every turn;
+    # on_session_finalize is the actual lifecycle end for the terminal session.
+    "on_session_start": "session_start",
+    "pre_llm_call": "prompt",
+    "post_tool_call": "tool",
+    "pre_approval_request": "notification",
+    "on_session_end": "stop",
+    "on_session_finalize": "session_end",
 }
 
 # Terminal GUI apps we walk the process tree looking for (comm -> app label).
@@ -78,7 +86,7 @@ def clean_prompt(text):
 
 def prompt_text(hook):
     """Claude/Codex use a string; Kimi may provide text content blocks."""
-    for key in ("prompt", "text"):
+    for key in ("prompt", "text", "user_message", "message"):
         value = hook.get(key)
         if isinstance(value, list):
             value = "\n".join(
@@ -187,11 +195,11 @@ def main(agent):
 
     # A short reason on Stop/Notification makes the pad tooltip useful.
     if event == "stop":
-        msg = hook.get("last_assistant_message")
+        msg = hook.get("last_assistant_message") or hook.get("response")
         if isinstance(msg, str) and msg.strip():
             payload["summary"] = msg.strip()[:180]
     elif event == "notification":
-        msg = hook.get("message")
+        msg = hook.get("message") or hook.get("description") or hook.get("command")
         if isinstance(msg, str) and msg.strip():
             payload["summary"] = msg.strip()[:180]
 

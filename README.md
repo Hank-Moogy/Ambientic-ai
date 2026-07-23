@@ -1,178 +1,260 @@
-# Vibe Controller
+# AgentBase
 
-A floating, always-on-top **APC40-style pad grid** that monitors every coding-agent
-terminal you have open — Claude Code, Codex, and Kimi — and lets you jump straight
-to the one that needs you.
+AgentBase is a local-first control surface for people working with several AI agents at once. It makes every active agent visible in one calm interface and maps that interface onto physical hardware so switching attention becomes immediate and habitual.
 
-- 🟢 **green** — the agent is working
-- 🔴 **red** — it is ready for the next prompt (including notifications)
+The first product target is a personal macOS cockpit for **Claude Code**, **Codex**, and **Hermes**, controlled from an **Akai APC40 MKII**.
 
-The **menu-bar icon** mirrors the worst state across all sessions (`🔴2` = two need
-you), so you can glance without even looking at the panel. **Click a pad** to bring
-that terminal's window to the front.
+## Long-term vision
 
-## How it works
+AgentBase should become the interface above agent providers:
 
-Each agent CLI fires lifecycle hooks (`SessionStart`, `UserPromptSubmit`,
-`PostToolUse`, `Notification`, `Stop`, `SessionEnd`). A tiny Python hook maps each
-one to a pad state and fires a detached `curl` at a loopback server the app runs on
-`127.0.0.1:47600`. The hook never blocks your agent — worst case it's a no-op.
+- See every active agent, project, task, state, context, and usage signal in one place.
+- Start, resume, interrupt, and supervise agents without navigating between terminal windows.
+- Inspect agent-created files, diffs, localhost websites, simulators, screenshots, and other artifacts visually.
+- Use the best provider for each task without changing the control surface or learned workflow.
+- Map semantic actions to physical controls so repeated operations become muscle memory.
+- Keep a local-first trust model while allowing optional remote access and synchronization later.
 
-The app also scans live foreground terminal jobs, so active Claude Code, Codex,
-and Kimi panes appear even if the controller started after them. Hook events add
-the precise working/ready state. Each pad uses the agent's real logo and shows a
-short current-task label above a fitted project name.
+The product should own the user experience and normalized session model, not provider credentials or private authentication formats. Provider-specific hooks, ACP implementations, SDKs, and CLIs are adapters behind a stable AgentBase interface.
 
-The limits strip above the pads reads the authenticated local accounts every two
-minutes and on demand. It shows Claude's 5-hour, weekly, and model-scoped limits,
-Codex's general and model-scoped weekly buckets, and Kimi's 5-hour and weekly
-limits. Percentages are normalized to "used" so the three providers are directly
-comparable. Quotas above 50% show a compact live reset countdown beneath their
-name. Claude runs its local `/usage` command in safe mode, Codex uses the
-app-server `account/rateLimits/read` method, and Kimi uses its managed usage API.
-Credentials remain in each CLI's own local credential store.
+## Current product increment
 
-The packaged macOS app enables **Launch at Login** on its first run, so the
-controller returns automatically after a restart. The setting can be toggled
-from the Vibe Controller menu-bar menu.
+This increment is deliberately personal and local. It adds the first full AgentBase workspace above the providers while keeping each provider responsible for its own account and credentials.
 
-The controller window is resizable from any edge or corner. Pads reflow into
-content-driven columns as the window grows, and both the chosen window size and
-interface zoom persist across restarts. Use **Interface Size** in the menu-bar
-menu or `⌘+`, `⌘−`, and `⌘0` while the controller is focused.
+### User experience
 
-### Task labels
+1. Open the AgentBase macOS app.
+2. See whether Claude Code, Codex, and Hermes are installed and connected.
+3. Land on an **Overview** command center instead of a conventional chat-history list.
+4. See animated Codex, Claude Code, Hermes, and create-task pads alongside active, needs-input, total-thread, APC40, and provider-consumption signals.
+5. Browse a cross-provider thread mosaic; select any card to open its full transcript, composer, approvals, and artifacts in the preserved **Threads** tab.
+6. Start a managed local task from a provider pad or create-task pad by choosing a provider, working folder, and first prompt; AgentBase uses the provider's existing local login.
+7. Press an APC40 MKII pad to select a live task, then hold that physical column's **Record Arm** button to speak; release it to transcribe and send the prompt to the selected agent.
+8. Use green running, red input-required, and blue idle pad feedback, or open the compact controller for previews, usage, connectors, and MIDI Learn mappings.
 
-`UserPromptSubmit` sends only the cleaned human prompt to the local controller.
-The app immediately creates a local four-word fallback, then asks
-`amazon/nova-micro-v1` through OpenRouter for a clearer 2–5 word label. Results
-are persisted by terminal identity for seven days, requests are serialized, and
-tool events never call the model. On startup, meaningful titles from existing
-Ghostty panes seed labels for agents whose prompts happened before the controller
-opened; generic project-only titles are ignored.
+### Included
 
-The OpenRouter credential is read from the `OPENROUTER_API_KEY` environment
-variable or the macOS Keychain service
-`com.findmecreators.claudecontroller.openrouter`; it is never bundled with the
-app. Prompt text (capped at 4,000 characters) is sent to OpenRouter when this
-feature is enabled.
+- Local macOS Electron application and menu-bar utility.
+- Full desktop workspace with project-grouped task navigation, transcript, shared composer, approval cards, task state, and artifact list.
+- Experimental Overview landing surface with slowly floating provider pads, live metrics, provider-aware task creation, and a dense cross-provider thread mosaic.
+- Overview consumption board with comparable Codex and Claude short/weekly quota meters, reset windows, stale/error states, manual refresh, and local weekly-session activity whenever a provider does not expose usable quota data.
+- Explicit Overview and Threads navigation, preserving the conventional conversation interface as a secondary tab rather than the product's default mental model.
+- Managed Codex conversations through Codex app-server, authenticated by the existing Codex installation.
+- Managed Hermes conversations through Hermes ACP, including streamed messages, tool activity, cancellation, and permission requests.
+- Completed Hermes turns are reconciled against Hermes' local database so dropped ACP chunks cannot leave a partial answer in the transcript.
+- User and assistant messages are selectable, each message has a Copy action, and the thread header can copy the complete human-readable chat without tool payloads.
+- Managed Claude Code turns through the installed Claude CLI with streamed structured output and the existing Claude login.
+- Readable recent Codex conversations plus dormant Claude Code and Hermes conversation history discovered directly from each provider's local store.
+- Separate workspace and hardware indexes: dormant history appears in the desktop workspace but only live/recent actionable sessions occupy APC40 pads.
+- Automatic discovery of Claude Code, Codex, and Hermes terminal processes.
+- Read-only import of the eight most recently active Codex desktop tasks from Codex's local index.
+- Direct `codex://threads/<id>` navigation back to imported Codex desktop tasks.
+- Session cards named from the active task, provider surface, or meaningful project instead of the macOS account folder.
+- Lifecycle events normalized into running, waiting, attention, idle, and ended states.
+- Exact Ghostty pane focus when its TTY AppleScript API is available.
+- Localhost and simulator companion previews.
+- Akai APC40 MKII 5×8 clip-grid session selection and RGB state feedback.
+- Push-to-talk voice prompts from the eight APC40 MKII per-track Record Arm buttons using the Mac microphone and installed Whisper `base` model.
+- APC40 MKII MIDI Learn mappings stored locally.
+- Local connector status and guided provider setup.
+- Existing Claude, Codex, and Kimi compatibility retained while the visible personal scope moves to Claude, Codex, and Hermes.
 
-On Ghostty, clicking a pad maps that agent's TTY directly to Ghostty's native
-AppleScript terminal object. If its owning window is on another physical display,
-the controller moves that whole window onto the controller's display, brings it
-to the front, and focuses the exact split. Windows already on that display are
-left in place. It does not type into the terminal, send process signals, cycle
-panes, or guess from duplicated project names.
+### Not included yet
 
-### Companion previews
+- AgentBase accounts or a cloud backend.
+- Archived/deleted-provider sessions and Claude internal subagent transcripts; the workspace intentionally indexes top-level user conversations only.
+- Rich diff rendering, image galleries, or embedded localhost web previews inside the full workspace; this increment lists touched files and retains the existing companion-preview system.
+- Fully interactive Claude tool approvals inside AgentBase. Claude managed turns currently use the CLI's `acceptEdits` permission mode; unsupported permission prompts are reported and can be continued in the native surface.
+- Windows or Linux support.
+- Generic MIDI-controller output profiles.
+- Public auto-update infrastructure.
+- OpenClaw integration.
 
-With two or more displays connected, a pad press can arrange the project beside
-its terminal:
+## Architecture
 
-- The exact Ghostty pane moves to the display holding Vibe Controller and
-  remains focused for typing.
-- A matching localhost page or emulator is shown on the configured preview
-  display first, so it remains visible when Ghostty receives keyboard focus.
-- Localhost pages auto-link by tracing the listening port back to its process
-  working directory. Expo-launched simulators auto-link when the device and
-  project are explicit in the launch command.
-- The route resolver reads the agent's local prompt/transcript context and the
-  localhost routes already recorded in Chrome's local session files. It ranks
-  those routes by task, tool, file, title, and URL-path evidence. A terminal
-  working on `Aya` therefore selects `/expansion/aya` instead of the project
-  root or another expansion.
-- Browser previews reuse an exact-route Chrome window when one exists, or open
-  one with the same Chrome profile on the preview display. Chrome does not need
-  an extension, so the preview keeps the user's existing login and cookies.
-- The camera control on a linked pad captures only that page or emulator,
-  focuses the exact terminal pane, and pastes the image into Claude Code,
-  Codex, or Kimi without submitting the prompt.
-- Ambiguous emulators stay suggestions. Use the monitor button on a pad to
-  attach one or more previews manually; those choices are remembered by
-  project.
+```text
+Claude hooks ─┐
+Codex hooks  ─┼──> local event server ──> normalized session store ──> React UI
+Hermes plugin ┘                                  │                       │
+                                                 ├──> terminal focus     │
+Process discovery ───────────────────────────────┤                       │
+Codex local task index ──> Codex deep links ────┤                       │
+                                                 ├──> previews           │
+APC40 MKII MIDI input ──> action mappings ──────┴───────────────────────┘
+APC40 MKII MIDI output <── session state and selection LEDs
 
-The header shows the live route (`T2 → P1`). Click it to choose the preview
-display. On a single-display setup, pad presses keep their existing terminal-only
-behavior.
+Codex app-server ─┐
+Claude local CLI ─┼──> normalized workspace bridge ──> transcript / composer / artifacts
+Hermes ACP ───────┘                                      │
+                                                        └──> approvals / interrupt / state
+```
 
-Native macOS fullscreen windows stay in their fullscreen Space; macOS does not
-allow them to be repositioned like ordinary windows. Their exact pane is still
-focused normally.
+The Electron main process owns local system access, session state, connectors, previews, and MIDI. The renderer receives a narrow IPC surface through the preload script. Provider credentials remain in provider-owned local stores.
 
-## Setup
+## APC40 MKII behavior
+
+AgentBase targets the protocol documented for the Akai APC40 MKII:
+
+- The 40 clip-launch pads are MIDI notes `0–39`.
+- APC note numbers begin on the hardware's bottom row; AgentBase reverses the row order so session 1 is always the physical top-left pad.
+- Sessions fill the top row from left to right before moving downward.
+- Select an agent pad, then hold the Record Arm button in that agent's physical column to capture a voice prompt.
+- Release Record Arm to stop, transcribe locally, and send the prompt directly to the selected agent.
+- Record Arm MIDI note `0x30` uses channels 0–7 for columns 1–8; AgentBase validates the selected pad's column before recording.
+- Only the held column's Record Arm LED is on during capture. It turns off immediately on release while transcription continues; the global transport Record button is not used.
+- AgentBase refreshes the complete owned LED surface every three seconds so a connected controller cannot leave an assigned session pad dark after transient MIDI state drift.
+- Pad velocity selects the hardware color.
+- MIDI channel selects solid, pulsing, or blinking animation.
+- Alternate Ableton mode is enabled while AgentBase owns the grid.
+
+Default session colors:
+
+- Green: working.
+- Red: requires user action.
+- Blinking red: requires user action and has not been acknowledged.
+- Blue: idle.
+
+Unassigned APC40 notes and CC controls can be learned as semantic AgentBase actions without replacing the default grid behavior unless the user explicitly maps that control.
+
+## Implementation plan and status
+
+Last updated: 2026-07-22
+
+### Completed
+
+- [x] Floating Electron session grid and menu-bar state.
+- [x] Claude Code, Codex, and Kimi lifecycle hook bridge.
+- [x] Live terminal-process discovery.
+- [x] Exact Ghostty TTY focus and multi-display companion routing.
+- [x] Localhost, Chrome-route, simulator, and screenshot companion support.
+- [x] Claude, Codex, and Kimi usage collectors.
+- [x] APC40 MKII CoreMIDI detection.
+- [x] APC40 MKII 5×8 pad input.
+- [x] APC40 MKII RGB session-state output.
+- [x] APC40 MKII physical hardware smoke test.
+- [x] Initial Hermes process discovery and lifecycle event normalization.
+- [x] Hermes plugin bridge resource added to the hook package.
+- [x] Local connector-status foundation added for Claude, Codex, and Hermes.
+- [x] APC40 MKII semantic mapping model foundation added.
+- [x] Hermes plugin installed and enabled locally through Hermes' supported plugin manager.
+- [x] Connector status, refresh, launch, and installation actions wired through Electron IPC.
+- [x] APC40 MKII Note/CC Learn mappings persisted in local AgentBase preferences.
+- [x] Learned APC40 controls routed to focus, navigation, preview, launch, and window actions.
+- [x] Clean local-agent connector strip and APC40 MKII mapping screen.
+- [x] Product renamed to AgentBase across runtime UI, package metadata, release metadata, logs, and documentation.
+- [x] Claude Code, Codex, and Hermes all detected and reported connected on the development Mac.
+- [x] Local arm64 AgentBase app and DMG packaging.
+- [x] Packaged AgentBase app launched locally and verified through its health endpoint.
+- [x] Recent Codex desktop tasks imported read-only and routed through stable Codex task deep links.
+- [x] APC40 MKII grid reordered from physical top-left to bottom-right.
+- [x] APC40 MKII state palette normalized to green running, red action required, and blue idle.
+- [x] Contextual card naming: task title first, then provider/platform or meaningful project; home-folder usernames are suppressed.
+- [x] Restored the individual-session-per-pad APC40 layout after testing column banking.
+- [x] APC40 MKII per-column Record Arm buttons provide hold-to-record/release-to-send voice prompts for the selected agent.
+- [x] Voice delivery uses the managed AgentBase provider bridge for non-terminal sessions and paste-plus-submit for an already-running terminal agent.
+- [x] Global transport Record no longer latches or controls voice input; per-column Record Arm LEDs mirror only active microphone capture.
+- [x] APC40 MKII full-grid LED heartbeat added, with a physical top-left pad regression test for green running, red input-required, blue idle, and off only when unassigned.
+- [x] Full AgentBase desktop workspace added alongside the compact always-on-top APC40 controller.
+- [x] Project-grouped task navigation, transcript reader, shared prompt composer, error reporting, status, and touched-file artifact panel.
+- [x] Codex app-server bridge for existing-task resume/read, new tasks, streamed item updates, turn interruption, and native approval requests.
+- [x] Hermes ACP bridge for session resume/new/prompt, streamed agent/tool updates, cancellation, and native permission requests.
+- [x] Claude Code local CLI bridge for new/resumed sessions and structured streamed output using the provider's existing local login.
+- [x] APC40 MKII pad presses now select the matching task in the AgentBase workspace; **Open native** preserves direct terminal/Codex navigation.
+- [x] Normal macOS dock/application behavior restored for the full workspace while retaining the menu-bar controller.
+- [x] Provider capability checks distinguish installed/observable agents from agents currently authenticated for managed prompts; invalid Claude login state is surfaced before task creation.
+- [x] Read-only Claude Code history index from top-level `~/.claude/projects/*/*.jsonl` transcripts, with project paths and prompt-derived titles.
+- [x] Read-only Hermes history index from `~/.hermes/state.db`, with stored titles, working directories, message counts, and transcript loading.
+- [x] Dormant Claude and Hermes conversations merged into the desktop workspace without assigning them APC40 hardware pads.
+- [x] Full-workspace grid rows constrained to the native window height so the thread list, transcript, and artifact panel scroll independently.
+- [x] Full workspace now displays recording, transcription, sent, microphone failure, wrong-column, and no-live-target voice feedback.
+- [x] Experimental Overview is now the default landing page, with real provider connection state, account usage, active/attention metrics, APC40 status, and animated provider pads.
+- [x] Provider pads and the create-task pad open the existing managed-task flow with the relevant provider preselected.
+- [x] Cross-provider task mosaic opens the selected conversation in the preserved Threads interface.
+- [x] Stable one-time renderer subscriptions prevent late live Codex discovery from being overwritten by the initial Claude/Hermes history snapshot.
+- [x] Landing-page consumption board added with provider rate-limit percentages, five-hour/weekly buckets, refresh and update state, and seven-day local-activity fallbacks for unavailable quota APIs.
+- [x] Claude usage adapter now tolerates both older `--safe-mode` CLIs and newer Claude Code builds that require a restricted no-tools invocation.
+- [x] Hermes completion now replaces best-effort ACP stream chunks with the canonical saved transcript, preserving full responses across tool-heavy turns.
+- [x] Empty Hermes assistant rows surrounding tool calls are filtered from the conversation view.
+- [x] Transcript selection, per-message Copy, and whole-chat Copy controls added through the local Electron clipboard bridge.
+
+### In progress
+
+- [ ] Evaluate whether the Overview's provider-pad scale, floating motion, metric hierarchy, and mosaic density feel better than a chat-list-first product.
+- [ ] Confirm the green/red/blue palette visually on the connected physical APC40 MKII after this build.
+- [ ] Physically validate per-column Record Arm hold/release, microphone permission, transcription latency, LED feedback, and direct prompt submission across Claude Code, Codex, and Hermes.
+- [ ] Physical validation of learned non-grid APC40 MKII buttons, knobs, and faders.
+- [ ] Restart active agent terminals so every process loads the migrated `~/.agentbase/hook.py` integration.
+- [ ] Validate one real managed prompt and interrupt on each locally authenticated provider after the packaged app relaunch.
+- [ ] Validate Codex and Hermes approval cards against a real tool permission request.
+- [ ] Re-authenticate the local Claude Code installation with `claude /login`; its current credential reports `Invalid API key`, so managed Claude task creation is intentionally disabled until then.
+- [ ] Re-check Claude's native quota endpoint after local re-authentication; the current CLI does not return `/usage` non-interactively, so AgentBase correctly displays Claude's weekly local session activity instead of inventing a percentage.
+
+### Next
+
+- [ ] Add a proper AgentBase application icon.
+- [ ] Bundle a supported recording/transcription runtime so voice prompts do not depend on Homebrew tools in public builds.
+- [ ] Configure Apple notarization for distribution beyond the development Mac.
+- [ ] Add an in-app reconnect message when another older controller process owns port `47600`.
+- [ ] Add history filters, archive controls, and pagination when the local conversation index grows beyond the current recent-session limit.
+- [ ] Add rich unified diffs, image/media previews, and embedded localhost websites to the workspace artifact panel.
+- [ ] Upgrade Claude integration to its supported Agent SDK control protocol if/when that becomes necessary for fully native permission prompts.
+
+### Verification
+
+- `npm test`: 21 tests passing, including per-column APC40 MKII Record Arm press/release parsing, selected-agent/physical-column targeting, contextual session naming, Hermes discovery, Codex desktop lifecycle/deep-link import, state colors, Note/CC mapping, local voice-tool validation, and Hermes partial-stream reconciliation.
+- `npm run build`: production main, preload, and renderer bundles succeed.
+- Full workspace production bundle succeeds with the local Codex app-server, Claude CLI, and Hermes ACP bridges included; no AgentBase credential storage or API-key field is introduced.
+- Packaged GUI smoke confirms the full workspace discovers eight recent Codex tasks, marks this task running, renders top-row-first APC task ordering, and detects the connected APC40 MKII.
+- Final packaged app is running as a single local instance; `/health` returns `{"ok":true,"sessions":8}` and the APC40 MKII is connected.
+- Local history-index verification discovers 12 top-level Claude Code conversations and 7 Hermes conversations; Claude internal `subagents/` transcripts are excluded.
+- Updated packaged app is running with 27 workspace conversations (8 live/recent Codex, 12 Claude Code history, and 7 Hermes history); `/health` continues to report only the 8 sessions assigned to the live APC40 surface by design.
+- Packaged navigation regression: at a 900×600 window, the sidebar is constrained to 315 px with 1,429 px scroll content; a hit-tested mouse click switched threads and a wheel event advanced `scrollTop` to 500. The prior unbounded 69,355 px layout is eliminated.
+- Overview visual smoke uses 27 real local conversations and renders all three provider pads, one active Codex signal, Claude login-required state, Hermes ready state, four top metrics, create-task pad, and cross-provider mosaic.
+- Overview interaction smoke confirms a Codex provider pad preselects Codex in the task dialog, a mosaic card opens its exact conversation, and Overview/Threads tab switching works without creating or modifying a provider task.
+- Consumption-board visual smoke confirms the three provider rows, compact hero metrics, refresh state, dual quota meters, and Hermes weekly-activity fallback fit cleanly above the provider pads at the packaged app's desktop size.
+- Live read-only quota smoke returned Codex's current weekly window successfully (50% used during verification). Claude's current local CLI exposed no usable non-interactive quota window, so its row falls back to locally indexed weekly activity after refresh.
+- The reported Hermes conversation was recovered directly from `state.db` with its complete 4,052-character assistant response; the normalized view contains 13 useful messages and no empty assistant placeholders.
+- Live bridge smoke: Codex app-server initialized and read this exact Codex task with 19 turns; Hermes ACP initialized as `hermes-agent` 0.19.0; Claude CLI authentication check correctly identified the currently invalid local login.
+- Packaged `AgentBase.app` is running, owns the local controller port, responds successfully at `/health`, and detects the connected APC40 MKII.
+- Latest packaged individual-pad build is running and healthy with eight currently discovered sessions; contextual labels remain active, so the active task resolves to `AgentBase — Codex Desktop` while untitled home-folder agents resolve to their provider instead of `samori`.
+- Voice-input implementation now follows the APC40 MKII's track-channel Record Arm protocol and direct-send behavior; physical hold/release validation remains the next step.
+- Latest packaged LED-heartbeat build is running with eight sessions; live inspection confirms the first grid entry is this running Codex task, so physical top-left pad 1 is refreshed green every three seconds.
+- Packaged runtime imported the active `AgentBase` Codex desktop task as `running`; its focus endpoint returned `provider-deep-link` for this exact task.
+- Runtime session ordering currently starts with live terminal agents followed by the active Codex desktop task and recent Codex tasks; up to 40 sessions are addressable from the APC40 grid in top-row-first order.
+- Visual smoke checks completed for the connector dashboard and APC40 MKII Learn interface at the minimum window width.
+- Local connector check: Claude Code connected, Codex connected, Hermes connected.
+- Current runnable app bundle: `release/mac-arm64/AgentBase.app` (not signed or notarized). The latest DMG creation reached the macOS `hdiutil` stage but failed there; the older DMG in `release/` does not contain this workspace increment and should not be used for this build.
+
+## Local development
 
 ```sh
 npm install
-npm run dev          # launches the floating panel + menu-bar icon
+npm run dev
 ```
 
-Then install the hooks into your agents (once):
+Install or update local provider integrations:
 
 ```sh
 npm run install-hooks
-# or from the menu-bar icon → "Install / update agent hooks…"
 ```
 
-New and already-running agent processes are discovered automatically. Restarting
-an agent is only needed after the first hook installation if you want full
-lifecycle colors immediately.
-
-### APC40 mkII hardware
-
-Connect an Akai APC40 mkII before or after launching Vibe Controller. The app
-auto-detects its MIDI input and output ports and maps the first 40 live sessions
-to the 5x8 clip-launch grid in stable session order.
-
-- Green: agent working
-- Red: agent ready; blinking red has not been seen yet
-- Pulsing yellow: agent needs attention
-- Blue: last focused session
-
-Pressing a hardware pad uses the same terminal-focus path as clicking its
-on-screen pad. Connection state and a manual reconnect action are available in
-the menu-bar menu. The connector puts the device in Alternate Ableton mode so
-Vibe Controller owns the grid LEDs while it is running.
-
-### Ghostty requirement
-
-Exact split targeting uses Ghostty's `terminal.tty` AppleScript property. Install
-a Ghostty tip build containing PR #11922 (merged April 20, 2026) or a newer stable
-release that includes it. The controller reports a safe failure instead of trying
-to type, signal, or traverse panes when that API is unavailable.
-
-### macOS permissions
-
-The first time you click a pad, macOS may ask to grant **Accessibility** and
-**Automation** permission to the app (in dev this is "Electron"). Approve it in
-*System Settings → Privacy & Security → Accessibility* — that's what lets it focus
-terminal windows.
-
-## Layout
-
-- Frameless, translucent, floats above everything (incl. fullscreen apps).
-- No dock icon — lives in the menu bar.
-- **Drag** it by the title strip; it remembers where you put it.
-- Menu bar → **Dock top-right** snaps it back to the corner.
-
-## Uninstalling the hooks
-
-The installer backs up each config to `*.cc-backup` before its first edit. To remove,
-delete the `~/.claude-controller/hook.py` entries from:
-
-- `~/.claude/settings.json`
-- `~/.codex/hooks.json`
-- `~/.kimi-code/config.toml`
-
-## Packaging into a .app
+Run tests and build verification:
 
 ```sh
-npm run dist        # builds the distributable into release/ via electron-builder
+npm test
+npm run build
 ```
 
-## Config
+## Local data and permissions
 
-- Port: set `CLAUDE_CONTROLLER_PORT` (default `47600`) — must match on both the app
-  env and the hook.
-- Which agents to install: `CC_AGENTS=claude,codex,kimi npm run install-hooks`.
-- Summary model: set `CLAUDE_CONTROLLER_SUMMARY_MODEL` (default
-  `amazon/nova-micro-v1`).
+- AgentBase preferences and mappings live in Electron's local `userData` directory.
+- The provider integration bridge lives under `~/.agentbase/`. Existing `~/.claude-controller/` references are migrated or accepted for compatibility.
+- Claude, Codex, and Hermes keep ownership of their authentication data.
+- Accessibility permission is required only for focusing terminal windows.
+- Microphone permission is required only while recording voice prompts. Audio is written to a temporary local folder and removed after local Whisper transcription.
+- Screen Recording permission is required only for companion screenshots.
+- This personal voice-input increment resolves Homebrew `ffmpeg` and `whisper` from `/opt/homebrew/bin` or `/usr/local/bin`; the public distribution still needs a bundled runtime.
+
+## Project discipline
+
+`README.md` is the current source of truth for scope and implementation status. Every coding task must update the completed, in-progress, next, and verification information before handoff.
