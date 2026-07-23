@@ -16,6 +16,7 @@ import { createMidiController } from './midi-controller.js'
 import { connectorState, openAgentTerminal } from './connectors.js'
 import { createVoiceInput } from './voice-input.mjs'
 import { WorkspaceService } from './workspace-service.mjs'
+import { normalizeExternalUrl } from './external-url.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -39,6 +40,7 @@ let midiController = null
 let voiceInput = null
 let connectors = []
 let workspace = null
+let pendingWorkspaceSessionId = ''
 
 function sendToWindows (channel, payload) {
   for (const target of [win, workspaceWin]) {
@@ -303,6 +305,10 @@ function createWorkspaceWindow () {
   workspaceWin.once('ready-to-show', () => workspaceWin.show())
   workspaceWin.webContents.on('did-finish-load', () => {
     pushState(); pushSys(); pushUsage(); pushDisplays(); pushCompanions(); pushMidi(); pushVoice(); pushConnectors()
+    if (pendingWorkspaceSessionId) {
+      workspaceWin.webContents.send('workspace-select', pendingWorkspaceSessionId)
+      pendingWorkspaceSessionId = ''
+    }
     const smokeScreenshot = process.env.AGENTBASE_SMOKE_SCREENSHOT
     if (smokeScreenshot && process.env.AGENTBASE_SMOKE_VIEW === 'workspace') {
       setTimeout(async () => {
@@ -413,17 +419,36 @@ function showWorkspace (sessionId = '') {
   if (!workspaceWin || workspaceWin.isDestroyed()) createWorkspaceWindow()
   workspaceWin.show()
   workspaceWin.focus()
-  if (sessionId) workspaceWin.webContents.send('workspace-select', sessionId)
+  if (sessionId) {
+    pendingWorkspaceSessionId = sessionId
+    if (!workspaceWin.webContents.isLoadingMainFrame()) {
+      workspaceWin.webContents.send('workspace-select', sessionId)
+      pendingWorkspaceSessionId = ''
+    }
+  }
   return true
 }
 
-function selectWorkspaceSession (id) {
+async function presentWorkspacePreview (id, { refresh = true } = {}) {
   const session = store.list().find((candidate) => candidate.id === id)
-  if (!session) return false
+  if (!session) return { ok: false, reason: 'not-found' }
+  if (refresh) await companions.refresh()
+  const state = companions.sessionState(session)
+  if (!state.activeCount) return { ok: false, reason: 'no-companion', state }
+  const display = previewDisplay() || workspacePreviewDisplay()
+  if (!display) return { ok: false, reason: 'no-preview-display', state }
+  return { ...(await companions.present(session, display)), state }
+}
+
+async function selectWorkspaceSession (id) {
+  const session = store.list().find((candidate) => candidate.id === id)
+  if (!session) return { ok: false, reason: 'not-found' }
   store.acknowledge(id)
   lastFocusedSessionId = id
   midiController?.select(id)
-  return showWorkspace(id)
+  showWorkspace(id)
+  const preview = await presentWorkspacePreview(id)
+  return { ok: true, sessionId: id, preview }
 }
 
 function runInstaller () {
@@ -506,9 +531,15 @@ ipcMain.handle('copy-text', (_event, text) => {
   clipboard.writeText(String(text || '').slice(0, 2 * 1024 * 1024))
   return true
 })
+ipcMain.handle('open-external-url', (_event, value) => {
+  const url = normalizeExternalUrl(value)
+  if (!url) return false
+  return shell.openExternal(url).then(() => true)
+})
 ipcMain.handle('show-controller', () => { win.showInactive(); return true })
 ipcMain.handle('show-workspace', (_event, id) => showWorkspace(id))
 ipcMain.handle('open-artifact', (_event, path) => shell.openPath(path))
+ipcMain.handle('present-preview', (_event, id) => presentWorkspacePreview(id))
 
 function accessibilityGranted (prompt = false) {
   try { return systemPreferences.isTrustedAccessibilityClient(prompt) } catch { return true }
@@ -561,6 +592,23 @@ function previewDisplay () {
   const topology = displayTopology()
   const display = topology.displays.find((candidate) => candidate.id === topology.previewDisplayId)
   return display ? { id: display.id, workArea: { ...display.workArea } } : null
+}
+
+function workspacePreviewDisplay () {
+  if (!workspaceWin || workspaceWin.isDestroyed()) return null
+  const display = screen.getDisplayMatching(workspaceWin.getBounds())
+  const area = display.workArea
+  const gap = 10
+  const width = Math.max(420, Math.floor(area.width * 0.46))
+  return {
+    id: display.id,
+    workArea: {
+      x: area.x + area.width - width - gap,
+      y: area.y,
+      width,
+      height: area.height
+    }
+  }
 }
 
 function setPreviewDisplay (displayId) {

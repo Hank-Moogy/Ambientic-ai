@@ -23,20 +23,31 @@
   "dependencies": {
     "@julusian/midi": "^3.6.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "build": {
     "appId": "com.findmecreators.agentbase",
     "productName": "AgentBase",
     "npmRebuild": false,
-    "directories": { "output": "release" },
-    "files": ["out/**/*"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*"
+    ],
     "extraResources": [
-      { "from": "hook", "to": "hook" }
+      {
+        "from": "hook",
+        "to": "hook"
+      }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "extendInfo": {
         "LSUIElement": false,
         "NSMicrophoneUsageDescription": "AgentBase records voice prompts locally when you press Record on your APC40 MKII."

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { AgentIcon } from './AgentIcon.jsx'
 import './workspace.css'
 
@@ -24,7 +26,19 @@ function EmptyThread ({ onCreate }) {
   )
 }
 
-function Message ({ item }) {
+function MarkdownLink ({ href, children }) {
+  const external = /^(?:https?:|mailto:)/i.test(href || '')
+  if (!external) return <span className="markdown-link--unavailable" title={href}>{children}</span>
+  return <a href={href} onClick={(event) => { event.preventDefault(); window.controller.openExternalUrl(href) }}>{children}<span aria-hidden="true">↗</span></a>
+}
+
+const markdownComponents = {
+  a: MarkdownLink,
+  input: ({ node: _node, ...props }) => <input {...props} disabled />,
+  img: ({ src, alt }) => <a href={src} onClick={(event) => { event.preventDefault(); window.controller.openExternalUrl(src) }}>{alt || 'Open image'}<span aria-hidden="true">↗</span></a>
+}
+
+function Message ({ item, providerLabel }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     await window.controller.copyText(item.text)
@@ -41,8 +55,8 @@ function Message ({ item }) {
   }
   return (
     <article className="message" data-role={item.role}>
-      <div className="message__role"><span>{item.role === 'user' ? 'You' : 'AgentBase'}</span><button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
-      <div className="message__text">{item.text}</div>
+      <div className="message__role"><span>{item.role === 'user' ? 'You' : providerLabel || 'Agent'}</span><button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
+      <div className="message__text"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{item.text}</Markdown></div>
     </article>
   )
 }
@@ -59,6 +73,16 @@ function CopyThreadButton ({ thread }) {
     setTimeout(() => setCopied(false), 1400)
   }
   return <button type="button" disabled={!thread?.messages?.some((item) => item.role === 'user' || item.role === 'assistant')} onClick={copy}>{copied ? 'Copied' : 'Copy chat'}</button>
+}
+
+function ThreadPreview ({ state, onPresent }) {
+  const previews = state?.active || []
+  if (!previews.length) return <div className="no-artifacts">No linked preview found for this task yet.</div>
+  return (
+    <div className="thread-previews">
+      {previews.map((preview) => <button key={preview.id} type="button" onClick={onPresent}><span>{preview.type === 'browser' ? '◉' : preview.type === 'ios' ? '◇' : '▣'}</span><div><b>{preview.label || 'Agent preview'}</b><small>{preview.detail || (preview.type === 'browser' ? 'Local web preview' : 'Running app preview')}</small></div><em>Show</em></button>)}
+    </div>
+  )
 }
 
 function Approval ({ approval, onResolve }) {
@@ -218,6 +242,7 @@ export default function Workspace () {
   const [midi, setMidi] = useState({ connected: false, model: 'APC40 MKII' })
   const [voice, setVoice] = useState({ recording: false, transcribing: false, error: '', transcript: '', sessionId: '', sessionLabel: '' })
   const [usage, setUsage] = useState(null)
+  const [companions, setCompanions] = useState({ bySession: {} })
   const [view, setView] = useState('overview')
   const [selectedId, setSelectedId] = useState('')
   const [thread, setThread] = useState(null)
@@ -232,8 +257,8 @@ export default function Workspace () {
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
 
   useEffect(() => {
-    Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getUsage()]).then(([state, agents, hardware, voiceState, usageState]) => {
-      setSessions(state); setConnectors(agents); setMidi(hardware); setVoice(voiceState); setUsage(usageState)
+    Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getUsage(), window.controller.getCompanions()]).then(([state, agents, hardware, voiceState, usageState, companionState]) => {
+      setSessions(state); setConnectors(agents); setMidi(hardware); setVoice(voiceState); setUsage(usageState); setCompanions(companionState)
       if (state[0]) setSelectedId(state[0].id)
     })
     const disposers = [
@@ -242,8 +267,9 @@ export default function Workspace () {
       window.controller.onMidi(setMidi),
       window.controller.onVoice(setVoice),
       window.controller.onUsage(setUsage),
+      window.controller.onCompanions(setCompanions),
       window.controller.onThread((value) => value.id === selectedIdRef.current && setThread(value)),
-      window.controller.onWorkspaceSelect(setSelectedId)
+      window.controller.onWorkspaceSelect((id) => { setSelectedId(id); setView('threads') })
     ]
     return () => disposers.forEach((dispose) => dispose?.())
   }, [])
@@ -276,6 +302,7 @@ export default function Workspace () {
   }, [sessions, query])
   const selectedConnector = connectors.find((connector) => connector.id === thread?.provider)
   const canManage = Boolean(thread?.managed && selectedConnector?.manageable !== false)
+  const selectedPreview = companions?.bySession?.[selectedId]
 
   const send = async () => {
     const value = composer.trim()
@@ -308,11 +335,11 @@ export default function Workspace () {
 
       {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onRefreshUsage={() => window.controller.refreshUsage()} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
-          <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions"><CopyThreadButton thread={thread} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
+          <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef}>
             {loading && <div className="loading">Loading local conversation…</div>}
             {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. AgentBase will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
-            {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} />)}
+            {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
           </div>
           <div className="composer-wrap">
             {(voice.recording || voice.transcribing || voice.error || voice.transcript) && <div className="voice-banner" data-tone={voice.error ? 'error' : voice.recording ? 'recording' : 'working'}>
@@ -332,6 +359,7 @@ export default function Workspace () {
       <aside className="artifact-panel">
         <header><span>Context</span><button type="button">···</button></header>
         <section><h3>Task</h3><dl><div><dt>Provider</dt><dd>{thread?.providerLabel || '—'}</dd></div><div><dt>Status</dt><dd><i data-state={thread?.state} />{stateLabel[thread?.state] || '—'}</dd></div><div><dt>Project</dt><dd>{thread?.project || '—'}</dd></div></dl></section>
+        <section><h3>Preview <span>{companions?.bySession?.[selectedId]?.activeCount || 0}</span></h3><ThreadPreview state={companions?.bySession?.[selectedId]} onPresent={() => window.controller.presentPreview(selectedId)} /></section>
         <section><h3>Artifacts <span>{thread?.artifacts?.length || 0}</span></h3>{thread?.artifacts?.length ? <div className="artifacts">{thread.artifacts.map((artifact) => <button key={artifact.path} type="button" title={artifact.path} onClick={() => window.controller.openArtifact(artifact.path)}><span>⌘</span><div><b>{artifact.name}</b><small>{artifact.path}</small></div></button>)}</div> : <div className="no-artifacts">Files touched by the agent appear here.</div>}</section>
         <section className="capabilities"><h3>Connection</h3><p>Provider credentials stay in the provider’s own local store. AgentBase never asks for or copies your API keys.</p></section>
       </aside></>}

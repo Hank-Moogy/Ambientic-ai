@@ -29,7 +29,7 @@ This increment is deliberately personal and local. It adds the first full AgentB
 4. See animated Codex, Claude Code, Hermes, and create-task pads alongside active, needs-input, total-thread, APC40, and provider-consumption signals.
 5. Browse a cross-provider thread mosaic; select any card to open its full transcript, composer, approvals, and artifacts in the preserved **Threads** tab.
 6. Start a managed local task from a provider pad or create-task pad by choosing a provider, working folder, and first prompt; AgentBase uses the provider's existing local login.
-7. Press an APC40 MKII pad to select a live task, then hold that physical column's **Record Arm** button to speak; release it to transcribe and send the prompt to the selected agent.
+7. Press an APC40 MKII pad to open that exact live task in **Threads** and present its linked localhost, iOS, or Android preview; then hold that physical column's **Record Arm** button to speak and release it to transcribe and send.
 8. Use green running, red input-required, and blue idle pad feedback, or open the compact controller for previews, usage, connectors, and MIDI Learn mappings.
 
 ### Included
@@ -43,6 +43,7 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - Managed Hermes conversations through Hermes ACP, including streamed messages, tool activity, cancellation, and permission requests.
 - Completed Hermes turns are reconciled against Hermes' local database so dropped ACP chunks cannot leave a partial answer in the transcript.
 - User and assistant messages are selectable, each message has a Copy action, and the thread header can copy the complete human-readable chat without tool payloads.
+- Agent responses render GitHub-flavored Markdown with larger reading typography, clear heading/list/table hierarchy, blockquotes, task lists, inline and fenced code, safe clickable links, and restrained semantic color.
 - Managed Claude Code turns through the installed Claude CLI with streamed structured output and the existing Claude login.
 - Readable recent Codex conversations plus dormant Claude Code and Hermes conversation history discovered directly from each provider's local store.
 - Separate workspace and hardware indexes: dormant history appears in the desktop workspace but only live/recent actionable sessions occupy APC40 pads.
@@ -53,6 +54,8 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - Lifecycle events normalized into running, waiting, attention, idle, and ended states.
 - Exact Ghostty pane focus when its TTY AppleScript API is available.
 - Localhost and simulator companion previews.
+- APC40 task activation is a complete context switch: exact thread selection, immediate preview rescan, automatic presentation on the configured preview display, and a right-side single-display fallback.
+- The thread header and Context panel show linked preview availability and can present it again on demand.
 - Akai APC40 MKII 5×8 clip-grid session selection and RGB state feedback.
 - Push-to-talk voice prompts from the eight APC40 MKII per-track Record Arm buttons using the Mac microphone and installed Whisper `base` model.
 - APC40 MKII MIDI Learn mappings stored locally.
@@ -69,6 +72,12 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - Generic MIDI-controller output profiles.
 - Public auto-update infrastructure.
 - OpenClaw integration.
+
+## Friend test build
+
+The current prerelease target is **AgentBase 0.8.1 alpha 1** for Apple-silicon Macs (`arm64`). The distributable is a ZIP containing `AgentBase.app`.
+
+This build is ad-hoc signed and integrity-verified, but it is not Apple-notarized yet. A tester may need to move `AgentBase.app` into Applications, Control-click it, choose **Open**, and confirm the macOS warning. Accessibility is needed for terminal focus; microphone and screen-recording permissions are only requested when their corresponding hardware or preview features are used.
 
 ## Architecture
 
@@ -118,7 +127,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic AgentBase acti
 
 ## Implementation plan and status
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 ### Completed
 
@@ -176,11 +185,19 @@ Last updated: 2026-07-22
 - [x] Hermes completion now replaces best-effort ACP stream chunks with the canonical saved transcript, preserving full responses across tool-heavy turns.
 - [x] Empty Hermes assistant rows surrounding tool calls are filtered from the conversation view.
 - [x] Transcript selection, per-message Copy, and whole-chat Copy controls added through the local Electron clipboard bridge.
+- [x] APC40 pad presses now force the workspace into Threads and load the pad's exact normalized session instead of changing a hidden selection behind Overview.
+- [x] Hardware task activation now refreshes companion discovery and presents the matching localhost page or simulator automatically when a confident link exists.
+- [x] Linked previews are visible in the thread header and Context panel, with a secondary-display layout and a right-side single-display presentation fallback.
+- [x] Thread typography increased to a 15 px body size with a relaxed 1.74 line height, wider spacing, shorter readable line length, and clearer user/agent separation.
+- [x] GitHub-flavored Markdown rendering added for headings, emphasis, ordered and unordered lists, tables, blockquotes, task lists, strikethrough, inline code, and fenced code.
+- [x] Web, localhost, and email links are clickable through a protocol-validated Electron bridge; scripts, local files, relative paths, and credential-bearing URLs are rejected.
+- [x] Message role labels now identify the actual provider (Codex, Claude Code, or Hermes) instead of labeling every response as AgentBase.
 
 ### In progress
 
 - [ ] Evaluate whether the Overview's provider-pad scale, floating motion, metric hierarchy, and mosaic density feel better than a chat-list-first product.
 - [ ] Confirm the green/red/blue palette visually on the connected physical APC40 MKII after this build.
+- [ ] Physically validate exact pad-to-thread switching and preview presentation for one live localhost task on the connected APC40 MKII.
 - [ ] Physically validate per-column Record Arm hold/release, microphone permission, transcription latency, LED feedback, and direct prompt submission across Claude Code, Codex, and Hermes.
 - [ ] Physical validation of learned non-grid APC40 MKII buttons, knobs, and faders.
 - [ ] Restart active agent terminals so every process loads the migrated `~/.agentbase/hook.py` integration.
@@ -201,8 +218,11 @@ Last updated: 2026-07-22
 
 ### Verification
 
-- `npm test`: 21 tests passing, including per-column APC40 MKII Record Arm press/release parsing, selected-agent/physical-column targeting, contextual session naming, Hermes discovery, Codex desktop lifecycle/deep-link import, state colors, Note/CC mapping, local voice-tool validation, and Hermes partial-stream reconciliation.
+- `npm test`: 23 tests passing, including per-column APC40 MKII Record Arm press/release parsing, selected-agent/physical-column targeting, contextual session naming, Hermes discovery, Codex desktop lifecycle/deep-link import, state colors, Note/CC mapping, local voice-tool validation, Hermes partial-stream reconciliation, and safe external-link validation.
 - `npm run build`: production main, preload, and renderer bundles succeed.
+- Pad activation build verification confirms the renderer subscribes to hardware workspace selections, switches to Threads, resolves the selected ID through the existing workspace bridge, refreshes companion candidates, and exposes linked previews through the preload boundary.
+- Real Hermes transcript smoke renders at 15 px/26.1 px line height with four H2 sections, four H3 subsections, six ordered lists, six clickable links, four emphasized spans in the final message, and no visible raw `**` markers.
+- Friend-test archive `AgentBase-0.8.1-alpha.1-mac-arm64.zip` is 96 MB, passes ZIP creation and strict deep code-signature verification, and has SHA-256 `670542ed7e3c36d0a3b0235c37f5ee202881f6f063402fcb1d948f52dc2fd53f`.
 - Full workspace production bundle succeeds with the local Codex app-server, Claude CLI, and Hermes ACP bridges included; no AgentBase credential storage or API-key field is introduced.
 - Packaged GUI smoke confirms the full workspace discovers eight recent Codex tasks, marks this task running, renders top-row-first APC task ordering, and detects the connected APC40 MKII.
 - Final packaged app is running as a single local instance; `/health` returns `{"ok":true,"sessions":8}` and the APC40 MKII is connected.
