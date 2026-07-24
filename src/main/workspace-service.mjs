@@ -346,7 +346,9 @@ export class WorkspaceService extends EventEmitter {
 
   emitSnapshot (snapshot) {
     snapshot.artifacts = [...new Map(snapshot.messages.flatMap((entry) => (entry.files || []).map((path) => [path, { path, name: basename(path), kind: 'file' }]))).values()]
-    snapshot.approvals = [...this.pendingApprovals.values()].filter((approval) => approval.sessionId === snapshot.id)
+    snapshot.approvals = [...this.pendingApprovals.values()]
+      .filter((approval) => approval.sessionId === snapshot.id)
+      .map(({ rpc: _rpc, resolve: _resolve, timer: _timer, requestId: _requestId, suggestions: _suggestions, ...approval }) => approval)
     // State has one owner. Callers set `running`/`error`/`messages`; the state
     // is always derived here so live snapshots and list()/read() cannot diverge.
     snapshot.state = this.effectiveState(this.sessionFor(snapshot.id), snapshot)
@@ -532,7 +534,8 @@ export class WorkspaceService extends EventEmitter {
       id, provider, sessionId, method: request.method,
       title: request.params?.reason || request.params?.toolCall?.title || request.params?.command || 'Permission requested',
       detail: request.params?.command || request.params?.toolCall?.rawInput || request.params?.reason || '',
-      options: request.params?.options || []
+      options: request.params?.options || [],
+      canRemember: provider === 'codex'
     }
     this.pendingApprovals.set(id, { ...approval, rpc, requestId: request.id })
     this.ingestLifecycle(sessionId, 'notification')
@@ -541,17 +544,73 @@ export class WorkspaceService extends EventEmitter {
     if (snapshot) this.emitSnapshot({ ...snapshot })
   }
 
+  requestExternalApproval (provider, event, explicitSessionId = '') {
+    const providerSessionId = explicitSessionId || event.session_id || ''
+    const sessionId = this.uiSessionId(provider, providerSessionId)
+    const session = this.sessionFor(sessionId)
+    if (!session) return Promise.resolve(null)
+    const id = `${provider}:${randomUUID()}`
+    const suggestions = Array.isArray(event.permission_suggestions) ? event.permission_suggestions : []
+    const toolInput = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {}
+    const detail = toolInput.command || toolInput.file_path || toolInput.path || toolInput.url || toolInput
+    const approval = {
+      id,
+      provider,
+      sessionId,
+      method: 'PermissionRequest',
+      title: event.tool_name || 'Claude Code tool',
+      detail,
+      options: [],
+      canRemember: suggestions.length > 0
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.pendingApprovals.has(id)) return
+        this.pendingApprovals.delete(id)
+        const current = this.snapshots.get(sessionId)
+        if (current) this.emitSnapshot({ ...current })
+        resolve(null)
+      }, 9 * 60 * 1000)
+      timer.unref?.()
+      this.pendingApprovals.set(id, { ...approval, suggestions, resolve, timer })
+      const snapshot = this.snapshots.get(sessionId) || this.baseSnapshot(session)
+      this.emitSnapshot({ ...snapshot })
+    })
+  }
+
   async resolveApproval (approvalId, allow, remember = false) {
     const approval = this.pendingApprovals.get(approvalId)
     if (!approval) return false
     if (approval.provider === 'hermes') {
       const option = approval.options.find((item) => allow ? /allow|approve/i.test(`${item.kind} ${item.name}`) : /reject|deny/i.test(`${item.kind} ${item.name}`)) || approval.options[allow ? 0 : approval.options.length - 1]
       approval.rpc.respond(approval.requestId, { outcome: option ? { outcome: 'selected', optionId: option.optionId } : { outcome: 'cancelled' } })
+    } else if (approval.provider === 'claude') {
+      if (approval.timer) clearTimeout(approval.timer)
+      const decision = allow
+        ? {
+            hookSpecificOutput: {
+              hookEventName: 'PermissionRequest',
+              decision: {
+                behavior: 'allow',
+                ...(remember && approval.suggestions?.length ? { updatedPermissions: approval.suggestions } : {})
+              }
+            }
+          }
+        : {
+            hookSpecificOutput: {
+              hookEventName: 'PermissionRequest',
+              decision: {
+                behavior: 'deny',
+                message: 'The user denied this request in Ambientic.'
+              }
+            }
+          }
+      approval.resolve(decision)
     } else {
       approval.rpc.respond(approval.requestId, { decision: allow ? (remember ? 'acceptForSession' : 'accept') : 'decline' })
     }
     this.pendingApprovals.delete(approvalId)
-    this.ingestLifecycle(approval.sessionId, this.activeTurns.has(approval.sessionId) ? 'tool' : 'stop_idle')
+    this.ingestLifecycle(approval.sessionId, (approval.provider === 'claude' && allow) || this.activeTurns.has(approval.sessionId) ? 'tool' : 'stop_idle')
     const snapshot = this.snapshots.get(approval.sessionId)
     if (snapshot) this.emitSnapshot({ ...snapshot })
     return true

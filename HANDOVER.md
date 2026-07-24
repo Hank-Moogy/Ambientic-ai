@@ -1,114 +1,136 @@
 <!-- ambientic-handover -->
-# Ambientic handover
+# vibe-controller handover
 
-Generated: 2026-07-24
-Source: Codex  
-Suggested next provider: Claude Code  
-Project: `/Users/samori/vibe-controller`
+Generated: 2026-07-24T13:23:19.041Z
+Source provider: claude
+Source task: Ok now can you
+Reason: 100% used · Current session
 
-## Mission
+## Continue from here
 
-Ambientic is a local-first macOS control surface above Codex, Claude Code, and Hermes. It unifies tasks, transcripts, provider usage, artifacts, previews, and native Akai APC40 MKII / APC mini mk2 hardware workflows without owning provider credentials.
+Work in `/Users/samori/vibe-controller`. Read this file, inspect the working tree, and continue the current objective. Preserve existing uncommitted work. Do not ask for the prior chat, and do not spend a turn re-summarizing this handover unless the repository contradicts it.
 
-The current product direction is to make the first encounter with Ambientic feel as intentional as the long-term agentic-engineering workflow. A native four-screen onboarding now introduces the field, captures a local display name, connects existing providers or starts a first task, and optionally wakes a MIDI controller before revealing Overview. The same increment restores manual Overview usage refresh and replaces Claude's obsolete print-mode `/usage` polling with a privacy-bounded local status-line quota bridge.
+## Product direction
+
+Ambientic should become the interface above agent providers:
+
+- See every active agent, project, task, state, context, and usage signal in one place.
+- Start, resume, interrupt, and supervise agents without navigating between terminal windows.
+- Inspect agent-created files, diffs, localhost websites, simulators, screenshots, and other artifacts visually.
+- Use the best provider for each task without changing the control surface or learned workflow.
+- Map semantic actions to physical controls so repeated operations become muscle memory.
+- Keep a local-first trust model while allowing optional remote access and synchronization later.
+- Help users improve their agentic engineering through continuity coaching, prompt and workflow insights, skill suggestions, and provider-neutral best practices derived from their own work.
+
+The product should own the user experience and normalized session model, not provider credentials or private authentication formats. Provider-specific hooks, ACP implementations, SDKs, and CLIs are adapters behind a stable Ambientic interface.
 
 ## Current objective
 
-The first production-shaped handover, provider account flows, and persistent consumption ledger are implemented. The current creative increment establishes `ART_DIRECTION.md` and adds an Overview Vibe control that plays a temporary ambient lighting composition on either supported APC before restoring operational LEDs.
+Ok now can you
 
-## What is already working
+## Completed and material state
 
-- Full Electron workspace plus compact APC40 MKII controller.
-- Managed Codex via app-server, Hermes via ACP, and Claude Code via its local CLI.
-- Cross-provider history, normalized task states, transcripts, Markdown rendering, artifacts, localhost/simulator previews, and prompt sending.
-- Provider consumption collection in `src/main/usage.js`:
-  - Codex through `account/rateLimits/read`.
-  - Claude through cached `rate_limits` emitted by Claude Code's local status-line payload after real agent activity; Ambientic never submits a quota prompt.
-  - Kimi remains in the legacy usage adapter but is not part of the current visible product scope.
-- Overview's compact provider-balance card again has a refresh button with in-progress feedback. Claude's row exposes a specific setup/staleness reason when no safe quota observation exists.
-- `hook/claude-statusline.py` persists only normalized five-hour/seven-day usage and reset times in `~/.ambientic/claude-usage.json`. The installer adds it only when no custom Claude status line exists, preserving user configuration.
-- Full-screen first-run mode lives in `src/renderer/Workspace.jsx` and `src/renderer/onboarding.css`: Welcome → local name → provider field/first task → optional MIDI controller → Overview.
-- First-run state persists in Ambientic preferences through narrow IPC. It can be reset from Settings or `⌘⇧O`; `AMBIENTIC_STATE_DIR` enables isolated repeatable visual tests.
-- Kimi Code is now a detected account-only connector with the official `kimi login` setup command and install guide. It is intentionally excluded from managed-task choices until a real Kimi conversation bridge exists.
-- A disconnected→connected native MIDI transition starts the existing cold Vibe composition automatically for either APC40 MKII or APC mini mk2 and restores operational LEDs when the phrase ends.
-- `ART_DIRECTION.md` now defines onboarding as a minimalist game introduction plus ambient instrument, with single decisions, large type, calm spatial motion, and reduced-motion parity.
-- The supplied orbital artwork is now Ambientic's durable identity mark and macOS icon. It appears in onboarding, workspace/compact chrome, loading and empty states, and the Dock on a cool-white field that preserves black-mark contrast.
-- The package, bundle ID, display strings, docs, logs, and provider client labels use Ambientic. Existing Electron state is copied from the legacy application directory on first launch; hooks now install to `~/.ambientic/` with old hook/quota locations retained only as migration fallbacks.
-- `src/main/consumption-ledger.mjs` persists normalized capacity snapshots and events in Electron user data, detects exact Codex reset use from allowance and quota transitions, distinguishes natural renewals, and tracks provider credit balance deltas.
-- Settings → Usage & Billing contains the quota board and AI usage/spend-signals history with recent local activity, reset/limit counters, observed credit usage, and explicit provider coverage boundaries. Overview is intentionally agent-focused again.
-- `ART_DIRECTION.md` defines Ambientic’s fluid, aerial, ambient visual and physical-interaction language; `AGENTS.md` requires it to be revisited for material creative changes.
-- Overview Vibe cycles between cold center-wave and cold-orbit studies. It now sends only changed LEDs at a 60 ms cadence with slower phase movement and a denser cold palette, reducing visible stepping without saturating MIDI. The hot Game of Life and illumination studies were removed because their hard on/off rhythm conflicted with the ambient direction.
-- A compact Overview provider-balance card restores at-a-glance Codex/Claude quota and Hermes activity without moving detailed usage history or billing out of Settings.
-- Threads sidebar is activity-first instead of project-grouped: a bounded local interaction map keeps the latest conversation opened by the user first, active/provider-recent threads are highlighted in **Recent & active**, and dormant history is separated into **Earlier threads** without breaking provider/search filters.
-- Turn state now has one provider-neutral precedence across UI and hardware: error/pending approval or hook-reported user wait → attention/red; known active managed turn or hook progress → running/green; completed managed turn → idle/blue; dormant history → history. Lifecycle state is written to the hardware session store before snapshot emission, passive terminal snapshots no longer mask hook state, and workspace lists refresh on streamed changes.
-- Threads navigation is globally recency-first using the latest known message activity, including immediate managed user/agent updates. Project groups inherit the timestamp of their newest conversation, and an icon-only All/Codex/Claude/Hermes filter sits above search.
-- The current local ledger is seeded with the real Codex reset just used by the user (reported limit hit; exact 97% → 0% and reset allowance 1 → 0). The packaged runtime subsequently refreshed it to 2% used, confirming continued observation.
-- APC40 MKII pad selection, RGB state, MIDI Learn, and per-column push-to-talk.
-- APC mini mk2 native 8×8/64-pad task mode, RGB state, Track-button column push-to-talk, and Scene/fader MIDI Learn.
-- Settings → MIDI Hardware with persisted Automatic, APC40 MKII, and APC mini mk2 profiles plus device-specific mappings.
-- The latest packaged build is running as one healthy instance; Automatic mode detected the attached `APC mini mk2 Control` port and initialized the native profile.
-- Stable per-provider thread aliases and an inline Rename action keep the same name across Overview, Threads, compact controller, and hardware pads; provider refreshes no longer overwrite aliases with first-prompt text.
-- The alias-enabled app is packaged at `release/mac-arm64/Ambientic.app`, and this exact Codex task is locally aliased to `Ambientic`; one manual app restart is required to load the new bundle.
-- Codex consumption discovery now resolves ChatGPT.app's bundled Codex binary; Overview shows real window durations and explicitly reports when Codex omits its short-term window.
-- Settings → AI Providers.
-- Official Codex ChatGPT browser login, with persistent global waiting/success/error feedback and `account/read` fallback verification.
-- Improve → Continuity with provider-risk cards and one brief per project folder.
-- Automatic handover preparation at 85% of any available provider quota window.
-- Manual Prepare, Refresh, Open, and Continue with another connected provider actions.
-- Deterministic bounded handovers built from README direction, Git state, recent canonical user/assistant messages, and material artifacts; tool logs and credentials are excluded.
-- Target-provider continuation creates a managed task in the same folder with a compact instruction to use the handover rather than request the old chat.
-- Claude’s official interactive `/login` now runs in a hidden pseudo-terminal behind an Ambientic wizard with browser handoff, minimal interaction controls, sanitized output, credential polling, and no separate Terminal window.
-- Claude authorization-code paste auto-submits once, immediately reports verification, never echoes or stores the code, and moves raw TUI redraws into collapsed diagnostics.
-- Claude verification recognizes the CLI success screen, reads only account identity metadata from Claude’s local provider-owned configuration, and times out to a retryable code step instead of spinning indefinitely.
-- The thread composer accepts native file/folder selections and exposes Build, Plan, and Ask. Codex uses app-server `localImage`/`mention` inputs and collaboration presets, Claude uses its planning permission mode, and Hermes receives a compact path-aware instruction.
-- Codex canonical user-message events now replace Ambientic's optimistic local row by client message ID or normalized text; one row remains and its attachment/mode metadata is retained.
-- Claude terminal sessions now emit immediate attention for `PermissionRequest`, `AskUserQuestion`, and `ExitPlanMode`; the installed `~/.ambientic/hook.py` and Claude settings contain these hooks, so approvals/input requests map to red APC pads without waiting for a delayed notification.
-- Ambient mode uses Electron’s process-owned `prevent-app-suspension` assertion, defaults off on launch, releases on quit, and is accessible from Overview, the menu bar, and Settings. Its configured 30-minute-to-12-hour check-in is persisted locally; a missed reminder never interrupts agents.
-- Test suite currently has 78 passing tests, including Ambient mode blocker lifecycle/bounded check-ins, Claude approval/question-to-red-pad propagation and ordinary-tool false-positive protection, activity-first thread ordering/recent separation, Codex optimistic-message reconciliation and native attachment/mode payloads, Claude status-line quota parsing/staleness, long-context Claude recovery, Kimi connection command coverage, MIDI arrival detection, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, the persistent consumption ledger, reset and credit transitions, persistent alias/provider-refresh regressions, bundled-Codex usage discovery, weekly-only quota parsing, APC mini mk2 ordering/RGB/PTT, APC40 regressions, real PTY relay, OAuth-link validation, phase detection, non-retention, and secret-exclusion smokes.
-- The 2026-07-24 Ambientic integration audit confirms that the pre-rename AgentBase feature work remains present in the renamed source tree. A fresh `Ambientic.app` is built from that combined tree after the full 73-test suite passes.
+Recent commits:
 
-## Architecture landmarks
+```text
+a2d3dea Claude usage gauge: scrape the interactive /usage panel for real limit windows
+83a8cb8 Stop tracking Python bytecode cache (__pycache__/*.pyc)
+e88f58f usage: publish each provider incrementally so one slow collector can't stall the panel
+eac0386 Combined checkpoint: Claude usage activity display + concurrent workspace work
+6c77020 NEXT_STEPS: Overview usage wiring + startup-refresh caveat
+```
 
-- `src/main/index.js` — Electron lifecycle, IPC, windows, service wiring.
-- `src/main/workspace-service.mjs` — normalized Codex/Claude/Hermes task read/create/send/interrupt behavior.
-- `src/main/usage.js` — provider rate-limit collectors and two-minute refresh service.
-- `src/main/consumption-ledger.mjs` — persistent local quota/reset/credit event ledger.
-- `src/main/sessions.js` — normalized live session store.
-- `src/renderer/Workspace.jsx` — Overview, Threads, Settings, task creation, transcript and artifacts.
-- `src/renderer/workspace.css` — full-workspace styling.
-- `src/preload/index.js` — narrow renderer IPC bridge.
-- `test/workspace-service.test.mjs` and other `test/*.mjs` — Node test suite.
-- `README.md` and `AGENTS.md` — product status and repository rules.
+Current working tree (preserve these changes):
 
-## Working tree state
+```text
+M hook/controller-hook.py
+ M hook/install.sh
+ M src/main/index.js
+ M src/main/server.js
+ M src/main/workspace-service.mjs
+ M src/renderer/Workspace.jsx
+ M src/renderer/spend.css
+ M test/workspace-service.test.mjs
+```
 
-The tree intentionally contains uncommitted Ambientic changes. Preserve them. They include provider-account settings, Codex browser authentication, connector detection improvements, auth feedback, UI adjustments, and associated tests. Run `git status --short` before editing and do not reset unrelated work.
+Change footprint:
 
-## Implemented handover architecture
+```text
+hook/controller-hook.py         | 31 ++++++++++++++++++++
+ hook/install.sh                 | 33 ++++++++++++++-------
+ src/main/index.js               |  1 +
+ src/main/server.js              | 30 ++++++++++++++++++-
+ src/main/workspace-service.mjs  | 65 +++++++++++++++++++++++++++++++++++++++--
+ src/renderer/Workspace.jsx      | 45 ++++++++++++++++++----------
+ src/renderer/spend.css          | 16 +++++-----
+ test/workspace-service.test.mjs | 35 ++++++++++++++++++++++
+ 8 files changed, 218 insertions(+), 38 deletions(-)
+```
 
-- `src/main/handover-service.mjs` owns risk evaluation, project deduplication, bounded deterministic rendering, atomic file writes, and provider continuation.
-- `src/main/index.js` wires automatic evaluation to usage updates and exposes handover IPC.
-- `src/preload/index.js` exposes the narrow handover bridge.
-- `src/renderer/Workspace.jsx` and `src/renderer/improve.css` implement the new Improve domain.
-- `test/handover-service.test.mjs` covers threshold selection and clutter-free provider-neutral output.
+## Remaining direction
 
-## Immediate next actions
+- Ambientic accounts or a cloud backend.
+- Universal monetary spend totals from consumer subscriptions. Exact currency reporting requires an optional provider billing connection (for example an OpenAI organization Admin API key); Claude subscription spend is not exposed by the local CLI, and Hermes costs belong to its configured upstream provider.
+- Archived/deleted-provider sessions and Claude internal subagent transcripts; the workspace intentionally indexes top-level user conversations only.
+- Rich diff rendering, image galleries, or embedded localhost web previews inside the full workspace; this increment lists touched files and retains the existing companion-preview system.
+- Fully interactive Claude tool approvals inside Ambientic. Claude managed turns currently use the CLI's `acceptEdits` permission mode; unsupported permission prompts are reported and can be continued in the native surface.
+- Windows or Linux support.
+- Generic MIDI-controller output profiles.
+- Public auto-update infrastructure.
+- OpenClaw integration.
 
-1. Run `git status --short`; preserve the existing uncommitted work.
-2. Physically validate the connected APC mini mk2 in Settings → MIDI Hardware: all 64 pads, RGB states, Track-button push-to-talk, Scene-button Learn, and fader Learn.
-3. Replay onboarding from Settings or `⌘⇧O` and run the complete human-paced sequence, including name entry, one account ceremony, first-task creation, controller skip, and Overview arrival.
-4. Repeat the controller-arrival step with the APC mini mk2 and confirm its full 64-pad cold-water phrase restores normal LEDs.
-5. Restart Claude Code and send one real subscription-backed message so the newly installed status-line bridge publishes its first quota observation.
-6. Click the restored Overview refresh button and confirm Claude five-hour/seven-day usage appears. If Claude reports API billing or omits `rate_limits`, reconnect Claude Code with the Pro/Max subscription account before testing again.
-7. Open the running Ambientic build, select **Improve**, find this Ambientic project, and choose **Continue with Claude**.
-8. Confirm Claude receives this file, works in `/Users/samori/vibe-controller`, and starts without asking for the Codex transcript.
-9. Validate automatic regeneration when a real provider window crosses 85%.
-10. Send one Codex prompt from Ambientic and confirm the optimistic row stays single when Codex returns its canonical user-message event; then try a folder attachment in Plan mode.
+Implemented after this handover was generated:
 
-## Guardrails
+- Claude and Codex approval cards now expose Deny, Allow once, and Always allow in the active thread. Claude’s command hook waits for Ambientic’s loopback decision and returns official `PermissionRequest` structured output; persisted approval uses only Claude-provided `permission_suggestions`, with the provider-native prompt as the timeout/unavailable fallback.
 
-- Product name is **Ambientic**, even if the concept is casually called Agenthub.
-- Keep all credentials in provider-owned stores.
-- Keep the APC40 MKII behavior intact.
-- Update `README.md` before ending every coding task.
-- Prefer a deterministic, auditable handover builder for the MVP; model-assisted refinement can be added later behind strict size and privacy controls.
+## Architecture
+
+```text
+Claude hooks ─┐
+Codex hooks  ─┼──> local event server ──> normalized session store ──> React UI
+Hermes plugin ┘                                  │                       │
+                                                 ├──> terminal focus     │
+Process discovery ───────────────────────────────┤                       │
+Codex local task index ──> Codex deep links ────┤                       │
+                                                 ├──> previews           │
+APC40 MKII MIDI input ──> action mappings ──────┴───────────────────────┘
+APC40 MKII MIDI output <── session state and selection LEDs
+
+Codex app-server ─┐
+Claude local CLI ─┼──> normalized workspace bridge ──> transcript / composer / artifacts
+Hermes ACP ───────┘                                      │
+                                                        └──> approvals / interrupt / state
+
+Provider quota adapters ──> current capacity ──> local consumption ledger ──> Overview history
+Provider billing APIs (future, optional) ────────────────────────────────────> currency spend
+```
+
+The Electron main process owns local system access, session state, connectors, previews, and MIDI. The renderer receives a narrow IPC surface through the preload script. Provider credentials remain in provider-owned local stores.
+
+## Recent decision context
+
+- **Agent result:** Now I'll rewrite `OverviewUsageBalance` to show both windows as matching meters. First the component:
+- **User direction:** The file /Users/samori/vibe-controller/src/renderer/Workspace.jsx has been updated successfully. (note: the file had been modified on disk since you last read it — the edit applied cleanly, but the file contains other changes not in your context. Read it before edits that depend on surrounding content.)
+- **Agent result:** Now the CSS — replace the grid row layout with the head + dual-meter layout:
+- **User direction:** 43	.overview-usage__row { --balance-accent: #67df98; min-height: 56px; padding: 9px 14px; display: grid; grid-template-columns: 30px minmax(90px, 1fr) 38px; gap: 10px; align-items: center; border-bottom: 1px solid #282d34; position: relative; } 44	.overview-usage__row[data-provider="claude"] { --balance-accent: #e49a70; } 45	.overview-usage__row[data-provider="hermes"] { --balance-accent: #898cff; } 46	.overview-usage__icon { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--balance-accent) 35%, #343a43); border-radius: 8px; background: color-mix(in srgb, var(--balance-accent) 7%, #15191e); color: var(--balance-accent); } 47	.overview-u
+- **User direction:** The file /Users/samori/vibe-controller/src/renderer/spend.css has been updated successfully. (file state is current in your context — no need to Read it back)
+- **Agent result:** Now build, test, and verify the dual-meter layout renders:
+
+## Material artifacts
+
+- `/Users/samori/vibe-controller/src/renderer/Workspace.jsx`
+- `/Users/samori/vibe-controller/src/main/usage.js`
+- `/Users/samori/vibe-controller/NEXT_STEPS.md`
+- `/tmp/overview.png`
+- `/Users/samori/vibe-controller/src/main/index.js`
+- `/tmp/overview2.png`
+- `/tmp/ov3.png`
+- `/Users/samori/vibe-controller/resources/claude_usage.py`
+- `/Users/samori/vibe-controller/src/main/claude-usage-scrape.mjs`
+- `/Users/samori/vibe-controller/package.json`
+- `/tmp/gauge.png`
+- `/Users/samori/vibe-controller/src/renderer/spend.css`
+
+## First action
+
+Run `git status --short`, read the directly relevant files, and continue the current objective with the smallest verifiable increment.

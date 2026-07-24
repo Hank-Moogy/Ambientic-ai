@@ -187,7 +187,7 @@ function Approval ({ approval, onResolve }) {
       <div className="approval__actions">
         <button type="button" onClick={() => onResolve(approval.id, false)}>Deny</button>
         <button type="button" className="primary" onClick={() => onResolve(approval.id, true)}>Allow once</button>
-        {approval.provider === 'codex' && <button type="button" onClick={() => onResolve(approval.id, true, true)}>Allow for task</button>}
+        {approval.canRemember && <button type="button" onClick={() => onResolve(approval.id, true, true)}>Always allow</button>}
       </div>
     </section>
   )
@@ -332,30 +332,45 @@ function SpendActivity ({ ledger }) {
 }
 
 function OverviewUsageBalance ({ sessions, usage, onRefresh }) {
+  const weekCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
   const providerRows = ['codex', 'claude', 'hermes'].map((providerId) => {
     const provider = usage?.providers?.[providerId]
-    const window = provider?.windows?.find((candidate) => candidate.period === 'week') || provider?.windows?.[0]
-    const used = Number.isFinite(window?.usedPercent) ? Math.round(window.usedPercent) : null
-    const recent = sessions.filter((session) => session.agent === providerId && Number(session.updatedAt || session.lastSeen || 0) >= Date.now() - 7 * 24 * 60 * 60 * 1000).length
-    // Claude exposes no quota %, so show its real recorded activity this week.
+    const windows = provider?.windows || []
+    // Both providers expose a short (5-hour) and a weekly window; show both the
+    // same way. Fall back to recorded activity when there is no rate-limit API.
+    const short = windows.find((window) => window.period === 'short')
+    const week = windows.find((window) => window.period === 'week') || windows.find((window) => window.period && window.period !== 'short')
+    const hasGauges = Boolean(short || week)
     const activity = provider?.activity
-    const unavailable = used === null && provider?.error
-    const detail = used !== null
-      ? `${provider?.plan || 'Subscription'} · ${100 - used}% left`
+    const recent = sessions.filter((session) => session.agent === providerId && Number(session.updatedAt || session.lastSeen || 0) >= weekCutoff).length
+    const name = providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude' : 'Hermes'
+    const detail = hasGauges
+      ? (provider.plan || 'Subscription')
       : activity?.available
         ? `${activity.weekly.messages} messages · ${activity.weekly.sessions} sessions this week`
-        : unavailable
-          ? provider.error
-          : `${recent} active this week`
-    return { providerId, provider, used, recent, detail, activity }
+        : provider?.error || `${recent} active this week`
+    return { providerId, name, short, week, hasGauges, detail }
   })
   return (
     <section className="overview-usage">
       <header><div><span>Provider balance</span><b>Capacity at a glance</b></div><button type="button" aria-label="Refresh provider usage" title="Refresh provider usage" data-refreshing={Boolean(usage?.refreshing)} disabled={Boolean(usage?.refreshing)} onClick={onRefresh}>↻</button></header>
-      <div>
-        {providerRows.map(({ providerId, used, detail, activity }) => <div className="overview-usage__row" key={providerId} data-provider={providerId} title={detail}><span className="overview-usage__icon"><AgentIcon agent={providerId} /></span><div><b>{providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude' : 'Hermes'}</b><small>{detail}</small></div><strong>{used !== null ? `${used}%` : activity?.available ? activity.weekly.messages : '—'}</strong><i><em style={{ '--overview-usage': `${used || 0}%` }} /></i></div>)}
+      <div className="overview-usage__rows">
+        {providerRows.map(({ providerId, name, short, week, hasGauges, detail }) => (
+          <div className="overview-usage__row" key={providerId} data-provider={providerId}>
+            <div className="overview-usage__head">
+              <span className="overview-usage__icon"><AgentIcon agent={providerId} /></span>
+              <div><b>{name}</b><small title={detail}>{detail}</small></div>
+            </div>
+            {hasGauges && (
+              <div className="overview-usage__meters">
+                <ConsumptionMeter label={quotaWindowLabel(short, '5h')} window={short} />
+                <ConsumptionMeter label={quotaWindowLabel(week, 'Week')} window={week} />
+              </div>
+            )}
+          </div>
+        ))}
       </div>
-      <footer>Detailed limits and spend are in Settings</footer>
+      <footer>5-hour and weekly limits · detailed spend in Settings</footer>
     </section>
   )
 }

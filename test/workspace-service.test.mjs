@@ -97,6 +97,41 @@ test('resolving an approval clears the "attention" state instead of sticking', a
   assert.equal(events.at(-1).state, 'idle')
 })
 
+test('bridges Claude approval once or always through its official hook decision', async () => {
+  const session = { id: 'claude-terminal', agent: 'claude', cwd: '/tmp/project', state: 'attention', tty: '/dev/ttys1' }
+  const ingested = []
+  const service = new WorkspaceService({
+    list: () => [session],
+    ingest: (event) => {
+      ingested.push(event)
+      session.state = event.event === 'tool' ? 'running' : session.state
+      return session
+    }
+  }, () => [])
+  service.snapshots.set(session.id, { ...service.baseSnapshot(session), messages: [] })
+  const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }
+  const decisionPromise = service.requestExternalApproval('claude', {
+    session_id: session.id,
+    tool_name: 'Bash',
+    tool_input: { command: 'npm test' },
+    permission_suggestions: [suggestion]
+  }, session.id)
+  const [approvalId, pending] = [...service.pendingApprovals.entries()][0]
+
+  assert.equal(pending.canRemember, true)
+  assert.equal(service.snapshots.get(session.id).approvals[0].resolve, undefined)
+  assert.equal(service.snapshots.get(session.id).state, 'attention')
+
+  await service.resolveApproval(approvalId, true, true)
+  assert.deepEqual(await decisionPromise, {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: { behavior: 'allow', updatedPermissions: [suggestion] }
+    }
+  })
+  assert.equal(ingested.at(-1).event, 'tool')
+})
+
 test('ignores a stale Codex completion event for a different active turn', async () => {
   const session = { id: 'codex-desktop:thread-1', threadId: 'thread-1', agent: 'codex', cwd: '/tmp/project', state: 'running' }
   const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])

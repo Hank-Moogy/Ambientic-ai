@@ -4,7 +4,7 @@ import http from 'node:http'
 // keep it dead simple and permissive (any parse error just 400s, never throws).
 export const PORT = 47600
 
-export function startServer (store, { focusById, onTaskText } = {}) {
+export function startServer (store, { focusById, onTaskText, onApprovalRequest } = {}) {
   const server = http.createServer((req, res) => {
     // Loopback only — never accept anything off-box.
     const ra = req.socket.remoteAddress || ''
@@ -32,6 +32,34 @@ export function startServer (store, { focusById, onTaskText } = {}) {
       Promise.resolve(focusById ? focusById(id) : { ok: false, reason: 'no-handler' })
         .then((r) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(r)) })
         .catch((e) => { res.writeHead(500).end(JSON.stringify({ ok: false, error: String(e) })) })
+      return
+    }
+
+    if (req.method === 'POST' && req.url === '/approval/claude') {
+      let body = ''
+      let tooBig = false
+      req.on('data', (chunk) => {
+        body += chunk
+        if (body.length > 256 * 1024) { tooBig = true; req.destroy() }
+      })
+      req.on('end', () => {
+        if (tooBig) { res.writeHead(413).end(); return }
+        try {
+          const event = JSON.parse(body)
+          const session = store.ingest({ ...event, event: 'notification', agent: 'claude' })
+          Promise.resolve(session && onApprovalRequest ? onApprovalRequest(event, session.id) : null)
+            .then((decision) => {
+              res.writeHead(200, { 'content-type': 'application/json' })
+              res.end(JSON.stringify(decision || {}))
+            })
+            .catch(() => {
+              res.writeHead(200, { 'content-type': 'application/json' })
+              res.end('{}')
+            })
+        } catch {
+          res.writeHead(400).end('{"ok":false}')
+        }
+      })
       return
     }
 

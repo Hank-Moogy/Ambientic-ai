@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
 
 PORT = int(os.environ.get("AMBIENTIC_PORT", os.environ.get("AGENTBASE_PORT", os.environ.get("CLAUDE_CONTROLLER_PORT", "47600"))))
 URL = "http://127.0.0.1:%d/event" % PORT
@@ -172,6 +173,27 @@ def post(body):
         pass
 
 
+def request_permission(body):
+    """Wait for an Ambientic approval decision.
+
+    PermissionRequest hooks are allowed to return a structured decision to
+    Claude. If Ambientic is unavailable or the request expires, return nothing
+    so Claude falls back to its own native permission dialog.
+    """
+    try:
+        request = urllib.request.Request(
+            URL.replace("/event", "/approval/claude"),
+            data=body.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=590) as response:
+            value = json.loads(response.read(256 * 1024).decode("utf-8"))
+            return value if isinstance(value, dict) else None
+    except Exception:
+        return None
+
+
 def main(agent):
     try:
         hook = json.load(sys.stdin)
@@ -218,6 +240,15 @@ def main(agent):
                hook.get("command") or hook.get("tool_name"))
         if isinstance(msg, str) and msg.strip():
             payload["summary"] = msg.strip()[:180]
+
+    if hook.get("hook_event_name") == "PermissionRequest":
+        payload["tool_name"] = str(hook.get("tool_name") or "")[:200]
+        payload["tool_input"] = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
+        payload["permission_suggestions"] = hook.get("permission_suggestions") if isinstance(hook.get("permission_suggestions"), list) else []
+        decision = request_permission(json.dumps(payload))
+        if decision:
+            print(json.dumps(decision))
+        return
 
     post(json.dumps(payload))
 

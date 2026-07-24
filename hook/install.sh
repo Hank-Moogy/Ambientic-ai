@@ -128,30 +128,41 @@ def add_claude_attention_hooks(path, cmd):
     with open(path, encoding="utf-8") as f:
         settings = json.load(f)
     hooks = settings.setdefault("hooks", {})
-    added = 0
+    changed = 0
     for event, matcher in CLAUDE_ATTENTION_HOOKS:
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             continue
-        already = any(
-            hook in str(item.get("command", "")) and
+        existing = next((
+            item
+            for group in groups if isinstance(group, dict) and
             (matcher is None or group.get("matcher") == matcher)
-            for group in groups if isinstance(group, dict)
             for item in (group.get("hooks") if isinstance(group.get("hooks"), list) else [])
-            if isinstance(item, dict)
-        )
-        if already:
+            if isinstance(item, dict) and hook in str(item.get("command", ""))
+        ), None)
+        if existing:
+            if event == "PermissionRequest":
+                if existing.get("timeout") != 600:
+                    existing["timeout"] = 600
+                    changed += 1
+                if existing.get("statusMessage") != "Waiting for approval in Ambientic…":
+                    existing["statusMessage"] = "Waiting for approval in Ambientic…"
+                    changed += 1
             continue
-        group = {"hooks": [{"type": "command", "command": cmd}]}
+        hook_spec = {"type": "command", "command": cmd}
+        if event == "PermissionRequest":
+            hook_spec["timeout"] = 600
+            hook_spec["statusMessage"] = "Waiting for approval in Ambientic…"
+        group = {"hooks": [hook_spec]}
         if matcher is not None:
             group["matcher"] = matcher
         groups.append(group)
-        added += 1
-    if added:
+        changed += 1
+    if changed:
         backup(path)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(settings, f, indent=2)
-    return added
+    return changed
 
 
 def kimi_missing(existing):

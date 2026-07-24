@@ -1180,6 +1180,7 @@ app.whenReady().then(() => {
   void refreshConnectors()
   startServer(store, {
     focusById: queueFocus,
+    onApprovalRequest: (event, sessionId) => workspace.requestExternalApproval('claude', event, sessionId),
     onTaskText: (id, text) => {
       store.updateContext(id, text)
       summarizer.enqueue(id, text)
