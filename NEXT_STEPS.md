@@ -1,4 +1,4 @@
-# AgentBase — next-commit notes
+# Ambientic — next-commit notes
 
 Working notes for whoever makes the next commit. This repo has had two sessions
 editing it concurrently; commits so far have been deliberately scoped.
@@ -18,7 +18,7 @@ Do not assume these are mine. Review before committing:
 - `src/main/usage.js`, `test/usage.test.mjs` — Claude usage via a status-line
   bridge hook.
 - `hook/claude-statusline.py` (new), `hook/install.sh` — installs the status
-  line that writes `~/.agentbase/claude-usage.json`.
+  line that writes `~/.ambientic/claude-usage.json`.
 - `src/renderer/Workspace.jsx`, `src/renderer/onboarding.css` (new),
   `src/renderer/spend.css` — onboarding + Usage/Billing UI.
 - `src/main/{connectors,index,midi-controller,vibe-sequence}.js/.mjs`,
@@ -53,7 +53,7 @@ committing them.
      session_id, transcript_path, version, workspace.
    - Nothing on disk caches the quota windows.
    => The `hook/claude-statusline.py` + `collectClaude` (reads
-      `~/.agentbase/claude-usage.json`) approach cannot populate and should be
+      `~/.ambientic/claude-usage.json`) approach cannot populate and should be
       retired or repurposed. Quota % for Claude is only available via the
       interactive `/usage` TUI (fragile scrape) or the credentialed API
       (off-limits). Do not fake a percentage.

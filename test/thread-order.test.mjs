@@ -20,9 +20,9 @@ test('keeps the latest user-opened thread first and separates old history', () =
 
 test('retains provider and search filtering across both activity lanes', () => {
   const result = organizeThreads([
-    { id: 'a', agent: 'codex', task: 'AgentBase', updatedAt: 100, state: 'running' },
+    { id: 'a', agent: 'codex', task: 'Ambientic', updatedAt: 100, state: 'running' },
     { id: 'b', agent: 'claude', task: 'Other', updatedAt: 1, state: 'history' }
-  ], { now: 200, provider: 'codex', query: 'agent' })
+  ], { now: 200, provider: 'codex', query: 'ambient' })
   assert.deepEqual(result.recent.map((session) => session.id), ['a'])
   assert.deepEqual(result.earlier, [])
 })

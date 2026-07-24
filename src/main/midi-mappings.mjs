@@ -8,7 +8,7 @@ export const APC40_ACTIONS = [
   { id: 'launch-claude', label: 'Open new Claude Code terminal' },
   { id: 'launch-codex', label: 'Open new Codex terminal' },
   { id: 'launch-hermes', label: 'Open new Hermes terminal' },
-  { id: 'toggle-controller', label: 'Show or hide AgentBase' }
+  { id: 'toggle-controller', label: 'Show or hide Ambientic' }
 ]
 
 const ACTION_IDS = new Set(APC40_ACTIONS.map((action) => action.id))

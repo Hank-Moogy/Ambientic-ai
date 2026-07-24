@@ -1,10 +1,10 @@
-# AgentBase art direction
+# Ambientic art direction
 
-This document is the durable creative reference for AgentBase. Revisit it whenever a material interface, motion, sound, lighting, or hardware-expression decision is made.
+This document is the durable creative reference for Ambientic. Revisit it whenever a material interface, motion, sound, lighting, or hardware-expression decision is made.
 
 ## The feeling
 
-AgentBase should feel **fluid, aerial, calm, and quietly alive**—closer to ambient music and reflected light than to a dense operations dashboard. It is a place where many agents can be active without making the user feel surrounded by alarms.
+Ambientic should feel **fluid, aerial, calm, and quietly alive**—closer to ambient music and reflected light than to a dense operations dashboard. It is a place where many agents can be active without making the user feel surrounded by alarms.
 
 The experience should suggest:
 
@@ -25,6 +25,16 @@ The experience should suggest:
 
 Provider filters should remain compact, icon-led, and softly illuminated in each provider’s accent. They organize attention without turning the sidebar into a toolbar.
 
+## Identity mark
+
+Ambientic’s primary mark is the supplied orbital-circle artwork: nested paths around a central core with one satellite point. It expresses the product as a calm field connecting multiple agents, tools, and physical controls.
+
+- Use the mark itself, not letter substitutes, for the app icon, onboarding focal object, workspace brand, loading state, and compact controller identity.
+- Preserve the artwork’s proportions and circular geometry. Never stretch, redraw, or add provider colors inside it.
+- On dark interfaces, place the black mark on a quiet cool-white surface so it remains legible; surrounding bloom may use Ambientic’s blue, violet, and green atmosphere.
+- Motion may orbit or breathe around the mark, but the artwork itself should remain stable and crisp.
+- Small system icons use a padded square derived from the same supplied source rather than a separate symbol.
+
 ## Motion and light language
 
 - Ambient cycles: roughly 6–16 seconds.
@@ -40,15 +50,15 @@ The Overview **Vibe** button (or ⌘⇧V) cycles through two temporary lighting 
 1. **Center wave** — a cold blue, violet, cyan, and green pulse radiates from the center toward the edges.
 2. **Cold orbit** — cool-color rings rotate around the grid with layered angular motion.
 
-The button identifies the queued and currently playing study. AgentBase sends only LEDs that actually change, allowing a higher refresh rate without saturating MIDI; slower phase movement and denser neighboring cold colors soften the discrete hardware palette. After about five seconds, AgentBase restores every live task LED and queues the next composition.
+The button identifies the queued and currently playing study. Ambientic sends only LEDs that actually change, allowing a higher refresh rate without saturating MIDI; slower phase movement and denser neighboring cold colors soften the discrete hardware palette. After about five seconds, Ambientic restores every live task LED and queues the next composition.
 
-Vibe is an expressive test surface, not a task command. It must never select, start, stop, or alter an agent. The earlier hot-color Game of Life and illumination studies were removed because their hard on/off rhythm felt too stop-motion for AgentBase’s ambient direction.
+Vibe is an expressive test surface, not a task command. It must never select, start, stop, or alter an agent. The earlier hot-color Game of Life and illumination studies were removed because their hard on/off rhythm felt too stop-motion for Ambientic’s ambient direction.
 
 ## First-run expression: Enter the field
 
 Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained four-step progress trace, floating symbols, and one unmistakable primary action.
 
-- Welcome is mysterious but immediately legible: one breathing AgentBase object, one promise, one entrance.
+- Welcome is mysterious but immediately legible: one breathing Ambientic object, one promise, one entrance.
 - Identity asks only for a local display name. The input and next action are the entire interaction.
 - Provider connection presents four large playable objects—Codex, Claude Code, Hermes, and Kimi—with provider color used only for identity and connection truth.
 - Hardware connection visualizes the controller as an instrument waiting in darkness. Detection wakes both the on-screen grid and the real APC with the same temporary cold-water composition.

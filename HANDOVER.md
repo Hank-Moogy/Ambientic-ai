@@ -1,16 +1,16 @@
-<!-- agentbase-handover -->
-# AgentBase handover
+<!-- ambientic-handover -->
+# Ambientic handover
 
-Generated: 2026-07-23  
+Generated: 2026-07-24
 Source: Codex  
 Suggested next provider: Claude Code  
 Project: `/Users/samori/vibe-controller`
 
 ## Mission
 
-AgentBase is a local-first macOS control surface above Codex, Claude Code, and Hermes. It unifies tasks, transcripts, provider usage, artifacts, previews, and native Akai APC40 MKII / APC mini mk2 hardware workflows without owning provider credentials.
+Ambientic is a local-first macOS control surface above Codex, Claude Code, and Hermes. It unifies tasks, transcripts, provider usage, artifacts, previews, and native Akai APC40 MKII / APC mini mk2 hardware workflows without owning provider credentials.
 
-The current product direction is to make the first encounter with AgentBase feel as intentional as the long-term agentic-engineering workflow. A native four-screen onboarding now introduces the field, captures a local display name, connects existing providers or starts a first task, and optionally wakes a MIDI controller before revealing Overview. The same increment restores manual Overview usage refresh and replaces Claude's obsolete print-mode `/usage` polling with a privacy-bounded local status-line quota bridge.
+The current product direction is to make the first encounter with Ambientic feel as intentional as the long-term agentic-engineering workflow. A native four-screen onboarding now introduces the field, captures a local display name, connects existing providers or starts a first task, and optionally wakes a MIDI controller before revealing Overview. The same increment restores manual Overview usage refresh and replaces Claude's obsolete print-mode `/usage` polling with a privacy-bounded local status-line quota bridge.
 
 ## Current objective
 
@@ -23,18 +23,20 @@ The first production-shaped handover, provider account flows, and persistent con
 - Cross-provider history, normalized task states, transcripts, Markdown rendering, artifacts, localhost/simulator previews, and prompt sending.
 - Provider consumption collection in `src/main/usage.js`:
   - Codex through `account/rateLimits/read`.
-  - Claude through cached `rate_limits` emitted by Claude Code's local status-line payload after real agent activity; AgentBase never submits a quota prompt.
+  - Claude through cached `rate_limits` emitted by Claude Code's local status-line payload after real agent activity; Ambientic never submits a quota prompt.
   - Kimi remains in the legacy usage adapter but is not part of the current visible product scope.
 - Overview's compact provider-balance card again has a refresh button with in-progress feedback. Claude's row exposes a specific setup/staleness reason when no safe quota observation exists.
-- `hook/claude-statusline.py` persists only normalized five-hour/seven-day usage and reset times in `~/.agentbase/claude-usage.json`. The installer adds it only when no custom Claude status line exists, preserving user configuration.
+- `hook/claude-statusline.py` persists only normalized five-hour/seven-day usage and reset times in `~/.ambientic/claude-usage.json`. The installer adds it only when no custom Claude status line exists, preserving user configuration.
 - Full-screen first-run mode lives in `src/renderer/Workspace.jsx` and `src/renderer/onboarding.css`: Welcome → local name → provider field/first task → optional MIDI controller → Overview.
-- First-run state persists in AgentBase preferences through narrow IPC. It can be reset from Settings or `⌘⇧O`; `AGENTBASE_STATE_DIR` enables isolated repeatable visual tests.
+- First-run state persists in Ambientic preferences through narrow IPC. It can be reset from Settings or `⌘⇧O`; `AMBIENTIC_STATE_DIR` enables isolated repeatable visual tests.
 - Kimi Code is now a detected account-only connector with the official `kimi login` setup command and install guide. It is intentionally excluded from managed-task choices until a real Kimi conversation bridge exists.
 - A disconnected→connected native MIDI transition starts the existing cold Vibe composition automatically for either APC40 MKII or APC mini mk2 and restores operational LEDs when the phrase ends.
 - `ART_DIRECTION.md` now defines onboarding as a minimalist game introduction plus ambient instrument, with single decisions, large type, calm spatial motion, and reduced-motion parity.
+- The supplied orbital artwork is now Ambientic's durable identity mark and macOS icon. It appears in onboarding, workspace/compact chrome, loading and empty states, and the Dock on a cool-white field that preserves black-mark contrast.
+- The package, bundle ID, display strings, docs, logs, and provider client labels use Ambientic. Existing Electron state is copied from the legacy application directory on first launch; hooks now install to `~/.ambientic/` with old hook/quota locations retained only as migration fallbacks.
 - `src/main/consumption-ledger.mjs` persists normalized capacity snapshots and events in Electron user data, detects exact Codex reset use from allowance and quota transitions, distinguishes natural renewals, and tracks provider credit balance deltas.
 - Settings → Usage & Billing contains the quota board and AI usage/spend-signals history with recent local activity, reset/limit counters, observed credit usage, and explicit provider coverage boundaries. Overview is intentionally agent-focused again.
-- `ART_DIRECTION.md` defines AgentBase’s fluid, aerial, ambient visual and physical-interaction language; `AGENTS.md` requires it to be revisited for material creative changes.
+- `ART_DIRECTION.md` defines Ambientic’s fluid, aerial, ambient visual and physical-interaction language; `AGENTS.md` requires it to be revisited for material creative changes.
 - Overview Vibe cycles between cold center-wave and cold-orbit studies. It now sends only changed LEDs at a 60 ms cadence with slower phase movement and a denser cold palette, reducing visible stepping without saturating MIDI. The hot Game of Life and illumination studies were removed because their hard on/off rhythm conflicted with the ambient direction.
 - A compact Overview provider-balance card restores at-a-glance Codex/Claude quota and Hermes activity without moving detailed usage history or billing out of Settings.
 - Threads sidebar is activity-first instead of project-grouped: a bounded local interaction map keeps the latest conversation opened by the user first, active/provider-recent threads are highlighted in **Recent & active**, and dormant history is separated into **Earlier threads** without breaking provider/search filters.
@@ -46,7 +48,7 @@ The first production-shaped handover, provider account flows, and persistent con
 - Settings → MIDI Hardware with persisted Automatic, APC40 MKII, and APC mini mk2 profiles plus device-specific mappings.
 - The latest packaged build is running as one healthy instance; Automatic mode detected the attached `APC mini mk2 Control` port and initialized the native profile.
 - Stable per-provider thread aliases and an inline Rename action keep the same name across Overview, Threads, compact controller, and hardware pads; provider refreshes no longer overwrite aliases with first-prompt text.
-- The alias-enabled app is packaged at `release/mac-arm64/AgentBase.app`, and this exact Codex task is locally aliased to `AgentBase`; one manual app restart is required to load the new bundle.
+- The alias-enabled app is packaged at `release/mac-arm64/Ambientic.app`, and this exact Codex task is locally aliased to `Ambientic`; one manual app restart is required to load the new bundle.
 - Codex consumption discovery now resolves ChatGPT.app's bundled Codex binary; Overview shows real window durations and explicitly reports when Codex omits its short-term window.
 - Settings → AI Providers.
 - Official Codex ChatGPT browser login, with persistent global waiting/success/error feedback and `account/read` fallback verification.
@@ -55,12 +57,14 @@ The first production-shaped handover, provider account flows, and persistent con
 - Manual Prepare, Refresh, Open, and Continue with another connected provider actions.
 - Deterministic bounded handovers built from README direction, Git state, recent canonical user/assistant messages, and material artifacts; tool logs and credentials are excluded.
 - Target-provider continuation creates a managed task in the same folder with a compact instruction to use the handover rather than request the old chat.
-- Claude’s official interactive `/login` now runs in a hidden pseudo-terminal behind an AgentBase wizard with browser handoff, minimal interaction controls, sanitized output, credential polling, and no separate Terminal window.
+- Claude’s official interactive `/login` now runs in a hidden pseudo-terminal behind an Ambientic wizard with browser handoff, minimal interaction controls, sanitized output, credential polling, and no separate Terminal window.
 - Claude authorization-code paste auto-submits once, immediately reports verification, never echoes or stores the code, and moves raw TUI redraws into collapsed diagnostics.
 - Claude verification recognizes the CLI success screen, reads only account identity metadata from Claude’s local provider-owned configuration, and times out to a retryable code step instead of spinning indefinitely.
 - The thread composer accepts native file/folder selections and exposes Build, Plan, and Ask. Codex uses app-server `localImage`/`mention` inputs and collaboration presets, Claude uses its planning permission mode, and Hermes receives a compact path-aware instruction.
-- Codex canonical user-message events now replace AgentBase's optimistic local row by client message ID or normalized text; one row remains and its attachment/mode metadata is retained.
-- Test suite currently has 73 passing tests, including activity-first thread ordering/recent separation, Codex optimistic-message reconciliation and native attachment/mode payloads, Claude status-line quota parsing/staleness, long-context Claude recovery, Kimi connection command coverage, MIDI arrival detection, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, the persistent consumption ledger, reset and credit transitions, persistent alias/provider-refresh regressions, bundled-Codex usage discovery, weekly-only quota parsing, APC mini mk2 ordering/RGB/PTT, APC40 regressions, real PTY relay, OAuth-link validation, phase detection, non-retention, and secret-exclusion smokes.
+- Codex canonical user-message events now replace Ambientic's optimistic local row by client message ID or normalized text; one row remains and its attachment/mode metadata is retained.
+- Claude terminal sessions now emit immediate attention for `PermissionRequest`, `AskUserQuestion`, and `ExitPlanMode`; the installed `~/.ambientic/hook.py` and Claude settings contain these hooks, so approvals/input requests map to red APC pads without waiting for a delayed notification.
+- Test suite currently has 75 passing tests, including Claude approval/question-to-red-pad propagation and ordinary-tool false-positive protection, activity-first thread ordering/recent separation, Codex optimistic-message reconciliation and native attachment/mode payloads, Claude status-line quota parsing/staleness, long-context Claude recovery, Kimi connection command coverage, MIDI arrival detection, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, the persistent consumption ledger, reset and credit transitions, persistent alias/provider-refresh regressions, bundled-Codex usage discovery, weekly-only quota parsing, APC mini mk2 ordering/RGB/PTT, APC40 regressions, real PTY relay, OAuth-link validation, phase detection, non-retention, and secret-exclusion smokes.
+- The 2026-07-24 Ambientic integration audit confirms that the pre-rename AgentBase feature work remains present in the renamed source tree. A fresh `Ambientic.app` is built from that combined tree after the full 73-test suite passes.
 
 ## Architecture landmarks
 
@@ -77,7 +81,7 @@ The first production-shaped handover, provider account flows, and persistent con
 
 ## Working tree state
 
-The tree intentionally contains uncommitted AgentBase changes. Preserve them. They include provider-account settings, Codex browser authentication, connector detection improvements, auth feedback, UI adjustments, and associated tests. Run `git status --short` before editing and do not reset unrelated work.
+The tree intentionally contains uncommitted Ambientic changes. Preserve them. They include provider-account settings, Codex browser authentication, connector detection improvements, auth feedback, UI adjustments, and associated tests. Run `git status --short` before editing and do not reset unrelated work.
 
 ## Implemented handover architecture
 
@@ -95,14 +99,14 @@ The tree intentionally contains uncommitted AgentBase changes. Preserve them. Th
 4. Repeat the controller-arrival step with the APC mini mk2 and confirm its full 64-pad cold-water phrase restores normal LEDs.
 5. Restart Claude Code and send one real subscription-backed message so the newly installed status-line bridge publishes its first quota observation.
 6. Click the restored Overview refresh button and confirm Claude five-hour/seven-day usage appears. If Claude reports API billing or omits `rate_limits`, reconnect Claude Code with the Pro/Max subscription account before testing again.
-7. Open the running AgentBase build, select **Improve**, find this AgentBase project, and choose **Continue with Claude**.
+7. Open the running Ambientic build, select **Improve**, find this Ambientic project, and choose **Continue with Claude**.
 8. Confirm Claude receives this file, works in `/Users/samori/vibe-controller`, and starts without asking for the Codex transcript.
 9. Validate automatic regeneration when a real provider window crosses 85%.
-10. Send one Codex prompt from AgentBase and confirm the optimistic row stays single when Codex returns its canonical user-message event; then try a folder attachment in Plan mode.
+10. Send one Codex prompt from Ambientic and confirm the optimistic row stays single when Codex returns its canonical user-message event; then try a folder attachment in Plan mode.
 
 ## Guardrails
 
-- Product name is **AgentBase**, even if the concept is casually called Agenthub.
+- Product name is **Ambientic**, even if the concept is casually called Agenthub.
 - Keep all credentials in provider-owned stores.
 - Keep the APC40 MKII behavior intact.
 - Update `README.md` before ending every coding task.

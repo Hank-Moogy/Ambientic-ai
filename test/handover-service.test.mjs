@@ -13,7 +13,7 @@ test('flags a provider when any quota window reaches the handover threshold', ()
 
 test('renders a bounded provider-neutral handover without tool-log clutter', () => {
   const body = renderHandover({
-    session: { agent: 'codex', project: 'AgentBase', cwd: '/tmp/agentbase', task: 'Build continuity' },
+    session: { agent: 'codex', project: 'Ambientic', cwd: '/tmp/agentbase', task: 'Build continuity' },
     snapshot: {
       title: 'Build continuity',
       messages: [

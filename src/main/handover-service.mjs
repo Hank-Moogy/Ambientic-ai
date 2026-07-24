@@ -59,7 +59,7 @@ export function renderHandover ({ session, snapshot, readme, git, risk, generate
   const architecture = section(readme, 'Architecture') || 'Inspect the project entry points and README before editing.'
   const limit = risk?.usedPercent === null || risk?.usedPercent === undefined ? 'Manual handover' : `${Math.round(risk.usedPercent)}% used · ${risk.label}`
 
-  return `<!-- agentbase-handover -->
+  return `<!-- ambientic-handover -->
 # ${session.project || basename(session.cwd || '') || 'Project'} handover
 
 Generated: ${new Date(generatedAt).toISOString()}  
@@ -145,7 +145,7 @@ export class HandoverService extends EventEmitter {
     const generatedAt = Date.now()
     const body = renderHandover({ session, snapshot, readme, git, risk, generatedAt })
     const path = join(session.cwd, 'HANDOVER.md')
-    const temporary = `${path}.agentbase-${process.pid}.tmp`
+    const temporary = `${path}.ambientic-${process.pid}.tmp`
     await writeFile(temporary, body, { mode: 0o600 })
     await rename(temporary, path)
     const record = {
@@ -181,7 +181,7 @@ export class HandoverService extends EventEmitter {
       this.generatedForWindow.add(windowKey)
       await this.generate(session.id, 'rate limit').catch((error) => {
         this.generatedForWindow.delete(windowKey)
-        console.error(`[agentbase] handover generation failed: ${error.message}`)
+        console.error(`[ambientic] handover generation failed: ${error.message}`)
       })
     }
   }

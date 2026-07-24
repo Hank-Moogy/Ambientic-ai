@@ -1,6 +1,6 @@
-# AgentBase
+# Ambientic
 
-AgentBase is a local-first control surface for people working with several AI agents at once. It makes every active agent visible in one calm interface and maps that interface onto physical hardware so switching attention becomes immediate and habitual.
+Ambientic is a local-first control surface for people working with several AI agents at once. It makes every active agent visible in one calm interface and maps that interface onto physical hardware so switching attention becomes immediate and habitual.
 
 The first product target is a personal macOS cockpit for **Claude Code**, **Codex**, and **Hermes**, with native hardware modes for the **Akai APC40 MKII** and **Akai APC mini mk2**.
 
@@ -8,7 +8,7 @@ The product’s durable creative direction—fluid, aerial, ambient, and quietly
 
 ## Long-term vision
 
-AgentBase should become the interface above agent providers:
+Ambientic should become the interface above agent providers:
 
 - See every active agent, project, task, state, context, and usage signal in one place.
 - Start, resume, interrupt, and supervise agents without navigating between terminal windows.
@@ -18,20 +18,20 @@ AgentBase should become the interface above agent providers:
 - Keep a local-first trust model while allowing optional remote access and synchronization later.
 - Help users improve their agentic engineering through continuity coaching, prompt and workflow insights, skill suggestions, and provider-neutral best practices derived from their own work.
 
-The product should own the user experience and normalized session model, not provider credentials or private authentication formats. Provider-specific hooks, ACP implementations, SDKs, and CLIs are adapters behind a stable AgentBase interface.
+The product should own the user experience and normalized session model, not provider credentials or private authentication formats. Provider-specific hooks, ACP implementations, SDKs, and CLIs are adapters behind a stable Ambientic interface.
 
 ## Current product increment
 
-This increment is deliberately personal and local. It adds the first full AgentBase workspace above the providers while keeping each provider responsible for its own account and credentials.
+This increment is deliberately personal and local. It adds the first full Ambientic workspace above the providers while keeping each provider responsible for its own account and credentials.
 
 ### User experience
 
-1. Open the AgentBase macOS app.
+1. Open the Ambientic macOS app.
 2. See whether Claude Code, Codex, and Hermes are installed and connected.
 3. Land on an **Overview** command center instead of a conventional chat-history list.
 4. See animated Codex, Claude Code, Hermes, and create-task pads alongside active, needs-input, total-thread, and APC hardware signals.
 5. Browse a cross-provider thread mosaic; select any card to open its full transcript, composer, approvals, and artifacts in the preserved **Threads** tab.
-6. Start a managed local task from a provider pad or create-task pad by choosing a provider, working folder, and first prompt; AgentBase uses the provider's existing local login.
+6. Start a managed local task from a provider pad or create-task pad by choosing a provider, working folder, and first prompt; Ambientic uses the provider's existing local login.
 7. Press an APC40 MKII pad to open that exact live task in **Threads** and present its linked localhost, iOS, or Android preview; then hold that physical column's **Record Arm** button to speak and release it to transcribe and send.
 8. Use green running, red input-required, and blue idle pad feedback, or open the compact controller for previews, usage, connectors, and MIDI Learn mappings.
 
@@ -49,7 +49,7 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - Managed Hermes conversations through Hermes ACP, including streamed messages, tool activity, cancellation, and permission requests.
 - Completed Hermes turns are reconciled against Hermes' local database so dropped ACP chunks cannot leave a partial answer in the transcript.
 - User and assistant messages are selectable, each message has a Copy action, and the thread header can copy the complete human-readable chat without tool payloads.
-- Threads can be renamed from their header; AgentBase stores the alias against the stable provider thread ID and uses it consistently in Overview, Threads, the compact controller, and MIDI pads.
+- Threads can be renamed from their header; Ambientic stores the alias against the stable provider thread ID and uses it consistently in Overview, Threads, the compact controller, and MIDI pads.
 - Agent responses render GitHub-flavored Markdown with larger reading typography, clear heading/list/table hierarchy, blockquotes, task lists, inline and fenced code, safe clickable links, and restrained semantic color.
 - Managed Claude Code turns through the installed Claude CLI with streamed structured output and the existing Claude login.
 - Readable recent Codex conversations plus dormant Claude Code and Hermes conversation history discovered directly from each provider's local store.
@@ -79,11 +79,11 @@ This increment is deliberately personal and local. It adds the first full AgentB
 
 ### Not included yet
 
-- AgentBase accounts or a cloud backend.
+- Ambientic accounts or a cloud backend.
 - Universal monetary spend totals from consumer subscriptions. Exact currency reporting requires an optional provider billing connection (for example an OpenAI organization Admin API key); Claude subscription spend is not exposed by the local CLI, and Hermes costs belong to its configured upstream provider.
 - Archived/deleted-provider sessions and Claude internal subagent transcripts; the workspace intentionally indexes top-level user conversations only.
 - Rich diff rendering, image galleries, or embedded localhost web previews inside the full workspace; this increment lists touched files and retains the existing companion-preview system.
-- Fully interactive Claude tool approvals inside AgentBase. Claude managed turns currently use the CLI's `acceptEdits` permission mode; unsupported permission prompts are reported and can be continued in the native surface.
+- Fully interactive Claude tool approvals inside Ambientic. Claude managed turns currently use the CLI's `acceptEdits` permission mode; unsupported permission prompts are reported and can be continued in the native surface.
 - Windows or Linux support.
 - Generic MIDI-controller output profiles.
 - Public auto-update infrastructure.
@@ -91,9 +91,9 @@ This increment is deliberately personal and local. It adds the first full AgentB
 
 ## Friend test build
 
-The current prerelease target is **AgentBase 0.8.1 alpha 1** for Apple-silicon Macs (`arm64`). The distributable is a ZIP containing `AgentBase.app`.
+The current prerelease target is **Ambientic 0.8.1 alpha 1** for Apple-silicon Macs (`arm64`). The distributable is a ZIP containing `Ambientic.app`.
 
-This build is ad-hoc signed and integrity-verified, but it is not Apple-notarized yet. A tester may need to move `AgentBase.app` into Applications, Control-click it, choose **Open**, and confirm the macOS warning. Accessibility is needed for terminal focus; microphone and screen-recording permissions are only requested when their corresponding hardware or preview features are used.
+This build is ad-hoc signed and integrity-verified, but it is not Apple-notarized yet. A tester may need to move `Ambientic.app` into Applications, Control-click it, choose **Open**, and confirm the macOS warning. Accessibility is needed for terminal focus; microphone and screen-recording permissions are only requested when their corresponding hardware or preview features are used.
 
 ## Architecture
 
@@ -121,19 +121,19 @@ The Electron main process owns local system access, session state, connectors, p
 
 ## APC40 MKII behavior
 
-AgentBase targets the protocol documented for the Akai APC40 MKII:
+Ambientic targets the protocol documented for the Akai APC40 MKII:
 
 - The 40 clip-launch pads are MIDI notes `0–39`.
-- APC note numbers begin on the hardware's bottom row; AgentBase reverses the row order so session 1 is always the physical top-left pad.
+- APC note numbers begin on the hardware's bottom row; Ambientic reverses the row order so session 1 is always the physical top-left pad.
 - Sessions fill the top row from left to right before moving downward.
 - Select an agent pad, then hold the Record Arm button in that agent's physical column to capture a voice prompt.
 - Release Record Arm to stop, transcribe locally, and send the prompt directly to the selected agent.
-- Record Arm MIDI note `0x30` uses channels 0–7 for columns 1–8; AgentBase validates the selected pad's column before recording.
+- Record Arm MIDI note `0x30` uses channels 0–7 for columns 1–8; Ambientic validates the selected pad's column before recording.
 - Only the held column's Record Arm LED is on during capture. It turns off immediately on release while transcription continues; the global transport Record button is not used.
-- AgentBase refreshes the complete owned LED surface every three seconds so a connected controller cannot leave an assigned session pad dark after transient MIDI state drift.
+- Ambientic refreshes the complete owned LED surface every three seconds so a connected controller cannot leave an assigned session pad dark after transient MIDI state drift.
 - Pad velocity selects the hardware color.
 - MIDI channel selects solid, pulsing, or blinking animation.
-- Alternate Ableton mode is enabled while AgentBase owns the grid.
+- Alternate Ableton mode is enabled while Ambientic owns the grid.
 
 Default session colors:
 
@@ -142,11 +142,11 @@ Default session colors:
 - Blinking red: requires user action and has not been acknowledged.
 - Blue: idle.
 
-Unassigned APC40 notes and CC controls can be learned as semantic AgentBase actions without replacing the default grid behavior unless the user explicitly maps that control.
+Unassigned APC40 notes and CC controls can be learned as semantic Ambientic actions without replacing the default grid behavior unless the user explicitly maps that control.
 
 ## APC mini mk2 behavior
 
-- AgentBase opens the device's dedicated `APC mini mk2 Control` input and output ports.
+- Ambientic opens the device's dedicated `APC mini mk2 Control` input and output ports.
 - The 64 RGB pads address agent tasks from physical top-left to bottom-right.
 - Green is running, red requires input, blinking red is unseen input required, blue is idle, and unused pads are off.
 - The eight Track buttons are per-column push-to-talk controls: select a task pad, hold its column's Track button to record, and release to transcribe and send.
@@ -155,7 +155,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic AgentBase acti
 
 ## Implementation plan and status
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 ### Completed
 
@@ -175,28 +175,30 @@ Last updated: 2026-07-23
 - [x] APC40 MKII semantic mapping model foundation added.
 - [x] Hermes plugin installed and enabled locally through Hermes' supported plugin manager.
 - [x] Connector status, refresh, launch, and installation actions wired through Electron IPC.
-- [x] APC40 MKII Note/CC Learn mappings persisted in local AgentBase preferences.
+- [x] APC40 MKII Note/CC Learn mappings persisted in local Ambientic preferences.
 - [x] Learned APC40 controls routed to focus, navigation, preview, launch, and window actions.
 - [x] Clean local-agent connector strip and APC40 MKII mapping screen.
-- [x] Product renamed to AgentBase across runtime UI, package metadata, release metadata, logs, and documentation.
+- [x] Product renamed to Ambientic across runtime UI, package metadata, release metadata, logs, and documentation.
+- [x] Supplied orbital Ambientic mark installed as the macOS application icon and reused across onboarding, workspace navigation, loading/empty states, Dock identity, and the compact controller.
+- [x] Existing Electron state migrates once from the legacy product directory; provider hooks move to `~/.ambientic/` while accepting the prior hook and quota-cache paths during migration.
 - [x] Claude Code, Codex, and Hermes all detected and reported connected on the development Mac.
-- [x] Local arm64 AgentBase app and DMG packaging.
-- [x] Packaged AgentBase app launched locally and verified through its health endpoint.
+- [x] Local arm64 Ambientic app and DMG packaging.
+- [x] Packaged Ambientic app launched locally and verified through its health endpoint.
 - [x] Recent Codex desktop tasks imported read-only and routed through stable Codex task deep links.
 - [x] APC40 MKII grid reordered from physical top-left to bottom-right.
 - [x] APC40 MKII state palette normalized to green running, red action required, and blue idle.
 - [x] Contextual card naming: task title first, then provider/platform or meaningful project; home-folder usernames are suppressed.
 - [x] Restored the individual-session-per-pad APC40 layout after testing column banking.
 - [x] APC40 MKII per-column Record Arm buttons provide hold-to-record/release-to-send voice prompts for the selected agent.
-- [x] Voice delivery uses the managed AgentBase provider bridge for non-terminal sessions and paste-plus-submit for an already-running terminal agent.
+- [x] Voice delivery uses the managed Ambientic provider bridge for non-terminal sessions and paste-plus-submit for an already-running terminal agent.
 - [x] Global transport Record no longer latches or controls voice input; per-column Record Arm LEDs mirror only active microphone capture.
 - [x] APC40 MKII full-grid LED heartbeat added, with a physical top-left pad regression test for green running, red input-required, blue idle, and off only when unassigned.
-- [x] Full AgentBase desktop workspace added alongside the compact always-on-top APC40 controller.
+- [x] Full Ambientic desktop workspace added alongside the compact always-on-top APC40 controller.
 - [x] Project-grouped task navigation, transcript reader, shared prompt composer, error reporting, status, and touched-file artifact panel.
 - [x] Codex app-server bridge for existing-task resume/read, new tasks, streamed item updates, turn interruption, and native approval requests.
 - [x] Hermes ACP bridge for session resume/new/prompt, streamed agent/tool updates, cancellation, and native permission requests.
 - [x] Claude Code local CLI bridge for new/resumed sessions and structured streamed output using the provider's existing local login.
-- [x] APC40 MKII pad presses now select the matching task in the AgentBase workspace; **Open native** preserves direct terminal/Codex navigation.
+- [x] APC40 MKII pad presses now select the matching task in the Ambientic workspace; **Open native** preserves direct terminal/Codex navigation.
 - [x] Normal macOS dock/application behavior restored for the full workspace while retaining the menu-bar controller.
 - [x] Provider capability checks distinguish installed/observable agents from agents currently authenticated for managed prompts; invalid Claude login state is surfaced before task creation.
 - [x] Read-only Claude Code history index from top-level `~/.claude/projects/*/*.jsonl` transcripts, with project paths and prompt-derived titles.
@@ -219,30 +221,30 @@ Last updated: 2026-07-23
 - [x] Thread typography increased to a 15 px body size with a relaxed 1.74 line height, wider spacing, shorter readable line length, and clearer user/agent separation.
 - [x] GitHub-flavored Markdown rendering added for headings, emphasis, ordered and unordered lists, tables, blockquotes, task lists, strikethrough, inline code, and fenced code.
 - [x] Web, localhost, and email links are clickable through a protocol-validated Electron bridge; scripts, local files, relative paths, and credential-bearing URLs are rejected.
-- [x] Message role labels now identify the actual provider (Codex, Claude Code, or Hermes) instead of labeling every response as AgentBase.
+- [x] Message role labels now identify the actual provider (Codex, Claude Code, or Hermes) instead of labeling every response as Ambientic.
 - [x] Codex lifecycle events are matched to the exact active turn, preventing stale completion notifications from showing a still-running task as “Needs input.”
 - [x] Reopening a Codex conversation restores its in-progress turn ID and reconciles the canonical provider transcript after completion.
-- [x] The AgentBase composer remains usable while Codex is working and sends follow-up guidance through `turn/steer` instead of starting a conflicting second turn.
+- [x] The Ambientic composer remains usable while Codex is working and sends follow-up guidance through `turn/steer` instead of starting a conflicting second turn.
 - [x] Full workspace Settings area added with a dedicated AI Providers account-management section for Claude Code, Codex, and Hermes.
-- [x] Provider settings expose installed CLI, local authentication, AgentBase hook, version, and credential-ownership status without storing provider secrets.
-- [x] Claude “Connect account” now runs the provider-owned `claude /login` flow inside an AgentBase wizard using a hidden macOS pseudo-terminal; no separate Terminal window is opened.
+- [x] Provider settings expose installed CLI, local authentication, Ambientic hook, version, and credential-ownership status without storing provider secrets.
+- [x] Claude “Connect account” now runs the provider-owned `claude /login` flow inside an Ambientic wizard using a hidden macOS pseudo-terminal; no separate Terminal window is opened.
 - [x] The Claude wizard renders sanitized bounded CLI output, provides Up/Down/Continue and optional text-response controls for official interactive prompts, opens only Claude/Anthropic HTTPS authentication URLs, polls `claude auth status`, and displays an explicit connected/failed result.
 - [x] Replaced the incompatible macOS `script` wrapper after a real packaged failure (`tcgetattr/ioctl: Operation not supported on socket`) with a bundled stdio-to-PTY relay that gives Claude Code a genuine interactive terminal without displaying Terminal.app.
 - [x] Claude connection failures now retain their explanation and offer explicit Close and Retry connection actions instead of removing the interaction controls without a recovery path.
-- [x] Claude Connect account now defaults directly to the official Claude subscription path, automatically selects “Claude account with subscription” when the CLI presents its account menu, and opens the browser without an AgentBase account-type chooser.
+- [x] Claude Connect account now defaults directly to the official Claude subscription path, automatically selects “Claude account with subscription” when the CLI presents its account menu, and opens the browser without an Ambientic account-type chooser.
 - [x] Claude OAuth URLs are validated before browser launch; authorization links missing the required `redirect_uri` are rejected, and the bundled PTY uses a wide terminal to prevent long OAuth links from being visually wrapped and truncated.
 - [x] Claude’s one-time authorization-code prompt is detected as a dedicated step: paste submits immediately, shows an explicit verification state, never echoes or stores the code, and keeps noisy terminal redraws inside collapsed diagnostics.
 - [x] Claude verification no longer calls the unsupported `claude auth status` argument (which older Claude Code versions interpret as an agent prompt); it checks non-secret provider account metadata, recognizes the CLI success screen, and returns a retry action after 30 seconds instead of spinning indefinitely.
 - [x] Codex connector discovery now falls back to the binary bundled inside ChatGPT.app, so the compact controller no longer reports “Not installed” when no shell PATH alias exists.
 - [x] Compact connector status now distinguishes provider authentication from hook installation and routes “Sign in” to the account flow instead of labeling an unauthenticated CLI “Connected.”
-- [x] Codex browser login now shows explicit waiting, connected, failed, and timeout feedback in AgentBase, with an `account/read` fallback when the live completion notification is missed.
+- [x] Codex browser login now shows explicit waiting, connected, failed, and timeout feedback in Ambientic, with an `account/read` fallback when the live completion notification is missed.
 - [x] Provider-auth feedback is now persistent at the application level and shown globally, so returning browser focus or leaving Settings cannot overwrite or lose the Codex login result.
 - [x] Codex account connection now uses app-server’s official hosted ChatGPT browser flow, supports the normal Google/ChatGPT sign-in ceremony, and refreshes provider state from completion notifications without opening Terminal.
-- [x] Compact APC40 controller and mapping window now has an explicit close button that hides the mapper without quitting AgentBase; the workspace launcher can reopen it.
+- [x] Compact APC40 controller and mapping window now has an explicit close button that hides the mapper without quitting Ambientic; the workspace launcher can reopen it.
 - [x] Dedicated Improve → Continuity area added with provider risk cards, one handover per working folder, manual Prepare/Refresh/Open actions, and connected-provider continuation actions.
 - [x] Local deterministic `HandoverService` added with an 85% quota trigger, bounded README/Git/canonical-message context, project-level deduplication, atomic `HANDOVER.md` writes, and no credential or raw tool-log capture.
 - [x] Cross-provider continuation creates a managed target-provider task in the same working folder with a compact instruction to read the handover and continue without asking for the prior chat.
-- [x] The AgentBase project itself now has a real root `HANDOVER.md` prepared from this Codex session for continuation by Claude Code.
+- [x] The Ambientic project itself now has a real root `HANDOVER.md` prepared from this Codex session for continuation by Claude Code.
 - [x] Native APC mini mk2 profile added from Akai's v1.0 protocol: dedicated Control-port detection, 8×8/64-pad task selection, full RGB heartbeat, and Track-button column push-to-talk.
 - [x] Settings → MIDI Hardware added with persisted Automatic, APC40 MKII, and APC mini mk2 selection plus separate learned mappings per device.
 - [x] Existing APC40 MKII protocol, colors, 40-pad ordering, Alternate Ableton mode, and Record Arm behavior remain intact.
@@ -251,15 +253,17 @@ Last updated: 2026-07-23
 - [x] Codex usage discovery now finds the binary bundled inside ChatGPT.app, matching connector discovery instead of depending on a shell `codex` command.
 - [x] Overview quota meters retain the provider's real window duration and clearly distinguish a missing short-term window from a failed collector.
 - [x] Overview provider balance has a manual refresh control again, with disabled/spinning feedback while all provider collectors update.
-- [x] Claude quota collection now uses Claude Code's local status-line `rate_limits` telemetry instead of submitting `/usage` through print mode; the hook stores only normalized five-hour/seven-day percentages and reset times under `~/.agentbase/`.
+- [x] Claude quota collection now uses Claude Code's local status-line `rate_limits` telemetry instead of submitting `/usage` through print mode; the hook stores only normalized five-hour/seven-day percentages and reset times under `~/.ambientic/`.
 - [x] Claude quota cache validation rejects observations older than 24 hours, and Overview surfaces the collector's actionable reason in the row tooltip instead of implying a fabricated balance.
 - [x] Native four-screen first-run experience added: mysterious Welcome, local display-name capture, provider connection/first-task choice, and skippable MIDI controller discovery before Overview.
 - [x] Onboarding uses full-screen single decisions, oversized type, floating spatial objects, provider-specific connection cards, one dominant CTA, reduced-motion support, and the ambient game/instrument language recorded in `ART_DIRECTION.md`.
-- [x] Codex and Claude reuse their guided AgentBase authentication; Hermes opens its provider-owned local setup; Kimi Code is detected as an account-only connector and links to its official install path when absent.
+- [x] Codex and Claude reuse their guided Ambientic authentication; Hermes opens its provider-owned local setup; Kimi Code is detected as an account-only connector and links to its official install path when absent.
 - [x] APC40 MKII and APC mini mk2 connection transitions automatically play one temporary cold Vibe composition, then restore truthful task LEDs.
-- [x] First-run state is local and replayable from Settings → Replay onboarding or `⌘⇧O`; `AGENTBASE_STATE_DIR` provides disposable isolated state for repeatable developer smokes.
+- [x] First-run state is local and replayable from Settings → Replay onboarding or `⌘⇧O`; `AMBIENTIC_STATE_DIR` provides disposable isolated state for repeatable developer smokes.
 - [x] Thread composer now supports native file/folder selection plus Build, Plan, and Ask modes. Codex receives images and path mentions through app-server inputs; Claude uses its native planning permission mode where applicable; Hermes receives a compact provider-neutral local-context instruction.
-- [x] Codex user-message echoes reconcile against AgentBase's optimistic row by stable client ID or normalized text, so the temporary local message is replaced rather than briefly duplicated. Attachment and mode metadata survive the replacement.
+- [x] Codex user-message echoes reconcile against Ambientic's optimistic row by stable client ID or normalized text, so the temporary local message is replaced rather than briefly duplicated. Attachment and mode metadata survive the replacement.
+- [x] Ambientic rename/build integration audited against the complete local AgentBase-era increment: consumption tracking, compact provider balances, activity-first thread navigation, provider-neutral turn states, APC40 MKII/APC mini mk2 profiles, voice routing, preview activation, and both ambient Vibe sequences are present in the Ambientic source and regression suite.
+- [x] Claude terminal attention is immediate and hardware-truthful: `PermissionRequest` turns the selected task red as soon as an approval dialog opens, while a narrow `PreToolUse` matcher does the same for `AskUserQuestion` and `ExitPlanMode`; ordinary tool calls remain green and the next `PostToolUse`/prompt restores working state.
 
 ### In progress
 
@@ -269,11 +273,11 @@ Last updated: 2026-07-23
 - [ ] Physically validate per-column Record Arm hold/release, microphone permission, transcription latency, LED feedback, and direct prompt submission across Claude Code, Codex, and Hermes.
 - [ ] Physical validation of learned non-grid APC40 MKII buttons, knobs, and faders.
 - [ ] Physically validate all 64 APC mini mk2 pad positions, RGB colors, Track-button hold/release voice capture, Scene-button learning, and fader learning.
-- [ ] Restart active agent terminals so every process loads the migrated `~/.agentbase/hook.py` integration.
+- [ ] Restart active agent terminals so every process loads the migrated `~/.ambientic/hook.py` integration.
 - [ ] Validate one real managed prompt and interrupt on each locally authenticated provider after the packaged app relaunch.
-- [ ] Explore a supported shared-host transport for live Codex desktop mirroring. Today AgentBase and Codex desktop share persisted task history, but their separate stdio app-server processes do not share the same in-memory active turn; reopen the task in Codex to refresh it after an AgentBase-owned turn.
+- [ ] Explore a supported shared-host transport for live Codex desktop mirroring. Today Ambientic and Codex desktop share persisted task history, but their separate stdio app-server processes do not share the same in-memory active turn; reopen the task in Codex to refresh it after an Ambientic-owned turn.
 - [ ] Validate Codex and Hermes approval cards against a real tool permission request.
-- [ ] Restart Claude Code and send one real message so its newly installed AgentBase status-line bridge receives the first subscription `rate_limits` payload; confirm five-hour and seven-day balances appear after Overview refresh.
+- [ ] Restart Claude Code and send one real message so its newly installed Ambientic status-line bridge receives the first subscription `rate_limits` payload; confirm five-hour and seven-day balances appear after Overview refresh.
 - [ ] Run one human-paced onboarding pass from a clean profile, including Codex browser login, Claude embedded login, first-task creation, controller skip, and replay from Settings.
 - [ ] Physically repeat the arrival-light test with the APC mini mk2; automated coverage confirms the same 64-pad Vibe path, while the connected visual smoke used an APC40 MKII.
 - [ ] Use a thread's **Hand off →** action (or the near-limit banner) as the first live cross-provider takeover test now that Claude is connected.
@@ -281,7 +285,6 @@ Last updated: 2026-07-23
 
 ### Next
 
-- [ ] Add a proper AgentBase application icon.
 - [ ] Replace terminal-owned Hermes and Kimi setup with guided provider-native browser/device-code ceremonies where their supported local protocols expose reliable completion callbacks.
 - [ ] Bundle a supported recording/transcription runtime so voice prompts do not depend on Homebrew tools in public builds.
 - [ ] Configure Apple notarization for distribution beyond the development Mac.
@@ -296,7 +299,8 @@ Last updated: 2026-07-23
 
 ### Verification
 
-- `npm test`: 73 tests passing, including activity-first thread ordering/recent separation, Codex optimistic-message reconciliation, native attachment/mode payloads, Claude status-line quota parsing/staleness, Claude long-context compaction/error guidance, provider connection commands including Kimi, MIDI arrival-light transition, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
+- 2026-07-24 Ambientic integration checkpoint: the complete combined working tree passes all 75 tests before packaging; the release bundle is regenerated from this exact source state rather than relying on a pre-rename app artifact.
+- `npm test`: 75 tests passing, including immediate Claude approval/question → red-pad propagation, ordinary-tool false-positive protection, activity-first thread ordering/recent separation, Codex optimistic-message reconciliation, native attachment/mode payloads, Claude status-line quota parsing/staleness, Claude long-context compaction/error guidance, provider connection commands including Kimi, MIDI arrival-light transition, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
 - Consumption-ledger regressions cover exact Codex reset-credit transitions, duplicate suppression, purchased-credit additions/consumption, and natural window renewal classification.
 - Vibe-sequence regressions verify both cold compositions, full 40/64-pad native layouts, temporal movement, minimum composition duration, and delta-frame smoothing.
 - Thread-order regressions verify latest-user-interaction priority, recent/archive separation, and provider/search filtering.
@@ -304,8 +308,8 @@ Last updated: 2026-07-23
 - `npm run build`: production main, preload, and renderer bundles succeed.
 - Pad activation build verification confirms the renderer subscribes to hardware workspace selections, switches to Threads, resolves the selected ID through the existing workspace bridge, refreshes companion candidates, and exposes linked previews through the preload boundary.
 - Real Hermes transcript smoke renders at 15 px/26.1 px line height with four H2 sections, four H3 subsections, six ordered lists, six clickable links, four emphasized spans in the final message, and no visible raw `**` markers.
-- Friend-test archive `AgentBase-0.8.1-alpha.1-mac-arm64.zip` is 96 MB, passes ZIP creation and strict deep code-signature verification, and has SHA-256 `670542ed7e3c36d0a3b0235c37f5ee202881f6f063402fcb1d948f52dc2fd53f`.
-- Full workspace production bundle succeeds with the local Codex app-server, Claude CLI, and Hermes ACP bridges included; no AgentBase credential storage or API-key field is introduced.
+- Friend-test archive `Ambientic-0.8.1-alpha.1-mac-arm64.zip` is 96 MB, passes ZIP creation and strict deep code-signature verification, and has SHA-256 `670542ed7e3c36d0a3b0235c37f5ee202881f6f063402fcb1d948f52dc2fd53f`.
+- Full workspace production bundle succeeds with the local Codex app-server, Claude CLI, and Hermes ACP bridges included; no Ambientic credential storage or API-key field is introduced.
 - Packaged GUI smoke confirms the full workspace discovers eight recent Codex tasks, marks this task running, renders top-row-first APC task ordering, and detects the connected APC40 MKII.
 - Final packaged app is running as a single local instance; `/health` returns `{"ok":true,"sessions":8}` and the APC40 MKII is connected.
 - Local history-index verification discovers 12 top-level Claude Code conversations and 7 Hermes conversations; Claude internal `subagents/` transcripts are excluded.
@@ -314,22 +318,22 @@ Last updated: 2026-07-23
 - Overview visual smoke uses 27 real local conversations and renders all three provider pads, one active Codex signal, Claude login-required state, Hermes ready state, four top metrics, create-task pad, and cross-provider mosaic.
 - Overview interaction smoke confirms a Codex provider pad preselects Codex in the task dialog, a mosaic card opens its exact conversation, and Overview/Threads tab switching works without creating or modifying a provider task.
 - Usage & Billing is isolated in Settings so Overview remains focused on agent providers, tasks, status, and hardware; the detailed three-provider quota board and persistent activity ledger retain their refresh behavior and data.
-- Live read-only quota smoke returned Codex's current weekly window successfully. Claude Code 2.1.31 proved that `/usage` is an interactive-only subscription command and that `claude -p /usage` is not a safe quota API; AgentBase no longer executes it. The replacement status-line bridge passed a privacy smoke with synthetic limits and persisted no supplied transcript or token field. The real Claude balance will populate after the next response from a restarted subscription-authenticated Claude session.
+- Live read-only quota smoke returned Codex's current weekly window successfully. Claude Code 2.1.31 proved that `/usage` is an interactive-only subscription command and that `claude -p /usage` is not a safe quota API; Ambientic no longer executes it. The replacement status-line bridge passed a privacy smoke with synthetic limits and persisted no supplied transcript or token field. The real Claude balance will populate after the next response from a restarted subscription-authenticated Claude session.
 - The reported Hermes conversation was recovered directly from `state.db` with its complete 4,052-character assistant response; the normalized view contains 13 useful messages and no empty assistant placeholders.
 - Live bridge smoke: Codex app-server initialized and read this exact Codex task with 19 turns; Hermes ACP initialized as `hermes-agent` 0.19.0; Claude CLI authentication check correctly identified the currently invalid local login.
-- Cross-host Codex diagnostic confirmed the desktop host reports this task live while a separately spawned, read-only app-server reports it `notLoaded` and sees only the persisted checkpoint. The lifecycle fix therefore guarantees exact-turn state inside AgentBase and persisted transcript continuity; instantaneous mirroring into an already-open Codex desktop view remains a provider-host limitation.
-- Packaged `AgentBase.app` is running, owns the local controller port, responds successfully at `/health`, and detects the connected APC40 MKII.
-- Latest packaged Improve/Continuity and corrected embedded-Claude-login build is running as a single instance; `/health` returns `{"ok":true,"sessions":9}`, the APC40 MKII is connected, and the bundled PTY relay was executed successfully from `AgentBase.app/Contents/Resources`.
-- Latest packaged individual-pad build is running and healthy with eight currently discovered sessions; contextual labels remain active, so the active task resolves to `AgentBase — Codex Desktop` while untitled home-folder agents resolve to their provider instead of `samori`.
+- Cross-host Codex diagnostic confirmed the desktop host reports this task live while a separately spawned, read-only app-server reports it `notLoaded` and sees only the persisted checkpoint. The lifecycle fix therefore guarantees exact-turn state inside Ambientic and persisted transcript continuity; instantaneous mirroring into an already-open Codex desktop view remains a provider-host limitation.
+- Packaged `Ambientic.app` is running, owns the local controller port, responds successfully at `/health`, and detects the connected APC40 MKII.
+- Latest packaged Improve/Continuity and corrected embedded-Claude-login build is running as a single instance; `/health` returns `{"ok":true,"sessions":9}`, the APC40 MKII is connected, and the bundled PTY relay was executed successfully from `Ambientic.app/Contents/Resources`.
+- Latest packaged individual-pad build is running and healthy with eight currently discovered sessions; contextual labels remain active, so the active task resolves to `Ambientic — Codex Desktop` while untitled home-folder agents resolve to their provider instead of `samori`.
 - Voice-input implementation now follows the APC40 MKII's track-channel Record Arm protocol and direct-send behavior; physical hold/release validation remains the next step.
 - Latest packaged LED-heartbeat build is running with eight sessions; live inspection confirms the first grid entry is this running Codex task, so physical top-left pad 1 is refreshed green every three seconds.
-- Packaged runtime imported the active `AgentBase` Codex desktop task as `running`; its focus endpoint returned `provider-deep-link` for this exact task.
+- Packaged runtime imported the active `Ambientic` Codex desktop task as `running`; its focus endpoint returned `provider-deep-link` for this exact task.
 - Runtime session ordering currently starts with live terminal agents followed by the active Codex desktop task and recent Codex tasks; up to 40 sessions are addressable from the APC40 grid in top-row-first order.
 - Visual smoke checks completed for the connector dashboard and APC40 MKII Learn interface at the minimum window width.
 - Local provider check: Claude Code 2.1.31 is installed and hooked but currently requires `/login`; Codex is connected through ChatGPT; Hermes is connected through its configured OpenAI Codex provider.
-- Current runnable app bundle: `release/mac-arm64/AgentBase.app` (not signed or notarized). The latest DMG creation reached the macOS `hdiutil` stage but failed there; the older DMG in `release/` does not contain this workspace increment and should not be used for this build.
+- Current runnable app bundle: `release/mac-arm64/Ambientic.app` (not signed or notarized). The latest DMG creation reached the macOS `hdiutil` stage but failed there; the older DMG in `release/` does not contain this workspace increment and should not be used for this build.
 - Latest packaged hardware-profile build is running as a single healthy instance with nine live hardware sessions; Automatic mode detected `APC mini mk2 Control`, opened the correct Control port, and initialized the native 8×8 surface.
-- Latest thread-alias build is packaged at `release/mac-arm64/AgentBase.app`; the current Codex task ID has a persistent `AgentBase` alias in local preferences and task cache. Quit and reopen the app once to load the new bundle.
+- Latest thread-alias build is packaged at `release/mac-arm64/Ambientic.app`; the current Codex task ID has a persistent `Ambientic` alias in local preferences and task cache. Quit and reopen the app once to load the new bundle.
 - Live Codex quota verification through the bundled ChatGPT binary returned Plus plan data with a 7-day window at 97% used; the provider response currently contains no secondary/short-term window, which the Overview now reports explicitly.
 - Post-reset packaged runtime verification recorded the reported limit hit, exact one-credit reset transition (97% → 0%, available resets 1 → 0), and subsequent 2% consumption in the renewed Codex window. The app is healthy at `/health`, and the ledger persisted across the packaged-app restart.
 - Isolated first-run visual smokes at 1420×880 verified the Welcome, four-provider connection field, and connected-controller screens. The real APC40 MKII was detected as 40 pads ready and played the new arrival composition; the same transition is unit-covered for the native APC mini mk2 64-pad path.
@@ -358,12 +362,12 @@ Replay onboarding without changing any provider account or conversation data:
 
 - In the app: **Settings → Replay onboarding**
 - From anywhere in the workspace: `⌘⇧O`
-- For an isolated developer smoke: launch with `AGENTBASE_STATE_DIR=/tmp/your-agentbase-smoke`
+- For an isolated developer smoke: launch with `AMBIENTIC_STATE_DIR=/tmp/your-ambientic-smoke`
 
 ## Local data and permissions
 
-- AgentBase preferences and mappings live in Electron's local `userData` directory.
-- The provider integration bridge lives under `~/.agentbase/`. Existing `~/.claude-controller/` references are migrated or accepted for compatibility.
+- Ambientic preferences and mappings live in Electron's local `userData` directory.
+- The provider integration bridge lives under `~/.ambientic/`. Existing `~/.agentbase/` and `~/.claude-controller/` references are migrated or accepted only for compatibility.
 - Claude, Codex, and Hermes keep ownership of their authentication data.
 - Accessibility permission is required only for focusing terminal windows.
 - Microphone permission is required only while recording voice prompts. Audio is written to a temporary local folder and removed after local Whisper transcription.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { agentForCommand } from '../src/main/discovery.js'
 import { providerConnectionCommand, providerExecutableCandidates } from '../src/main/connectors.js'
 
-test('detects the personal AgentBase provider commands', () => {
+test('detects the personal Ambientic provider commands', () => {
   assert.equal(agentForCommand('/opt/homebrew/bin/claude'), 'claude')
   assert.equal(agentForCommand('/Applications/Codex.app/Contents/Resources/codex'), 'codex')
   assert.equal(agentForCommand('/Users/test/.local/bin/hermes'), 'hermes')

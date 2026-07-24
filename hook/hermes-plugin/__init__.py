@@ -1,10 +1,10 @@
-"""Hermes lifecycle bridge for the local AgentBase app."""
+"""Hermes lifecycle bridge for the local Ambientic app."""
 import json
 from pathlib import Path
 import subprocess
 import sys
 
-HOOK = Path.home() / ".agentbase" / "hook.py"
+HOOK = Path.home() / ".ambientic" / "hook.py"
 
 
 def _callback(event_name):

@@ -4,7 +4,7 @@ import { codexDesktopState, parseCodexDesktopRows } from '../src/main/codex-desk
 
 const event = (timestamp, type) => JSON.stringify({ timestamp, type: 'event_msg', payload: { type } })
 
-test('maps Codex desktop rollout lifecycle to AgentBase states', () => {
+test('maps Codex desktop rollout lifecycle to Ambientic states', () => {
   const now = Date.parse('2026-07-22T13:20:00Z')
   assert.equal(codexDesktopState([
     event('2026-07-22T13:10:00Z', 'task_started'),
@@ -23,10 +23,10 @@ test('maps Codex desktop rollout lifecycle to AgentBase states', () => {
 
 test('creates stable Codex desktop session records and deep links', () => {
   const [session] = parseCodexDesktopRows(JSON.stringify([{
-    id: 'thread-123', cwd: '/Users/test/AgentBase', title: '  Build   AgentBase  ', rollout_path: '/tmp/rollout.jsonl', activity_ms: 42
+    id: 'thread-123', cwd: '/Users/test/Ambientic', title: '  Build   Ambientic  ', rollout_path: '/tmp/rollout.jsonl', activity_ms: 42
   }]))
   assert.equal(session.id, 'codex-desktop:thread-123')
-  assert.equal(session.project, 'AgentBase')
-  assert.equal(session.task, 'Build AgentBase')
+  assert.equal(session.project, 'Ambientic')
+  assert.equal(session.task, 'Build Ambientic')
   assert.equal(session.deepLink, 'codex://threads/thread-123')
 })

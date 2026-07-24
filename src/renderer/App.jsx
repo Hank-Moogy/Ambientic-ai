@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { AgentIcon } from './AgentIcon.jsx'
 import { sessionLabels } from './session-labels.mjs'
+import ambienticLogo from './assets/ambientic-logo.png'
 
 function fmtElapsed (ms) {
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -254,7 +255,7 @@ function ConnectorStrip ({ connectors, onInstall, onOpen, onConnect, onRefresh }
             : connector.manageable === false
                 ? 'Login required'
                 : !connector.configured
-                    ? 'Needs AgentBase hook'
+                    ? 'Needs Ambientic hook'
                     : 'Connected'
           const action = !connector.installed
             ? 'Missing'
@@ -299,12 +300,12 @@ function MidiMappingPanel ({ midi, onClose }) {
       <div className="midi-map__header">
         <span className="midi-map__device">
           <span className="midi-map__device-dot" data-connected={Boolean(midi?.connected)} />
-          <span><b>{midi?.model || 'Akai APC controller'}</b><small>{midi?.connected ? `Connected · ${midi.gridLabel || ''} AgentBase mode` : `Connect the selected ${midi?.shortModel || 'APC controller'} to begin`}</small></span>
+          <span><b>{midi?.model || 'Akai APC controller'}</b><small>{midi?.connected ? `Connected · ${midi.gridLabel || ''} Ambientic mode` : `Connect the selected ${midi?.shortModel || 'APC controller'} to begin`}</small></span>
         </span>
         <button type="button" onClick={onClose}>Done</button>
       </div>
       <p className="midi-map__hint">
-        The {midi?.gridLabel || 'pad'} grid selects agent tasks by default. Learn any other button, knob, or fader to an AgentBase action.
+        The {midi?.gridLabel || 'pad'} grid selects agent tasks by default. Learn any other button, knob, or fader to an Ambientic action.
       </p>
       <div className="midi-map__actions">
         {(midi?.actions || []).map((action) => {
@@ -558,8 +559,9 @@ export default function App () {
     <div className="app">
       <div className="app__content" ref={bodyRef}>
         <div className="titlebar">
+          <span className="titlebar__brand"><img src={ambienticLogo} alt="" /></span>
           <span className="titlebar__dot" data-needy={needy > 0} />
-          <span className="titlebar__label">AgentBase</span>
+          <span className="titlebar__label">Ambientic</span>
           <DisplayRoute topology={displays} onChoose={() => window.controller.showDisplayMenu()} />
           <button className="titlebar__midi" type="button" data-connected={Boolean(midi?.connected)} onClick={() => setShowMidiMap((value) => !value)}>
             {midi?.shortModel || 'APC'} <span />

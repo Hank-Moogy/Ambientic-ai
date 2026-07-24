@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
+import { cpSync, existsSync, readdirSync } from 'node:fs'
 import { SessionStore, STATE } from './sessions.js'
 import { startServer } from './server.js'
 import { focusSession, pasteClipboardImage, pasteClipboardText, submitTerminalPrompt } from './focus.js'
@@ -29,9 +30,26 @@ ensureEnhancedPath()
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// A disposable state directory makes the first-run experience replayable in
-// automated visual smokes without touching the user's real AgentBase data.
-if (process.env.AGENTBASE_STATE_DIR) app.setPath('userData', process.env.AGENTBASE_STATE_DIR)
+// A disposable state directory makes first-run replayable without touching the
+// user's real data. Keep the old variable as a compatibility alias.
+const explicitStateDirectory = process.env.AMBIENTIC_STATE_DIR || process.env.AGENTBASE_STATE_DIR
+if (explicitStateDirectory) {
+  app.setPath('userData', explicitStateDirectory)
+} else if (process.platform === 'darwin') {
+  // The product rename changes Electron's default userData directory. Copy the
+  // existing local state once so provider aliases, onboarding, mappings, and
+  // consumption history survive the move from AgentBase to Ambientic.
+  const ambienticState = app.getPath('userData')
+  const legacyState = join(dirname(ambienticState), 'AgentBase')
+  try {
+    const ambienticIsEmpty = !existsSync(ambienticState) || readdirSync(ambienticState).length === 0
+    if (ambienticState !== legacyState && ambienticIsEmpty && existsSync(legacyState)) {
+      cpSync(legacyState, ambienticState, { recursive: true, force: false })
+    }
+  } catch (error) {
+    console.error(`[ambientic] legacy state migration skipped: ${error.message}`)
+  }
+}
 
 const DEFAULT_WIDTH = 232
 const MIN_WIDTH = 232
@@ -113,7 +131,7 @@ function setLaunchAtLogin (enabled) {
     app.setLoginItemSettings({ openAtLogin: Boolean(enabled), type: 'mainAppService' })
     savePrefs({ ...loadPrefs(), launchAtLogin: Boolean(enabled) })
   } catch (error) {
-    console.error(`[agentbase] could not update login item: ${error.message}`)
+    console.error(`[ambientic] could not update login item: ${error.message}`)
   }
   return loginItemSettings()
 }
@@ -224,10 +242,10 @@ function createWindow () {
   else win.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'controller' } })
 
   win.webContents.on('console-message', (_event, level, message) => {
-    if (level >= 2) console.error(`[agentbase:renderer] ${message}`)
+    if (level >= 2) console.error(`[ambientic:renderer] ${message}`)
   })
   win.webContents.on('render-process-gone', (_event, details) => {
-    console.error(`[agentbase:renderer] process gone: ${details.reason}`)
+    console.error(`[ambientic:renderer] process gone: ${details.reason}`)
   })
 
   // The compact hardware view remains available from the workspace and tray,
@@ -249,21 +267,22 @@ function createWindow () {
     pushMidi()
     pushVoice()
     pushConnectors()
-    const smokeScreenshot = process.env.AGENTBASE_SMOKE_SCREENSHOT
-    if (smokeScreenshot && process.env.AGENTBASE_SMOKE_VIEW !== 'workspace') {
+    const smokeScreenshot = process.env.AMBIENTIC_SMOKE_SCREENSHOT || process.env.AGENTBASE_SMOKE_SCREENSHOT
+    const smokeView = process.env.AMBIENTIC_SMOKE_VIEW || process.env.AGENTBASE_SMOKE_VIEW
+    if (smokeScreenshot && smokeView !== 'workspace') {
       setTimeout(async () => {
         try {
-          if (process.env.AGENTBASE_SMOKE_VIEW === 'midi') {
+          if (smokeView === 'midi') {
             await win.webContents.executeJavaScript('document.querySelector(".titlebar__midi")?.click()')
             await new Promise((resolve) => setTimeout(resolve, 250))
           }
           const image = await win.webContents.capturePage()
           await writeFile(smokeScreenshot, image.toPNG())
-          console.log(`[agentbase] smoke screenshot: ${smokeScreenshot}`)
+          console.log(`[ambientic] smoke screenshot: ${smokeScreenshot}`)
         } catch (error) {
-          console.error(`[agentbase] smoke screenshot failed: ${error.message}`)
+          console.error(`[ambientic] smoke screenshot failed: ${error.message}`)
         } finally {
-          if (process.env.AGENTBASE_SMOKE_QUIT === '1') app.quit()
+          if ((process.env.AMBIENTIC_SMOKE_QUIT || process.env.AGENTBASE_SMOKE_QUIT) === '1') app.quit()
         }
       }, 2500)
     }
@@ -308,7 +327,7 @@ function createWorkspaceWindow () {
     height: 880,
     minWidth: 820,
     minHeight: 600,
-    title: 'AgentBase',
+    title: 'Ambientic',
     backgroundColor: '#0b0c0f',
     show: false,
     fullscreenable: true,
@@ -328,17 +347,18 @@ function createWorkspaceWindow () {
       workspaceWin.webContents.send('workspace-select', pendingWorkspaceSessionId)
       pendingWorkspaceSessionId = ''
     }
-    const smokeScreenshot = process.env.AGENTBASE_SMOKE_SCREENSHOT
-    if (smokeScreenshot && process.env.AGENTBASE_SMOKE_VIEW === 'workspace') {
+    const smokeScreenshot = process.env.AMBIENTIC_SMOKE_SCREENSHOT || process.env.AGENTBASE_SMOKE_SCREENSHOT
+    const smokeView = process.env.AMBIENTIC_SMOKE_VIEW || process.env.AGENTBASE_SMOKE_VIEW
+    if (smokeScreenshot && smokeView === 'workspace') {
       setTimeout(async () => {
         try {
           const image = await workspaceWin.webContents.capturePage()
           await writeFile(smokeScreenshot, image.toPNG())
-          console.log(`[agentbase] workspace smoke screenshot: ${smokeScreenshot}`)
+          console.log(`[ambientic] workspace smoke screenshot: ${smokeScreenshot}`)
         } catch (error) {
-          console.error(`[agentbase] workspace smoke screenshot failed: ${error.message}`)
+          console.error(`[ambientic] workspace smoke screenshot failed: ${error.message}`)
         } finally {
-          if (process.env.AGENTBASE_SMOKE_QUIT === '1') app.quit()
+          if ((process.env.AMBIENTIC_SMOKE_QUIT || process.env.AGENTBASE_SMOKE_QUIT) === '1') app.quit()
         }
       }, 11_000)
     }
@@ -355,7 +375,7 @@ function pushState () {
 
 async function pushWorkspaceThreads (force = false) {
   if (!workspace) return
-  try { sendToWindows('workspace-threads', await workspace.list({ force })) } catch (error) { console.error('[agentbase] workspace index failed:', error.message) }
+  try { sendToWindows('workspace-threads', await workspace.list({ force })) } catch (error) { console.error('[ambientic] workspace index failed:', error.message) }
 }
 
 function scheduleWorkspaceThreads () {
@@ -413,7 +433,7 @@ async function refreshConnectors () {
 function pushProviderAuth (payload) {
   const value = { ...payload, updatedAt: Date.now() }
   providerAuthState.set(payload.provider, value)
-  console.log(`[agentbase] ${payload.provider} auth: ${payload.status}${payload.email ? ` (${payload.email})` : ''}${payload.error ? ` — ${payload.error}` : ''}`)
+  console.log(`[ambientic] ${payload.provider} auth: ${payload.status}${payload.email ? ` (${payload.email})` : ''}${payload.error ? ` — ${payload.error}` : ''}`)
   sendToWindows('provider-auth', value)
 }
 
@@ -435,7 +455,7 @@ function verifyCodexLogin (loginId) {
             provider: 'codex',
             status: 'timeout',
             loginId,
-            error: 'AgentBase could not confirm the login. Return here and use Check connections.'
+            error: 'Ambientic could not confirm the login. Return here and use Check connections.'
           })
         }
       } catch (error) {
@@ -456,7 +476,7 @@ function updateTray () {
   tray.setToolTip(
     total
       ? `${total} session${total > 1 ? 's' : ''}${needy ? ` · ${needy} need you` : ''}`
-      : 'AgentBase — no sessions'
+      : 'Ambientic — no sessions'
   )
 }
 
@@ -537,7 +557,7 @@ function buildTrayMenu () {
   const zoom = savedZoom()
   const midiStatus = midiController?.getStatus() || { connected: false }
   return Menu.buildFromTemplate([
-    { label: 'Open AgentBase workspace', click: () => showWorkspace() },
+    { label: 'Open Ambientic workspace', click: () => showWorkspace() },
     { label: 'Show / Hide compact controller', click: () => (win.isVisible() ? win.hide() : win.showInactive()) },
     { label: 'Dock top-right', click: snapTopRight },
     {
@@ -566,9 +586,9 @@ function buildTrayMenu () {
     { label: 'Reconnect MIDI controller', click: () => midiController?.reconnect() },
     { type: 'separator' },
     { label: 'Install / update agent hooks…', click: runInstaller },
-    { label: 'Open AgentBase data folder', click: () => shell.openPath(join(app.getPath('home'), '.agentbase')) },
+    { label: 'Open Ambientic data folder', click: () => shell.openPath(join(app.getPath('home'), '.ambientic')) },
     { type: 'separator' },
-    { label: 'Quit AgentBase', click: () => { app.isQuitting = true; app.quit() } }
+    { label: 'Quit Ambientic', click: () => { app.isQuitting = true; app.quit() } }
   ])
 }
 
@@ -1067,7 +1087,13 @@ companions.on('change', () => pushCompanions())
 app.whenReady().then(() => {
   const prefs = loadPrefs()
   store.hydrateTasks(loadTaskCache())
-  if (app.dock) app.dock.show()
+  if (app.dock) {
+    const logoPath = app.isPackaged
+      ? join(process.resourcesPath, 'ambientic-logo.png')
+      : join(app.getAppPath(), 'resources', 'ambientic-logo.png')
+    if (existsSync(logoPath)) app.dock.setIcon(nativeImage.createFromPath(logoPath))
+    app.dock.show()
+  }
   const loginItem = ensureLaunchAtLoginPreference()
   workspace = new WorkspaceService(store, () => connectors, {
     aliases: prefs.threadAliases,
@@ -1137,8 +1163,8 @@ app.whenReady().then(() => {
   })
   companions.start()
   usage.start()
-  console.log(`[agentbase] accessibility granted: ${accessibilityGranted(false)}`)
-  console.log(`[agentbase] launch at login: ${loginItem.openAtLogin} (${loginItem.status})`)
+  console.log(`[ambientic] accessibility granted: ${accessibilityGranted(false)}`)
+  console.log(`[ambientic] launch at login: ${loginItem.openAtLogin} (${loginItem.status})`)
   // Reflect permission changes (user granting it in Settings) into the UI.
   const sysTimer = setInterval(pushSys, 3000)
   if (sysTimer.unref) sysTimer.unref()

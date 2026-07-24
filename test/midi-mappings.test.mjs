@@ -17,7 +17,7 @@ test('ignores releases and unsupported MIDI messages', () => {
   assert.equal(midiControlForMessage([0xF0, 0x47, 0x7F]), null)
 })
 
-test('keeps only known AgentBase actions and valid controls', () => {
+test('keeps only known Ambientic actions and valid controls', () => {
   assert.deepEqual(normalizeMappings({
     'note:0:64': 'focus-next',
     'cc:0:16': 'launch-hermes',

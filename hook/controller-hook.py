@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AgentBase hook — Claude Code, Codex CLI, Kimi, and Hermes.
+"""Ambientic hook — Claude Code, Codex CLI, Kimi, and Hermes.
 
 All three CLIs fire near-identical lifecycle hooks with JSON on stdin. This
 script maps each event to a pad state and fires a detached, best-effort curl to
@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-PORT = int(os.environ.get("AGENTBASE_PORT", os.environ.get("CLAUDE_CONTROLLER_PORT", "47600")))
+PORT = int(os.environ.get("AMBIENTIC_PORT", os.environ.get("AGENTBASE_PORT", os.environ.get("CLAUDE_CONTROLLER_PORT", "47600"))))
 URL = "http://127.0.0.1:%d/event" % PORT
 
 # Lifecycle event name -> canonical pad event the controller understands.
@@ -24,6 +24,7 @@ EVENT_MAP = {
     "UserPromptSubmit": "prompt",
     "PostToolUse": "tool",
     "Notification": "notification",
+    "PermissionRequest": "notification",
     "Stop": "stop",
     "SessionEnd": "session_end",
     # Hermes plugin hook names. Hermes fires on_session_end after every turn;
@@ -35,6 +36,20 @@ EVENT_MAP = {
     "on_session_end": "stop",
     "on_session_finalize": "session_end",
 }
+
+# Claude's PermissionRequest hook fires as soon as an approval dialog appears.
+# AskUserQuestion is different: it is a tool invocation that blocks for a human
+# response, so Ambientic installs a narrow PreToolUse matcher for that tool.
+# Ignore any unmatched PreToolUse event in case another integration invokes the
+# shared hook without the matcher.
+CLAUDE_INPUT_TOOLS = {"AskUserQuestion", "ExitPlanMode"}
+
+
+def event_for_hook(hook):
+    name = hook.get("hook_event_name", "")
+    if name == "PreToolUse":
+        return "notification" if hook.get("tool_name") in CLAUDE_INPUT_TOOLS else None
+    return EVENT_MAP.get(name)
 
 # Terminal GUI apps we walk the process tree looking for (comm -> app label).
 TERMINALS = {
@@ -163,7 +178,7 @@ def main(agent):
     except Exception:
         return
 
-    event = EVENT_MAP.get(hook.get("hook_event_name", ""))
+    event = event_for_hook(hook)
     if not event:
         return
 
@@ -199,7 +214,8 @@ def main(agent):
         if isinstance(msg, str) and msg.strip():
             payload["summary"] = msg.strip()[:180]
     elif event == "notification":
-        msg = hook.get("message") or hook.get("description") or hook.get("command")
+        msg = (hook.get("message") or hook.get("description") or
+               hook.get("command") or hook.get("tool_name"))
         if isinstance(msg, str) and msg.strip():
             payload["summary"] = msg.strip()[:180]
 

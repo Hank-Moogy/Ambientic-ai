@@ -297,9 +297,9 @@ test('applies a persistent user alias to workspace lists and snapshots', async (
     aliases: {},
     onAliasesChange: (aliases) => { saved = aliases }
   })
-  assert.deepEqual(await service.rename(session.id, '  AgentBase  '), { id: session.id, title: 'AgentBase' })
-  assert.deepEqual(renamed, { id: session.id, title: 'AgentBase', source: 'user' })
-  assert.equal(saved[session.id], 'AgentBase')
-  assert.equal((await service.list()).find((item) => item.id === session.id).task, 'AgentBase')
-  assert.equal(service.baseSnapshot(session).title, 'AgentBase')
+  assert.deepEqual(await service.rename(session.id, '  Ambientic  '), { id: session.id, title: 'Ambientic' })
+  assert.deepEqual(renamed, { id: session.id, title: 'Ambientic', source: 'user' })
+  assert.equal(saved[session.id], 'Ambientic')
+  assert.equal((await service.list()).find((item) => item.id === session.id).task, 'Ambientic')
+  assert.equal(service.baseSnapshot(session).title, 'Ambientic')
 })

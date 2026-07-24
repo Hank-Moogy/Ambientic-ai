@@ -105,6 +105,8 @@ html, body {
   font-size: 11px; font-weight: 600; letter-spacing: .14em;
   text-transform: uppercase; color: var(--text-dim);
 }
+.titlebar__brand { width: 22px; height: 22px; display:grid; place-items:center; overflow:hidden; flex:none; border:1px solid #68727c; border-radius:7px; background:#eff2f6; }
+.titlebar__brand img { width:19px; height:19px; object-fit:contain; }
 .display-route {
   -webkit-app-region: no-drag;
   display: inline-flex;

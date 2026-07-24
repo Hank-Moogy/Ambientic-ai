@@ -18,7 +18,7 @@ test('maps the APC mini mk2 8x8 grid from physical top-left downward', () => {
   assert.equal(miniPadForMessage([0x90, 0, 127]), 56)
 })
 
-test('renders 64 APC mini mk2 pads with AgentBase state colors', () => {
+test('renders 64 APC mini mk2 pads with Ambientic state colors', () => {
   const messages = miniGridLedMessages([
     { state: 'running' },
     { state: 'attention', unseen: true },

@@ -13,7 +13,7 @@ const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes
 // rendered transcript on reload.
 const COMPACTION_HEADER = 'You are resuming a conversation that exceeded the model'
 const COMPACTION_BUDGET = 24000
-const AGENTBASE_CONTEXT = /<agentbase-context\b[^>]*>[\s\S]*?<\/agentbase-context>\s*/i
+const AMBIENTIC_CONTEXT = /<(?:ambientic|agentbase)-context\b[^>]*>[\s\S]*?<\/(?:ambientic|agentbase)-context>\s*/i
 const CHAT_MODES = new Set(['build', 'plan', 'ask'])
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 
@@ -27,19 +27,19 @@ function message (role, text, extra = {}) {
   return { id: extra.id || randomUUID(), role, text: String(text || ''), ...extra }
 }
 
-function stripAgentBaseContext (text) {
-  return String(text || '').replace(AGENTBASE_CONTEXT, '').trim()
+function stripAmbienticContext (text) {
+  return String(text || '').replace(AMBIENTIC_CONTEXT, '').trim()
 }
 
 export function reconcileProviderMessage (messages, incoming) {
   const list = [...(messages || [])]
   let index = list.findIndex((entry) => entry.id === incoming.id)
   if (index < 0 && incoming.role === 'user') {
-    const cleanIncoming = stripAgentBaseContext(incoming.text)
+    const cleanIncoming = stripAmbienticContext(incoming.text)
     index = list.findLastIndex((entry) => (
       entry.role === 'user' &&
       entry.pendingProvider &&
-      stripAgentBaseContext(entry.text) === cleanIncoming
+      stripAmbienticContext(entry.text) === cleanIncoming
     ))
   }
   if (index >= 0) {
@@ -82,7 +82,7 @@ function providerPrompt (text, { mode, attachments }) {
   const paths = attachments.length
     ? `\nAttached local context:\n${attachments.map((item) => `- ${item.kind}: ${item.path}`).join('\n')}`
     : ''
-  return `<agentbase-context mode="${mode}">\n${guidance}${paths}\n</agentbase-context>\n${text}`
+  return `<ambientic-context mode="${mode}">\n${guidance}${paths}\n</ambientic-context>\n${text}`
 }
 
 function codexInputs (text, attachments) {
@@ -99,7 +99,7 @@ function codexInputs (text, attachments) {
 
 function codexItem (item) {
   if (!item) return null
-  if (item.type === 'userMessage') return message('user', stripAgentBaseContext(textContent(item.content)), { id: item.id })
+  if (item.type === 'userMessage') return message('user', stripAmbienticContext(textContent(item.content)), { id: item.id })
   if (item.type === 'agentMessage') return message('assistant', item.text, { id: item.id })
   if (item.type === 'reasoning') return message('activity', textContent(item.summary || item.content), { id: item.id, kind: 'reasoning', title: 'Reasoning' })
   if (item.type === 'commandExecution') return message('activity', item.aggregatedOutput || item.command || '', { id: item.id, kind: 'command', title: item.command || 'Command', status: item.status })
@@ -135,7 +135,7 @@ function claudeMessages (path) {
     let row
     try { row = JSON.parse(line) } catch { continue }
     if (row.type === 'user') {
-      const text = stripAgentBaseContext(textContent(row.message?.content))
+      const text = stripAmbienticContext(textContent(row.message?.content))
       if (text && !text.startsWith('<task-notification>')) output.push(message('user', text, { id: row.uuid }))
     } else if (row.type === 'assistant') {
       for (const part of row.message?.content || []) {
@@ -188,7 +188,7 @@ function readFileSlice (path, position, length) {
 
 function meaningfulClaudeUserText (row) {
   if (row?.type !== 'user') return ''
-  const value = stripAgentBaseContext(textContent(row.message?.content)).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const value = stripAmbienticContext(textContent(row.message?.content)).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
   if (!value || value.startsWith('<') || /^\/?(?:clear|compact|help)$/i.test(value)) return ''
   return value
 }
@@ -304,7 +304,7 @@ export class WorkspaceService extends EventEmitter {
             updatedAt: Number(row.updatedAt) || 0, state: 'history', history: true
           })))
         }
-      } catch (error) { console.error('[agentbase] Hermes history discovery failed:', error.message) }
+      } catch (error) { console.error('[ambientic] Hermes history discovery failed:', error.message) }
       this.history = new Map(histories.map((session) => [session.id, session]))
       this.historyRefreshedAt = Date.now()
     }
@@ -456,7 +456,7 @@ export class WorkspaceService extends EventEmitter {
         this.codexCollaborationModes = undefined
       })
       rpc.start()
-      await rpc.request('initialize', { clientInfo: { name: 'agentbase', title: 'AgentBase', version: '0.8.1' } })
+      await rpc.request('initialize', { clientInfo: { name: 'ambientic', title: 'Ambientic', version: '0.8.1' } })
       rpc.notify('initialized')
       this.codex = rpc
       return rpc
@@ -517,7 +517,7 @@ export class WorkspaceService extends EventEmitter {
       rpc.on('request', (request) => this.providerApproval('hermes', rpc, request))
       rpc.on('exit', () => { this.hermes = null; this.hermesReady = null })
       rpc.start()
-      await rpc.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'AgentBase', version: '0.8.1' } })
+      await rpc.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'Ambientic', version: '0.8.1' } })
       this.hermes = rpc
       return rpc
     })()
@@ -629,7 +629,7 @@ export class WorkspaceService extends EventEmitter {
       return id
     }
     if (provider === 'claude') {
-      if (this.connector('claude')?.manageable === false) throw new Error('Claude Code is not logged in. Run `claude /login` in a terminal, then refresh AgentBase connectors.')
+      if (this.connector('claude')?.manageable === false) throw new Error('Claude Code is not logged in. Run `claude /login` in a terminal, then refresh Ambientic connectors.')
       const id = randomUUID()
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'claude', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Claude task' })
       if (prompt) await this.send(id, prompt)
@@ -712,7 +712,7 @@ export class WorkspaceService extends EventEmitter {
     }
     const omitted = Math.max(0, convo.length - kept.length)
     const note = omitted ? `${omitted} earlier message(s) were omitted; ` : ''
-    return `${COMPACTION_HEADER}'s context window, so its history was compressed by AgentBase. ${note}the most recent exchanges are preserved verbatim below. Treat them as authoritative context and continue seamlessly without mentioning this compression.\n\n=== Recent conversation ===\n${kept.join('\n\n')}\n=== End of recent conversation ===`
+    return `${COMPACTION_HEADER}'s context window, so its history was compressed by Ambientic. ${note}the most recent exchanges are preserved verbatim below. Treat them as authoritative context and continue seamlessly without mentioning this compression.\n\n=== Recent conversation ===\n${kept.join('\n\n')}\n=== End of recent conversation ===`
   }
 
   // Start a fresh Claude session seeded with the compacted history, remap the UI
@@ -724,7 +724,7 @@ export class WorkspaceService extends EventEmitter {
     this.claudeRemap.set(id, randomUUID())
     const snapshot = this.snapshots.get(id)
     if (snapshot) {
-      snapshot.messages.push(message('activity', 'This conversation grew past the model context window. AgentBase compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
+      snapshot.messages.push(message('activity', 'This conversation grew past the model context window. Ambientic compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
       this.emitSnapshot({ ...snapshot, running: true })
     }
     this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode })
@@ -821,7 +821,7 @@ export class WorkspaceService extends EventEmitter {
     const rows = await execJson('/usr/bin/sqlite3', ['-json', db, `select id,role,content,tool_name,tool_calls,timestamp from messages where session_id='${escaped}' and active=1 order by timestamp asc limit 300`])
     return rows.map((row) => row.tool_name
       ? message('activity', row.content || row.tool_calls || '', { id: `hermes:${row.id}`, kind: 'tool', title: row.tool_name })
-      : message(row.role === 'assistant' ? 'assistant' : 'user', row.role === 'assistant' ? (row.content || '') : stripAgentBaseContext(row.content || ''), { id: `hermes:${row.id}` }))
+      : message(row.role === 'assistant' ? 'assistant' : 'user', row.role === 'assistant' ? (row.content || '') : stripAmbienticContext(row.content || ''), { id: `hermes:${row.id}` }))
       .filter((entry) => entry.role === 'activity' || entry.text.trim())
   }
 
@@ -845,13 +845,13 @@ export class WorkspaceService extends EventEmitter {
       // Hermes ACP emits best-effort chunks around tool calls, but the final
       // canonical assistant message is persisted to state.db before
       // session/prompt resolves. Reconcile here so a dropped/partial chunk can
-      // never leave the completed AgentBase transcript showing only its tail.
+      // never leave the completed Ambientic transcript showing only its tail.
       if (session?.agent === 'hermes') {
         try {
           const diskMessages = await this.hermesMessages(id)
           if (diskMessages.length) snapshot.messages = diskMessages
         } catch (error) {
-          console.error('[agentbase] Hermes transcript reconciliation failed:', error.message)
+          console.error('[ambientic] Hermes transcript reconciliation failed:', error.message)
         }
       }
       if (session?.agent === 'codex') {
@@ -861,7 +861,7 @@ export class WorkspaceService extends EventEmitter {
           snapshot.messages = codexThreadMessages(result.thread)
           snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
         } catch (error) {
-          console.error('[agentbase] Codex transcript reconciliation failed:', error.message)
+          console.error('[ambientic] Codex transcript reconciliation failed:', error.message)
         }
       }
       for (const entry of snapshot.messages) delete entry.streaming

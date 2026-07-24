@@ -52,7 +52,7 @@ export function recordArmForMessage (message) {
   return { column, pressed: kind === 0x90 && velocity > 0 }
 }
 
-// APC note numbers start on the physical bottom row. AgentBase presents pads
+// APC note numbers start on the physical bottom row. Ambientic presents pads
 // in reading order instead: top-left to top-right, then the next row down.
 export function noteForPad (pad) {
   if (!Number.isInteger(pad) || pad < 0 || pad >= APC40.PAD_COUNT) return null

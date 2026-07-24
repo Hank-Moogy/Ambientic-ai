@@ -53,7 +53,7 @@ const PROFILES = [
 
 export const MIDI_PROFILE_OPTIONS = [
   { id: AUTO_PROFILE, label: 'Automatic', description: 'Use the first supported APC controller found.' },
-  ...PROFILES.map(({ id, label, gridLabel }) => ({ id, label, description: `${gridLabel} native AgentBase layout` }))
+  ...PROFILES.map(({ id, label, gridLabel }) => ({ id, label, description: `${gridLabel} native Ambientic layout` }))
 ]
 
 function portIndex (device, pattern) {
@@ -233,7 +233,7 @@ export function createMidiController (store, {
         const mappedAction = control ? mappings[control.key] : ''
         if (mappedAction && (control.type !== 'cc' || control.value >= 64)) {
           Promise.resolve(onAction?.(mappedAction)).catch((error) => {
-            console.error(`[midi] AgentBase action ${mappedAction} failed: ${error.message}`)
+            console.error(`[midi] Ambientic action ${mappedAction} failed: ${error.message}`)
           })
           return
         }
@@ -269,7 +269,7 @@ export function createMidiController (store, {
     connect()
     // Refresh the entire owned surface as well as checking the connection.
     // This corrects LED drift if the APC firmware or another MIDI client
-    // clears a pad after AgentBase's initial state render.
+    // clears a pad after Ambientic's initial state render.
     timer = setInterval(() => {
       if (!input || !output) connect()
       else render()

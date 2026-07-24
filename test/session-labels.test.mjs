@@ -8,9 +8,9 @@ test('uses a captured task as the card name and identifies Codex Desktop', () =>
     term_program: 'codex-desktop',
     project: 'samori',
     cwd: '/Users/samori',
-    task: 'AgentBase'
+    task: 'Ambientic'
   }), {
-    primary: 'AgentBase',
+    primary: 'Ambientic',
     secondary: 'Codex Desktop',
     provider: 'Codex Desktop',
     placeholder: false

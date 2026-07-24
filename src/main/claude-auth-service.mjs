@@ -175,7 +175,7 @@ export class ClaudeAuthService extends EventEmitter {
         error: '',
         message: 'Authorization code submitted. Verifying with Claude…'
       })
-      // Claude Code owns the PTY and credential exchange. AgentBase forwards the
+      // Claude Code owns the PTY and credential exchange. Ambientic forwards the
       // one-time value once and deliberately never appends it to UI state or disk.
       this.child.stdin.write(`${code}\r`)
       setTimeout(() => { void this.verify(false) }, 500)
@@ -186,7 +186,7 @@ export class ClaudeAuthService extends EventEmitter {
         this.update({
           phase: 'code',
           status: 'waiting',
-          error: 'AgentBase could not confirm the code after 30 seconds. Paste a fresh authorization code or retry the connection.'
+          error: 'Ambientic could not confirm the code after 30 seconds. Paste a fresh authorization code or retry the connection.'
         })
       }, 30_000)
       if (this.verificationTimer.unref) this.verificationTimer.unref()

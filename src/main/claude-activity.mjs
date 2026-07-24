@@ -9,7 +9,7 @@ import { join } from 'node:path'
 // exceeds_200k_tokens, model, output_style, session_id, transcript_path,
 // version, workspace). The only place local usage is available is Claude's own
 // stats cache, which records real message/session/token activity per day. This
-// module reads that cache so AgentBase can show honest Claude *activity* instead
+// module reads that cache so Ambientic can show honest Claude *activity* instead
 // of a quota meter it cannot obtain.
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000

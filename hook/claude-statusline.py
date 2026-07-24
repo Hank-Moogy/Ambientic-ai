@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture Claude Code subscription limits for AgentBase.
+"""Capture Claude Code subscription limits for Ambientic.
 
 Claude invokes status-line commands with a JSON snapshot on stdin after agent
 activity. Only the normalized rate-limit fields are persisted; prompts,
@@ -14,7 +14,7 @@ import tempfile
 import time
 
 
-TARGET = Path.home() / ".agentbase" / "claude-usage.json"
+TARGET = Path.home() / ".ambientic" / "claude-usage.json"
 
 
 def normalize_window(rate_limits, key, window_id, label, period, duration):

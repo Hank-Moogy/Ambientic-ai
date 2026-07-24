@@ -1,5 +1,5 @@
 {
-  "name": "agentbase",
+  "name": "ambientic",
   "version": "0.8.1",
   "description": "Local-first APC40 MKII control surface for Claude Code, Codex, and Hermes agent sessions.",
   "author": "findmecreators",
@@ -28,8 +28,8 @@
     "remark-gfm": "^4.0.1"
   },
   "build": {
-    "appId": "com.findmecreators.agentbase",
-    "productName": "AgentBase",
+    "appId": "com.findmecreators.ambientic",
+    "productName": "Ambientic",
     "npmRebuild": false,
     "directories": {
       "output": "release"
@@ -45,16 +45,21 @@
       {
         "from": "resources/claude_pty.py",
         "to": "claude_pty.py"
+      },
+      {
+        "from": "resources/ambientic-logo.png",
+        "to": "ambientic-logo.png"
       }
     ],
     "mac": {
+      "icon": "build/ambientic-icon-1024.png",
       "category": "public.app-category.developer-tools",
       "target": [
         "dmg"
       ],
       "extendInfo": {
         "LSUIElement": false,
-        "NSMicrophoneUsageDescription": "AgentBase records voice prompts locally when you press Record on your APC40 MKII."
+        "NSMicrophoneUsageDescription": "Ambientic records voice prompts locally when you press Record on your APC40 MKII."
       }
     }
   }

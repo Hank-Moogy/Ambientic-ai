@@ -261,7 +261,7 @@ export class SessionStore extends EventEmitter {
 
       const previousState = existing.state
       for (const [key, value] of Object.entries(incoming)) {
-        // A persistent AgentBase label is authoritative over a provider index
+        // A persistent Ambientic label is authoritative over a provider index
         // title. Provider refreshes may expose the full first prompt as title.
         if (key === 'task' && ['user', 'model', 'cache'].includes(existing.taskSource)) continue
         if (existing[key] !== value) { existing[key] = value; changed = true }

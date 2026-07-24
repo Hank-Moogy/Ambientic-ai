@@ -76,7 +76,7 @@ function hookConfigured (agent) {
   }
   try {
     const value = readFileSync(agent.config, 'utf8')
-    return value.includes('.agentbase/hook.py') || value.includes('.claude-controller/hook.py')
+    return value.includes('.ambientic/hook.py') || value.includes('.agentbase/hook.py') || value.includes('.claude-controller/hook.py')
   } catch { return false }
 }
 

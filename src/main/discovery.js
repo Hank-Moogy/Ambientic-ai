@@ -201,7 +201,7 @@ export function startDiscovery (store, { intervalMs = SCAN_INTERVAL_MS, onTaskTe
       const [terminals, codexDesktop] = await Promise.all([
         discoverAgentTerminals({ includeTitles: !seededTitles }),
         discoverCodexDesktopSessions().catch((error) => {
-          console.error('[agentbase] Codex desktop discovery failed:', error.message)
+          console.error('[ambientic] Codex desktop discovery failed:', error.message)
           return []
         })
       ])
@@ -216,7 +216,7 @@ export function startDiscovery (store, { intervalMs = SCAN_INTERVAL_MS, onTaskTe
       }
       seededTitles = true
     } catch (err) {
-      console.error('[agentbase] terminal discovery failed:', err.message)
+      console.error('[ambientic] terminal discovery failed:', err.message)
     } finally {
       scanning = false
     }

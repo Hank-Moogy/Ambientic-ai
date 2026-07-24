@@ -1,5 +1,5 @@
 #!/bin/sh
-# AgentBase hook installer.
+# Ambientic hook installer.
 # Registers the lifecycle hook into every coding agent found on this machine:
 #   Claude Code (~/.claude/settings.json), Codex CLI (~/.codex/hooks.json),
 #   Kimi Code CLI (~/.kimi-code/config.toml), and Hermes Agent
@@ -9,15 +9,15 @@ set -e
 
 command -v python3 >/dev/null 2>&1 || { echo "✗ needs python3 on PATH"; exit 1; }
 
-AGENTBASE_DIR="$HOME/.agentbase"
-mkdir -p "$AGENTBASE_DIR"
+AMBIENTIC_DIR="$HOME/.ambientic"
+mkdir -p "$AMBIENTIC_DIR"
 
 # Copy the hook next to a stable home so it survives the repo moving.
 SRC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-cp "$SRC_DIR/controller-hook.py" "$AGENTBASE_DIR/hook.py"
-chmod +x "$AGENTBASE_DIR/hook.py"
-cp "$SRC_DIR/claude-statusline.py" "$AGENTBASE_DIR/claude-statusline.py"
-chmod +x "$AGENTBASE_DIR/claude-statusline.py"
+cp "$SRC_DIR/controller-hook.py" "$AMBIENTIC_DIR/hook.py"
+chmod +x "$AMBIENTIC_DIR/hook.py"
+cp "$SRC_DIR/claude-statusline.py" "$AMBIENTIC_DIR/claude-statusline.py"
+chmod +x "$AMBIENTIC_DIR/claude-statusline.py"
 
 # Hermes loads a small, explicit local plugin so its native lifecycle callbacks
 # feed the same normalized hook used by Claude and Codex.
@@ -35,7 +35,7 @@ if [ -z "${CC_AGENTS:-}" ]; then
     CC_AGENTS="${CC_AGENTS:+$CC_AGENTS,}codex"
   fi
   # Kimi remains supported when explicitly requested through CC_AGENTS, but
-  # the personal AgentBase setup is intentionally Claude + Codex + Hermes.
+  # the personal Ambientic setup is intentionally Claude + Codex + Hermes.
   if [ -d "$HOME/.hermes" ] || /bin/zsh -lic 'command -v hermes >/dev/null 2>&1'; then
     CC_AGENTS="${CC_AGENTS:+$CC_AGENTS,}hermes"
   fi
@@ -45,19 +45,29 @@ fi
 CC_AGENTS="$CC_AGENTS" python3 - <<'PYEOF'
 import json, os, shutil
 
-agentbase_dir = os.path.join(os.path.expanduser("~"), ".agentbase")
-hook = os.path.join(agentbase_dir, "hook.py")
-claude_statusline = os.path.join(agentbase_dir, "claude-statusline.py")
-legacy_hook = os.path.join(os.path.expanduser("~"), ".claude-controller", "hook.py")
+ambientic_dir = os.path.join(os.path.expanduser("~"), ".ambientic")
+hook = os.path.join(ambientic_dir, "hook.py")
+claude_statusline = os.path.join(ambientic_dir, "claude-statusline.py")
+legacy_hooks = [
+    os.path.join(os.path.expanduser("~"), ".agentbase", "hook.py"),
+    os.path.join(os.path.expanduser("~"), ".claude-controller", "hook.py"),
+]
+legacy_statuslines = [
+    os.path.join(os.path.expanduser("~"), ".agentbase", "claude-statusline.py"),
+]
 quoted = '"%s"' % hook
 
 agents = [a.strip().lower() for a in os.environ.get("CC_AGENTS", "claude").split(",") if a.strip()]
 
-# Events the controller consumes. PreToolUse is intentionally NOT registered —
-# UserPromptSubmit turns the pad green and PostToolUse keeps it green, so we
-# avoid putting a hook on the front of every single tool call.
+# Common lifecycle events consumed across providers. Claude receives two extra,
+# narrowly-scoped attention hooks below so approvals and questions turn red at
+# the moment its UI blocks for the user.
 EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification",
           "Stop", "SessionEnd"]
+CLAUDE_ATTENTION_HOOKS = [
+    ("PermissionRequest", None),
+    ("PreToolUse", "AskUserQuestion|ExitPlanMode"),
+]
 
 
 def backup(path):
@@ -80,7 +90,11 @@ def add_json_hooks(path, cmd):
         if isinstance(value, list):
             return [migrate(v) for v in value]
         if isinstance(value, str):
-            return value.replace(legacy_hook, hook)
+            for legacy_hook in legacy_hooks:
+                value = value.replace(legacy_hook, hook)
+            for legacy_statusline in legacy_statuslines:
+                value = value.replace(legacy_statusline, claude_statusline)
+            return value
         return value
     settings = migrate(settings)
     migrated = settings != original
@@ -108,8 +122,41 @@ def add_json_hooks(path, cmd):
     return added
 
 
+def add_claude_attention_hooks(path, cmd):
+    """Install Claude-only immediate attention signals without putting the
+    Ambientic hook in front of every ordinary tool call."""
+    with open(path, encoding="utf-8") as f:
+        settings = json.load(f)
+    hooks = settings.setdefault("hooks", {})
+    added = 0
+    for event, matcher in CLAUDE_ATTENTION_HOOKS:
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
+            continue
+        already = any(
+            hook in str(item.get("command", "")) and
+            (matcher is None or group.get("matcher") == matcher)
+            for group in groups if isinstance(group, dict)
+            for item in (group.get("hooks") if isinstance(group.get("hooks"), list) else [])
+            if isinstance(item, dict)
+        )
+        if already:
+            continue
+        group = {"hooks": [{"type": "command", "command": cmd}]}
+        if matcher is not None:
+            group["matcher"] = matcher
+        groups.append(group)
+        added += 1
+    if added:
+        backup(path)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+    return added
+
+
 def kimi_missing(existing):
-    existing = existing.replace(legacy_hook, hook)
+    for legacy_hook in legacy_hooks:
+        existing = existing.replace(legacy_hook, hook)
     try:
         import tomllib
         ours = {h.get("event") for h in tomllib.loads(existing).get("hooks", [])
@@ -131,6 +178,7 @@ if "claude" in agents:
     try:
         claude_settings_path = os.path.expanduser("~/.claude/settings.json")
         add_json_hooks(claude_settings_path, quoted)
+        add_claude_attention_hooks(claude_settings_path, quoted)
         with open(claude_settings_path, encoding="utf-8") as f:
             claude_settings = json.load(f)
         current_statusline = claude_settings.get("statusLine")
@@ -170,7 +218,9 @@ if "kimi" in agents:
         if os.path.exists(cfg):
             with open(cfg, encoding="utf-8") as f:
                 existing = f.read()
-        migrated = existing.replace(legacy_hook, hook)
+        migrated = existing
+        for legacy_hook in legacy_hooks:
+            migrated = migrated.replace(legacy_hook, hook)
         if migrated != existing:
             backup(cfg)
             with open(cfg, "w", encoding="utf-8") as f:
@@ -179,7 +229,7 @@ if "kimi" in agents:
         missing = kimi_missing(existing)
         if missing:
             backup(cfg)
-            blocks = ["\n# AgentBase hooks"]
+            blocks = ["\n# Ambientic hooks"]
             for ev in missing:
                 blocks.append("\n[[hooks]]\nevent = \"%s\"\ncommand = '%s --agent kimi'\ntimeout = 5"
                               % (ev, hook))
@@ -198,7 +248,7 @@ if "hermes" in agents:
     try:
         plugin = os.path.expanduser("~/.hermes/plugins/agentbase/plugin.yaml")
         if not os.path.exists(plugin):
-            raise RuntimeError("AgentBase Hermes plugin was not copied")
+            raise RuntimeError("Ambientic Hermes plugin was not copied")
         print("  ✓ Hermes — ~/.hermes/plugins/agentbase")
         ok.append("hermes")
     except Exception as e:
@@ -210,7 +260,7 @@ print("   restart any running agent sessions to pick up the hooks")
 PYEOF
 
 # Enabling through Hermes' own CLI lets Hermes update its YAML configuration
-# without AgentBase attempting to parse or rewrite unrelated user settings.
+# without Ambientic attempting to parse or rewrite unrelated user settings.
 if printf '%s' "$CC_AGENTS" | grep -q 'hermes' && /bin/zsh -lic 'command -v hermes >/dev/null 2>&1'; then
   /bin/zsh -lic 'hermes plugins enable agentbase' >/dev/null 2>&1 || true
 fi

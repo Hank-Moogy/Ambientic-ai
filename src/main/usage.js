@@ -10,6 +10,15 @@ import { collectClaudeActivity } from './claude-activity.mjs'
 const execFileAsync = promisify(execFile)
 const REFRESH_MS = 2 * 60 * 1000
 const COMMAND_TIMEOUT_MS = 20_000
+// Per-collector ceiling for a single usage refresh so one stalled provider can
+// never keep the whole panel in its loading state.
+const COLLECTOR_TIMEOUT_MS = 12_000
+
+function withTimeout (promise, ms) {
+  let timer
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Timed out fetching provider usage')), ms) })
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(timer))
+}
 const KIMI_CLIENT_ID = '17e5f671-d194-4dfb-9706-5516cb48c098'
 const KIMI_OAUTH_URL = 'https://auth.kimi.com/api/oauth/token'
 const KIMI_USAGE_URL = 'https://api.kimi.com/coding/v1/usages'
@@ -185,7 +194,13 @@ export function parseClaudeStatusLineUsage (payload, now = Date.now()) {
 
 async function collectClaude () {
   try {
-    const cached = await readFile(join(homedir(), '.agentbase', 'claude-usage.json'), 'utf8')
+    let cached
+    try {
+      cached = await readFile(join(homedir(), '.ambientic', 'claude-usage.json'), 'utf8')
+    } catch {
+      // Preserve the last observation until the renamed hook runs once.
+      cached = await readFile(join(homedir(), '.agentbase', 'claude-usage.json'), 'utf8')
+    }
     return parseClaudeStatusLineUsage(cached)
   } catch {
     // Claude exposes no subscription quota (% used) to any local, non-interactive
@@ -316,7 +331,7 @@ async function requestCodexRateLimits (command) {
       id: 1,
       method: 'initialize',
       params: {
-        clientInfo: { name: 'agentbase', version: CONTROLLER_VERSION },
+        clientInfo: { name: 'ambientic', version: CONTROLLER_VERSION },
         capabilities: {}
       }
     })
@@ -365,7 +380,7 @@ async function acquireKimiRefreshLock () {
 
 async function saveKimiCredentials (credentials) {
   const file = kimiCredentialPath()
-  const temporary = `${file}.agentbase-${process.pid}.tmp`
+  const temporary = `${file}.ambientic-${process.pid}.tmp`
   await mkdir(dirname(file), { recursive: true })
   try {
     await writeFile(temporary, `${JSON.stringify(credentials, null, 2)}\n`, { mode: 0o600 })
@@ -522,33 +537,38 @@ export class UsageService extends EventEmitter {
     return this.inFlight
   }
 
+  applyProvider (name, provider) {
+    this.state = {
+      ...this.state,
+      providers: { ...this.state.providers, [name]: provider }
+    }
+    this.emitState()
+  }
+
   async doRefresh () {
     this.state = { ...this.state, refreshing: true }
     this.emitState()
 
     const collectors = { claude: collectClaude, codex: collectCodex, kimi: collectKimi }
-    const results = await Promise.allSettled(PROVIDERS.map((name) => collectors[name]()))
-    const providers = { ...this.state.providers }
-
-    PROVIDERS.forEach((name, index) => {
-      const result = results[index]
-      if (result.status === 'fulfilled') {
-        providers[name] = { status: 'ok', error: null, ...result.value }
-      } else {
-        const previous = providers[name]
-        providers[name] = {
+    // Publish each provider the moment its collector settles, and time each one
+    // out. A single slow/hung collector (e.g. a stalled codex app-server) must
+    // never freeze the whole panel — fast providers like Claude activity should
+    // appear within a second regardless of the others.
+    await Promise.all(PROVIDERS.map(async (name) => {
+      try {
+        const value = await withTimeout(collectors[name](), COLLECTOR_TIMEOUT_MS)
+        this.applyProvider(name, { status: 'ok', error: null, ...value })
+      } catch (reason) {
+        const previous = this.state.providers[name] || blankProvider()
+        this.applyProvider(name, {
           ...previous,
-          status: previous.windows.length ? 'stale' : 'error',
-          error: safeError(result.reason)
-        }
+          status: previous.windows?.length ? 'stale' : 'error',
+          error: safeError(reason)
+        })
       }
-    })
+    }))
 
-    this.state = {
-      refreshing: false,
-      updatedAt: Date.now(),
-      providers
-    }
+    this.state = { ...this.state, refreshing: false, updatedAt: Date.now() }
     this.emitState()
     return this.state
   }

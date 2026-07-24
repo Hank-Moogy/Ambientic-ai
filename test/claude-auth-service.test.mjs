@@ -20,7 +20,7 @@ test('cleans Claude login terminal output for the in-app wizard', () => {
   assert.equal(value, 'Sign in\n\nOpen https://claude.ai/login')
 })
 
-test('bounds Claude login output retained by AgentBase', () => {
+test('bounds Claude login output retained by Ambientic', () => {
   assert.ok(cleanClaudeAuthOutput('x'.repeat(20_000)).length <= 12_000)
 })
 

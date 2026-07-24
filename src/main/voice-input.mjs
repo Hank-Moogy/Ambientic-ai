@@ -9,8 +9,8 @@ const FFMPEG_PATHS = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']
 const WHISPER_PATHS = ['/opt/homebrew/bin/whisper', '/usr/local/bin/whisper']
 
 export function localVoiceTools ({ ffmpegPath = '', whisperPath = '' } = {}) {
-  const ffmpeg = [ffmpegPath, process.env.AGENTBASE_FFMPEG_PATH, ...FFMPEG_PATHS].find((path) => path && existsSync(path)) || ''
-  const whisper = [whisperPath, process.env.AGENTBASE_WHISPER_PATH, ...WHISPER_PATHS].find((path) => path && existsSync(path)) || ''
+  const ffmpeg = [ffmpegPath, process.env.AMBIENTIC_FFMPEG_PATH, process.env.AGENTBASE_FFMPEG_PATH, ...FFMPEG_PATHS].find((path) => path && existsSync(path)) || ''
+  const whisper = [whisperPath, process.env.AMBIENTIC_WHISPER_PATH, process.env.AGENTBASE_WHISPER_PATH, ...WHISPER_PATHS].find((path) => path && existsSync(path)) || ''
   return { ffmpeg, whisper, ready: Boolean(ffmpeg && whisper) }
 }
 
@@ -102,7 +102,7 @@ export function createVoiceInput ({ tempRoot, ffmpegPath = '', whisperPath = '',
 
     try {
       await waitForExit(current.child)
-      const model = process.env.AGENTBASE_WHISPER_MODEL || 'base'
+      const model = process.env.AMBIENTIC_WHISPER_MODEL || process.env.AGENTBASE_WHISPER_MODEL || 'base'
       await run(tools.whisper, [
         current.audioPath,
         '--model', model,

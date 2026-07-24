@@ -10,6 +10,7 @@ import './improve.css'
 import './onboarding.css'
 import './composer-controls.css'
 import { organizeThreads } from './thread-order.mjs'
+import ambienticLogo from './assets/ambientic-logo.png'
 
 const stateLabel = { running: 'Running', waiting: 'Your move', attention: 'Needs input', idle: 'Idle', history: 'History' }
 const providerCatalog = [
@@ -32,7 +33,8 @@ const providerInstallUrls = {
 // the main-process HandoverService.
 const HANDOVER_PROVIDERS = ['codex', 'claude', 'hermes']
 const HANDOVER_THRESHOLD = 85
-const THREAD_INTERACTIONS_KEY = 'agentbase.thread-interactions.v1'
+const THREAD_INTERACTIONS_KEY = 'ambientic.thread-interactions.v1'
+const LEGACY_THREAD_INTERACTIONS_KEY = 'agentbase.thread-interactions.v1'
 
 function handoverLabel (provider, fallback) {
   return provider === 'claude' ? 'Claude' : (fallback || provider)
@@ -60,7 +62,7 @@ function sessionTitle (session) {
 function EmptyThread ({ onCreate }) {
   return (
     <div className="workspace-empty">
-      <div className="workspace-empty__mark">AB</div>
+      <div className="workspace-empty__mark"><img src={ambienticLogo} alt="" /></div>
       <h2>Your agents, one surface.</h2>
       <p>Select an existing task or start a managed Codex, Claude Code, or Hermes task using the provider login already on this Mac.</p>
       <button type="button" onClick={onCreate}>New agent task</button>
@@ -313,7 +315,7 @@ function SpendActivity ({ ledger }) {
   const codexBalance = summary?.currentBalances?.codex
   return (
     <section className="spend-activity">
-      <header><div><span className="eyebrow">Capacity history</span><h2>AI usage & spend signals</h2></div><p>AgentBase records observed provider changes locally. Currency spend appears only when a provider billing connection supplies it.</p></header>
+      <header><div><span className="eyebrow">Capacity history</span><h2>AI usage & spend signals</h2></div><p>Ambientic records observed provider changes locally. Currency spend appears only when a provider billing connection supplies it.</p></header>
       <div className="spend-activity__metrics">
         <div><b>{summary?.limitHits || 0}</b><span>limit hits observed</span></div>
         <div data-tone="reset"><b>{summary?.resetUses || 0}</b><span>resets used</span></div>
@@ -322,7 +324,7 @@ function SpendActivity ({ ledger }) {
       </div>
       <div className="spend-activity__timeline">
         {recent.map((event) => <div key={event.id} data-type={event.type}><span className="spend-activity__provider"><AgentIcon agent={event.provider} /></span><div><b>{activityLabel(event)}</b><small>{event.provider} · {new Date(event.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{event.confidence === 'inferred' ? ' · inferred' : ''}</small></div></div>)}
-        {!recent.length && <div className="spend-activity__empty">No capacity changes recorded yet. AgentBase will keep a local history from this point forward.</div>}
+        {!recent.length && <div className="spend-activity__empty">No capacity changes recorded yet. Ambientic will keep a local history from this point forward.</div>}
       </div>
       <footer><span><i data-state="exact" /> Codex: quota, resets, credit balance</span><span><i /> Claude: quota where exposed</span><span><i /> Hermes: upstream billing needed</span></footer>
     </section>
@@ -456,10 +458,10 @@ function ClaudeAuthWizard ({ auth, onInput, onCancel, onRetry, onClose }) {
         <header><span className="provider-account__icon"><AgentIcon agent="claude" /></span><div><small>Official Claude Code connection</small><h2>{auth.status === 'connected' ? 'Claude is connected' : auth.status === 'failed' ? 'Connection needs attention' : 'Connect your Claude account'}</h2></div>{finished && <button type="button" onClick={onClose}>×</button>}</header>
         <div className="claude-auth-progress"><i data-active={auth.status !== 'failed' && auth.status !== 'cancelled'} /><span>{progress}</span></div>
         {auth.error && <div className="claude-auth-error"><b>What happened</b><span>{auth.error}</span></div>}
-        {!finished && phase === 'browser' && <div className="claude-auth-step"><span className="claude-auth-step__mark">↗</span><div><h3>Finish signing in with Claude</h3><p>The secure Claude page is open in your browser. Approve the connection there, then return to AgentBase. If Claude gives you a one-time code, paste it here when the field appears.</p></div></div>}
-        {!finished && phase === 'code' && <div className="claude-auth-code"><div><span>Authorization code</span><h3>Paste the code from Claude</h3><p>Pasting submits it immediately. AgentBase forwards it directly to Claude Code and never stores it.</p></div><div className="claude-auth-code__field"><input value={answer} autoFocus autoComplete="off" spellCheck="false" aria-label="Claude authorization code" onChange={(event) => setAnswer(event.target.value)} onPaste={(event) => { const pasted = event.clipboardData.getData('text'); if (pasted) { event.preventDefault(); send(pasted) } }} onKeyDown={(event) => { if (event.key === 'Enter') send() }} placeholder="Paste one-time code" /><button className="primary" type="button" disabled={!answer.trim()} onClick={() => send()}>Submit code</button></div></div>}
+        {!finished && phase === 'browser' && <div className="claude-auth-step"><span className="claude-auth-step__mark">↗</span><div><h3>Finish signing in with Claude</h3><p>The secure Claude page is open in your browser. Approve the connection there, then return to Ambientic. If Claude gives you a one-time code, paste it here when the field appears.</p></div></div>}
+        {!finished && phase === 'code' && <div className="claude-auth-code"><div><span>Authorization code</span><h3>Paste the code from Claude</h3><p>Pasting submits it immediately. Ambientic forwards it directly to Claude Code and never stores it.</p></div><div className="claude-auth-code__field"><input value={answer} autoFocus autoComplete="off" spellCheck="false" aria-label="Claude authorization code" onChange={(event) => setAnswer(event.target.value)} onPaste={(event) => { const pasted = event.clipboardData.getData('text'); if (pasted) { event.preventDefault(); send(pasted) } }} onKeyDown={(event) => { if (event.key === 'Enter') send() }} placeholder="Paste one-time code" /><button className="primary" type="button" disabled={!answer.trim()} onClick={() => send()}>Submit code</button></div></div>}
         {!finished && phase === 'verifying' && <div className="claude-auth-step claude-auth-step--verifying"><span className="claude-auth-spinner" /><div><h3>Verifying with Claude…</h3><p>Your one-time code was submitted. This usually takes only a few seconds.</p></div></div>}
-        {!finished && !['browser', 'code', 'verifying'].includes(phase) && <><p>AgentBase is preparing Claude Code’s official subscription login. If Claude presents a choice, use the controls below.</p><div className="claude-auth-controls"><button type="button" title="Previous option" onClick={() => onInput({ action: 'up' })}>↑</button><button type="button" title="Next option" onClick={() => onInput({ action: 'down' })}>↓</button><button className="primary" type="button" onClick={() => onInput({ action: 'enter' })}>Continue</button></div></>}
+        {!finished && !['browser', 'code', 'verifying'].includes(phase) && <><p>Ambientic is preparing Claude Code’s official subscription login. If Claude presents a choice, use the controls below.</p><div className="claude-auth-controls"><button type="button" title="Previous option" onClick={() => onInput({ action: 'up' })}>↑</button><button type="button" title="Next option" onClick={() => onInput({ action: 'down' })}>↓</button><button className="primary" type="button" onClick={() => onInput({ action: 'enter' })}>Continue</button></div></>}
         <details className="claude-auth-details"><summary>Claude Code details</summary><pre ref={outputRef}>{auth.output || 'Waiting for Claude Code…'}</pre></details>
         <footer><span>Credentials remain in Claude Code’s macOS Keychain storage.</span>{!finished ? <button type="button" onClick={onCancel}>Cancel</button> : auth.status === 'failed' ? <><button type="button" onClick={onClose}>Close</button><button className="primary" type="button" onClick={onRetry}>Retry connection</button></> : <button className="primary" type="button" onClick={onClose}>Done</button>}</footer>
       </section>
@@ -471,7 +473,7 @@ function MidiHardwareSettings ({ midi, onSelect }) {
   const profiles = midi?.profiles || []
   return (
     <>
-      <div className="provider-settings__intro"><span className="eyebrow"><i /> Physical control</span><h2>Choose your AgentBase controller.</h2><p>Select which Akai device AgentBase owns. Automatic mode prefers the APC40 MKII when both controllers are connected; choosing a model explicitly prevents AgentBase from opening the other device.</p></div>
+      <div className="provider-settings__intro"><span className="eyebrow"><i /> Physical control</span><h2>Choose your Ambientic controller.</h2><p>Select which Akai device Ambientic owns. Automatic mode prefers the APC40 MKII when both controllers are connected; choosing a model explicitly prevents Ambientic from opening the other device.</p></div>
       <div className="midi-device-status" data-connected={Boolean(midi?.connected)}><i /><div><b>{midi?.connected ? `${midi.model} connected` : 'Waiting for the selected controller'}</b><span>{midi?.connected ? `${midi.device} · ${midi.gridLabel} grid · ${midi.padCount} agent pads` : 'Connect the hardware by USB, then choose its profile below.'}</span></div></div>
       <div className="midi-profile-list">
         {profiles.map((profile) => {
@@ -525,9 +527,9 @@ function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect,
     try {
       const result = await onConnect(provider.id)
       setNotice(result?.mode === 'browser'
-        ? 'Finish signing in with ChatGPT in your browser. AgentBase will confirm it here.'
+        ? 'Finish signing in with ChatGPT in your browser. Ambientic will confirm it here.'
         : result?.mode === 'embedded'
-            ? 'Complete Claude’s secure connection in AgentBase.'
+            ? 'Complete Claude’s secure connection in Ambientic.'
             : `${provider.label} setup opened in Terminal. Complete the provider’s own login, then return here.`)
     } catch (error) {
       setNotice(error.message)
@@ -551,20 +553,20 @@ function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect,
     <main className="onboarding-shell" data-step={step}>
       <div className="onboarding-ambient" aria-hidden="true"><i /><i /><i /></div>
       <header className="onboarding-topbar">
-        <div className="onboarding-brand"><span>AB</span><b>AgentBase</b></div>
+        <div className="onboarding-brand"><span><img src={ambienticLogo} alt="" /></span><b>Ambientic</b></div>
         <div className="onboarding-progress" aria-label={`Step ${step + 1} of 4`}>{[0, 1, 2, 3].map((value) => <i key={value} data-active={value <= step} />)}</div>
         <small>{String(step + 1).padStart(2, '0')} / 04</small>
       </header>
 
       {step === 0 && <section className="onboarding-stage onboarding-welcome">
-        <div className="onboarding-orb" aria-hidden="true"><span>AB</span><i /><i /></div>
-        <div className="onboarding-copy"><span className="eyebrow">Your agents are already out there</span><h1>Bring them into<br /><em>one field.</em></h1><p>AgentBase turns every coding agent and physical controller into one calm, playable workspace.</p></div>
-        <button className="onboarding-primary" type="button" onClick={() => advance(1)}>Enter AgentBase <span>→</span></button>
+        <div className="onboarding-orb" aria-hidden="true"><img src={ambienticLogo} alt="" /><i /><i /></div>
+        <div className="onboarding-copy"><span className="eyebrow">Your agents are already out there</span><h1>Bring them into<br /><em>one field.</em></h1><p>Ambientic turns every coding agent and physical controller into one calm, playable workspace.</p></div>
+        <button className="onboarding-primary" type="button" onClick={() => advance(1)}>Enter Ambientic <span>→</span></button>
       </section>}
 
       {step === 1 && <section className="onboarding-stage onboarding-name">
         <div className="onboarding-symbol" aria-hidden="true"><span>⌁</span></div>
-        <div className="onboarding-copy"><span className="eyebrow">First, an introduction</span><h1>How should I<br /><em>call you?</em></h1><p>This stays on this Mac and is used only to make AgentBase feel like your space.</p></div>
+        <div className="onboarding-copy"><span className="eyebrow">First, an introduction</span><h1>How should I<br /><em>call you?</em></h1><p>This stays on this Mac and is used only to make Ambientic feel like your space.</p></div>
         <form onSubmit={(event) => { event.preventDefault(); if (name.trim()) advance(2, { name }) }}>
           <input value={name} autoFocus maxLength={48} autoComplete="name" onChange={(event) => setName(event.target.value)} placeholder="Your name" aria-label="Your name" />
           <button className="onboarding-primary" type="submit" disabled={!name.trim()}>Continue <span>→</span></button>
@@ -572,7 +574,7 @@ function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect,
       </section>}
 
       {step === 2 && <section className="onboarding-stage onboarding-providers">
-        <div className="onboarding-copy"><span className="eyebrow">Your existing intelligence</span><h1>Connect your <em>agents.</em></h1><p>AgentBase uses each provider’s official local login. Your passwords and tokens never enter AgentBase.</p></div>
+        <div className="onboarding-copy"><span className="eyebrow">Your existing intelligence</span><h1>Connect your <em>agents.</em></h1><p>Ambientic uses each provider’s official local login. Your passwords and tokens never enter Ambientic.</p></div>
         <div className="onboarding-provider-grid">
           {onboardingProviderCatalog.map((provider) => {
             const status = providerState(provider)
@@ -584,7 +586,7 @@ function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect,
       </section>}
 
       {step === 3 && <section className="onboarding-stage onboarding-controller" data-connected={Boolean(midi.connected)}>
-        <div className="onboarding-copy"><span className="eyebrow">Optional physical layer</span><h1>Connect your <em>controller.</em></h1><p>Plug in an APC40 MKII or APC mini mk2. AgentBase detects it automatically and answers with light.</p></div>
+        <div className="onboarding-copy"><span className="eyebrow">Optional physical layer</span><h1>Connect your <em>controller.</em></h1><p>Plug in an APC40 MKII or APC mini mk2. Ambientic detects it automatically and answers with light.</p></div>
         <div className="onboarding-hardware">
           <div className="onboarding-pad-field" data-model={midi.activeProfile || 'waiting'} aria-hidden="true">
             {Array.from({ length: midi.activeProfile === 'apc40-mkii' ? 40 : 64 }, (_, index) => <i key={index} style={{ '--pad-index': index }} />)}
@@ -620,10 +622,10 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
       const result = await onConnect(connector.id)
       waitingForProvider = ['browser', 'embedded'].includes(result?.mode)
       setNotice(result?.mode === 'browser'
-        ? 'Waiting for ChatGPT to confirm your Codex account… Finish signing in in the browser. You can return to AgentBase at any time.'
+        ? 'Waiting for ChatGPT to confirm your Codex account… Finish signing in in the browser. You can return to Ambientic at any time.'
         : result?.mode === 'embedded'
-            ? 'Claude’s official connection wizard is open inside AgentBase.'
-        : `${connector.label} login opened in Terminal. Complete the provider’s sign-in, then return to AgentBase.`)
+            ? 'Claude’s official connection wizard is open inside Ambientic.'
+        : `${connector.label} login opened in Terminal. Complete the provider’s sign-in, then return to Ambientic.`)
     } catch (error) {
       setNotice(error.message)
     } finally {
@@ -648,11 +650,11 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
     setConnecting('')
     if (result.status === 'connected') {
       const identity = result.email ? ` as ${result.email}` : ''
-      setNotice(`✓ Codex is connected${identity}. You can now create and continue Codex tasks in AgentBase.`)
+      setNotice(`✓ Codex is connected${identity}. You can now create and continue Codex tasks in Ambientic.`)
     } else if (result.status === 'disconnected') {
       setNotice('Codex is signed out. Use Connect account to try again.')
     } else {
-      setNotice(result.error || 'AgentBase could not confirm the Codex login. Use Check connections to retry the status check.')
+      setNotice(result.error || 'Ambientic could not confirm the Codex login. Use Check connections to retry the status check.')
     }
   }, [providerAuth?.codex?.updatedAt])
 
@@ -668,10 +670,10 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
     <section className="settings-page">
       <header className="settings-topbar"><div><span>Settings</span><h1>{section === 'providers' ? 'AI provider accounts' : section === 'usage' ? 'Usage & billing' : 'MIDI hardware'}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
       <div className="settings-scroll">
-        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart the first-run experience</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'usage' ? 'Measured honestly' : 'One controller at a time'}</b><p>{section === 'providers' ? 'AgentBase delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : 'AgentBase opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div></aside>
+        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart the first-run experience</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'usage' ? 'Measured honestly' : 'One controller at a time'}</b><p>{section === 'providers' ? 'Ambientic delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div></aside>
         <main className="provider-settings">
           {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : <>
-          <div className="provider-settings__intro"><span className="eyebrow"><i /> Local account bridge</span><h2>Connect the agents you already use.</h2><p>Each provider keeps ownership of authentication. AgentBase checks the installed CLI, opens its official login flow, and uses that existing local session.</p></div>
+          <div className="provider-settings__intro"><span className="eyebrow"><i /> Local account bridge</span><h2>Connect the agents you already use.</h2><p>Each provider keeps ownership of authentication. Ambientic checks the installed CLI, opens its official login flow, and uses that existing local session.</p></div>
           {notice && <div className="settings-notice"><span>i</span>{notice}</div>}
           <div className="provider-account-list">
             {providerCatalog.map((provider) => {
@@ -687,17 +689,17 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
               return (
                 <article className="provider-account" key={provider.id} data-provider={provider.id} data-connected={Boolean(connector.installed && authenticated)}>
                   <span className="provider-account__icon"><AgentIcon agent={provider.id} /></span>
-                  <div className="provider-account__identity"><div><h3>{provider.label}</h3><i /><span>{connectionLabel}</span></div><p>{connector.authMessage || connector.accountLabel || (authenticated ? 'Authenticated through the provider’s local credential store.' : 'Sign in through the provider’s own terminal flow.')}</p><dl><div><dt>CLI</dt><dd>{connector.installed ? connector.version || 'Installed' : 'Missing'}</dd></div><div><dt>AgentBase integration</dt><dd>{connector.configured ? 'Hook connected' : connector.installed ? 'Hook not installed' : 'Unavailable'}</dd></div><div><dt>Credential storage</dt><dd>{provider.label}</dd></div></dl></div>
+                  <div className="provider-account__identity"><div><h3>{provider.label}</h3><i /><span>{connectionLabel}</span></div><p>{connector.authMessage || connector.accountLabel || (authenticated ? 'Authenticated through the provider’s local credential store.' : 'Sign in through the provider’s own terminal flow.')}</p><dl><div><dt>CLI</dt><dd>{connector.installed ? connector.version || 'Installed' : 'Missing'}</dd></div><div><dt>Ambientic integration</dt><dd>{connector.configured ? 'Hook connected' : connector.installed ? 'Hook not installed' : 'Unavailable'}</dd></div><div><dt>Credential storage</dt><dd>{provider.label}</dd></div></dl></div>
                   <div className="provider-account__actions">
                     <button className="primary" type="button" disabled={!connector.installed || connecting === provider.id} onClick={() => connect(connector)}>{connecting === provider.id ? 'Opening…' : authenticated ? 'Reconnect account' : 'Connect account'}</button>
-                    {connector.installed && !connector.configured && <button type="button" onClick={onInstallHooks}>Install AgentBase hook</button>}
+                    {connector.installed && !connector.configured && <button type="button" onClick={onInstallHooks}>Install Ambientic hook</button>}
                     {!connector.installed && <small>Install {provider.label} first, then check connections again.</small>}
                   </div>
                 </article>
               )
             })}
           </div>
-          <section className="provider-security"><div><span>◇</span><div><b>How connection works</b><p>Codex uses its browser API. Claude’s official CLI login runs inside an AgentBase wizard. AgentBase receives status only and never stores provider credentials.</p></div></div><div><span>⌁</span><div><b>Subscription support</b><p>Claude Code and Codex use their existing local subscription login. Hermes uses the provider configured in Hermes itself.</p></div></div></section>
+          <section className="provider-security"><div><span>◇</span><div><b>How connection works</b><p>Codex uses its browser API. Claude’s official CLI login runs inside an Ambientic wizard. Ambientic receives status only and never stores provider credentials.</p></div></div><div><span>⌁</span><div><b>Subscription support</b><p>Claude Code and Codex use their existing local subscription login. Hermes uses the provider configured in Hermes itself.</p></div></div></section>
           </>}
         </main>
       </div>
@@ -727,7 +729,12 @@ export default function Workspace () {
   const [query, setQuery] = useState('')
   const [providerFilter, setProviderFilter] = useState('all')
   const [threadInteractions, setThreadInteractions] = useState(() => {
-    try { return JSON.parse(window.localStorage.getItem(THREAD_INTERACTIONS_KEY) || '{}') } catch { return {} }
+    try {
+      const stored = window.localStorage.getItem(THREAD_INTERACTIONS_KEY) || window.localStorage.getItem(LEGACY_THREAD_INTERACTIONS_KEY) || '{}'
+      const value = JSON.parse(stored)
+      window.localStorage.setItem(THREAD_INTERACTIONS_KEY, JSON.stringify(value))
+      return value
+    } catch { return {} }
   })
   const [newTask, setNewTask] = useState(false)
   const [newTaskProvider, setNewTaskProvider] = useState('')
@@ -861,7 +868,7 @@ export default function Workspace () {
   }
 
   if (onboarding === null) {
-    return <main className="onboarding-loading"><span>AB</span><p>Assembling your field…</p></main>
+    return <main className="onboarding-loading"><span><img src={ambienticLogo} alt="" /></span><p>Assembling your field…</p></main>
   }
 
   if (!onboarding.completed) {
@@ -881,7 +888,7 @@ export default function Workspace () {
   return (
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
-        <header className="brand"><span className="brand__mark">A</span><div><b>AgentBase</b><small>Local agent workspace</small></div><button type="button" title="Open compact APC controller" onClick={() => window.controller.showController()}>⌘</button></header>
+        <header className="brand"><span className="brand__mark"><img src={ambienticLogo} alt="" /></span><div><b>Ambientic</b><small>Local agent workspace</small></div><button type="button" title="Open compact APC controller" onClick={() => window.controller.showController()}>⌘</button></header>
         <nav className="workspace-nav"><button type="button" data-selected={view === 'overview'} onClick={() => setView('overview')}><span>✦</span><b>Overview</b></button><button type="button" data-selected={view === 'threads'} onClick={() => setView('threads')}><span>☷</span><b>Threads</b><em>{sessions.length}</em></button><button type="button" data-selected={view === 'settings'} onClick={() => { setSettingsSection('providers'); setView('settings') }}><span>⚙</span><b>Settings</b></button></nav>
         <button className="new-task-button" type="button" onClick={() => openCreate()}><span>＋</span> New agent task <kbd>⌘N</kbd></button>
         {view === 'threads' ? <><div className="thread-provider-filters" role="group" aria-label="Filter threads by provider"><button type="button" data-selected={providerFilter === 'all'} onClick={() => setProviderFilter('all')} title="All providers" aria-label="All providers"><span>✦</span></button>{providerCatalog.map((provider) => <button type="button" key={provider.id} data-provider={provider.id} data-selected={providerFilter === provider.id} onClick={() => setProviderFilter(provider.id)} title={provider.label} aria-label={`Show ${provider.label} threads`}><AgentIcon agent={provider.id} /></button>)}</div><div className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" /></div>
@@ -893,7 +900,7 @@ export default function Workspace () {
         <footer className="hardware"><i data-connected={midi.connected} /><div><b>{midi.shortModel || 'APC controller'}</b><span>{midi.connected ? `Connected · ${midi.device || 'ready'}` : 'Waiting for hardware'}</span></div><button type="button" onClick={() => { setSettingsSection('midi'); setView('settings') }}>Choose</button></footer>
       </aside>
 
-      {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in AgentBase.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. AgentBase is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => setProviderAuth((current) => ({ ...current, codex: null }))}>×</button></div>}
+      {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in Ambientic.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. Ambientic is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => setProviderAuth((current) => ({ ...current, codex: null }))}>×</button></div>}
       {providerAuth.claude && providerAuth.claude.status !== 'idle' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => setProviderAuth((current) => ({ ...current, claude: null }))} />}
       {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
@@ -901,7 +908,7 @@ export default function Workspace () {
           <div className="thread-body" ref={transcriptRef}>
             <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} />
             {loading && <div className="loading">Loading local conversation…</div>}
-            {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. AgentBase will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
+            {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. Ambientic will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
             {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
           </div>
           <div className="composer-wrap">
@@ -935,7 +942,7 @@ export default function Workspace () {
         <section><h3>Task</h3><dl><div><dt>Provider</dt><dd>{thread?.providerLabel || '—'}</dd></div><div><dt>Status</dt><dd><i data-state={thread?.state} />{stateLabel[thread?.state] || '—'}</dd></div><div><dt>Project</dt><dd>{thread?.project || '—'}</dd></div></dl></section>
         <section><h3>Preview <span>{companions?.bySession?.[selectedId]?.activeCount || 0}</span></h3><ThreadPreview state={companions?.bySession?.[selectedId]} onPresent={() => window.controller.presentPreview(selectedId)} /></section>
         <section><h3>Artifacts <span>{thread?.artifacts?.length || 0}</span></h3>{thread?.artifacts?.length ? <div className="artifacts">{thread.artifacts.map((artifact) => <button key={artifact.path} type="button" title={artifact.path} onClick={() => window.controller.openArtifact(artifact.path)}><span>⌘</span><div><b>{artifact.name}</b><small>{artifact.path}</small></div></button>)}</div> : <div className="no-artifacts">Files touched by the agent appear here.</div>}</section>
-        <section className="capabilities"><h3>Connection</h3><p>Provider credentials stay in the provider’s own local store. AgentBase never asks for or copies your API keys.</p></section>
+        <section className="capabilities"><h3>Connection</h3><p>Provider credentials stay in the provider’s own local store. Ambientic never asks for or copies your API keys.</p></section>
       </aside></>}
       {newTask && <NewTask key={newTaskProvider || 'any'} connectors={connectors} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} />}
     </main>

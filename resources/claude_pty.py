@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Small stdio-to-PTY relay for AgentBase's provider-owned Claude login."""
+"""Small stdio-to-PTY relay for Ambientic's provider-owned Claude login."""
 
 import fcntl
 import os
@@ -21,7 +21,7 @@ def main():
         os.execvpe(sys.argv[1], sys.argv[1:], os.environ)
 
     # A wide PTY keeps long OAuth URLs intact if Claude prints a manual link.
-    # AgentBase still validates required OAuth parameters before opening it.
+    # Ambientic still validates required OAuth parameters before opening it.
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 500, 0, 0))
 
     def terminate(_signum, _frame):

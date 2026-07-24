@@ -62,14 +62,14 @@ export function startServer (store, { focusById, onTaskText } = {}) {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`[agentbase] port ${PORT} already in use — another instance running?`)
+      console.error(`[ambientic] port ${PORT} already in use — another instance running?`)
     } else {
-      console.error('[agentbase] server error:', err.message)
+      console.error('[ambientic] server error:', err.message)
     }
   })
 
   server.listen(PORT, '127.0.0.1', () => {
-    console.log(`[agentbase] ingest listening on http://127.0.0.1:${PORT}`)
+    console.log(`[ambientic] ingest listening on http://127.0.0.1:${PORT}`)
   })
 
   return server
