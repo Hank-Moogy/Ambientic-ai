@@ -9,14 +9,23 @@ import { focusSession, pasteClipboardImage, pasteClipboardText, submitTerminalPr
 import { startDiscovery } from './discovery.js'
 import { createTaskSummarizer } from './summarizer.js'
 import { createUsageService } from './usage.js'
+import { createConsumptionLedger } from './consumption-ledger.mjs'
 import { createCompanionService } from './companions.js'
 import { loadPrefs, savePrefs } from './prefs.js'
 import { loadTaskCache, saveTaskCache } from './task-cache.js'
 import { createMidiController } from './midi-controller.js'
-import { connectorState, openAgentTerminal } from './connectors.js'
+import { connectorState, openAgentSetup, openAgentTerminal } from './connectors.js'
 import { createVoiceInput } from './voice-input.mjs'
 import { WorkspaceService } from './workspace-service.mjs'
+import { HandoverService } from './handover-service.mjs'
+import { ClaudeAuthService } from './claude-auth-service.mjs'
 import { normalizeExternalUrl } from './external-url.mjs'
+import { ensureEnhancedPath } from './env-path.mjs'
+
+// Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
+// Finder-launched app otherwise only has launchd's minimal PATH, which lacks
+// Homebrew/nvm node and breaks Claude Code plugin hooks.
+ensureEnhancedPath()
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -39,7 +48,12 @@ let lastFocusedSessionId = null
 let midiController = null
 let voiceInput = null
 let connectors = []
+let pendingCodexLogin = ''
+const providerAuthState = new Map()
 let workspace = null
+let handovers = null
+let consumptionLedger = null
+let claudeAuth = null
 let pendingWorkspaceSessionId = ''
 
 function sendToWindows (channel, payload) {
@@ -357,6 +371,10 @@ function pushUsage () {
   sendToWindows('usage', usage.getState())
 }
 
+function pushConsumptionLedger () {
+  if (consumptionLedger) sendToWindows('consumption-ledger', consumptionLedger.getState())
+}
+
 function pushDisplays () {
   sendToWindows('displays', displayTopology())
 }
@@ -366,7 +384,7 @@ function pushCompanions () {
 }
 
 function pushMidi () {
-  sendToWindows('midi', midiController?.getStatus() || { connected: false, model: 'Akai APC40 MKII' })
+  sendToWindows('midi', midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
 }
 
 function pushConnectors () {
@@ -377,6 +395,44 @@ async function refreshConnectors () {
   connectors = await connectorState()
   pushConnectors()
   return connectors
+}
+
+function pushProviderAuth (payload) {
+  const value = { ...payload, updatedAt: Date.now() }
+  providerAuthState.set(payload.provider, value)
+  console.log(`[agentbase] ${payload.provider} auth: ${payload.status}${payload.email ? ` (${payload.email})` : ''}${payload.error ? ` — ${payload.error}` : ''}`)
+  sendToWindows('provider-auth', value)
+}
+
+function verifyCodexLogin (loginId) {
+  pendingCodexLogin = loginId
+  const checks = [2500, 10_000, 30_000, 60_000]
+  for (const delay of checks) {
+    setTimeout(async () => {
+      if (pendingCodexLogin !== loginId) return
+      try {
+        const account = await workspace.codexAccountStatus()
+        if (account.connected) {
+          pendingCodexLogin = ''
+          await refreshConnectors()
+          pushProviderAuth({ provider: 'codex', status: 'connected', loginId, ...account })
+        } else if (delay === checks.at(-1)) {
+          pendingCodexLogin = ''
+          pushProviderAuth({
+            provider: 'codex',
+            status: 'timeout',
+            loginId,
+            error: 'AgentBase could not confirm the login. Return here and use Check connections.'
+          })
+        }
+      } catch (error) {
+        if (delay === checks.at(-1)) {
+          pendingCodexLogin = ''
+          pushProviderAuth({ provider: 'codex', status: 'failed', loginId, error: error.message })
+        }
+      }
+    }, delay)
+  }
 }
 
 function updateTray () {
@@ -491,10 +547,10 @@ function buildTrayMenu () {
     },
     { type: 'separator' },
     {
-      label: midiStatus.connected ? `APC40 MKII: ${midiStatus.device}` : 'APC40 MKII: Not connected',
+      label: midiStatus.connected ? `${midiStatus.shortModel}: ${midiStatus.device}` : `${midiStatus.shortModel || 'APC controller'}: Not connected`,
       enabled: false
     },
-    { label: 'Reconnect APC40', click: () => midiController?.reconnect() },
+    { label: 'Reconnect MIDI controller', click: () => midiController?.reconnect() },
     { type: 'separator' },
     { label: 'Install / update agent hooks…', click: runInstaller },
     { label: 'Open AgentBase data folder', click: () => shell.openPath(join(app.getPath('home'), '.agentbase')) },
@@ -513,16 +569,72 @@ function createTray () {
 ipcMain.handle('get-state', () => store.list())
 ipcMain.handle('get-workspace-threads', () => workspace.list())
 ipcMain.handle('get-usage', () => usage.getState())
+ipcMain.handle('get-consumption-ledger', () => consumptionLedger?.getState() || null)
 ipcMain.handle('refresh-usage', () => usage.refresh())
 ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
 ipcMain.handle('refresh-connectors', () => refreshConnectors())
+ipcMain.handle('get-provider-auth', () => Object.fromEntries(providerAuthState))
+ipcMain.handle('get-handovers', () => handovers?.list() || [])
+ipcMain.handle('generate-handover', (_event, sessionId) => handovers.generate(sessionId))
+ipcMain.handle('continue-handover', async (_event, sessionId, targetProvider) => {
+  const result = await handovers.continueWith(sessionId, targetProvider)
+  showWorkspace(result.targetSessionId)
+  return result
+})
 ipcMain.handle('open-agent-setup', (_event, agentId) => openAgentTerminal(agentId))
-ipcMain.handle('get-midi', () => midiController?.getStatus() || { connected: false, model: 'Akai APC40 MKII' })
+ipcMain.handle('connect-provider', async (_event, agentId, options = {}) => {
+  if (agentId === 'codex') {
+    const result = await workspace.connectCodexAccount()
+    await shell.openExternal(result.authUrl)
+    pushProviderAuth({ provider: 'codex', status: 'waiting', loginId: result.loginId })
+    verifyCodexLogin(result.loginId)
+    return { provider: 'codex', mode: 'browser', loginId: result.loginId }
+  }
+  if (agentId === 'claude') {
+    if (options.method === 'terminal') {
+      const opened = await openAgentSetup('claude')
+      return { provider: 'claude', mode: 'terminal', opened }
+    }
+    showWorkspace()
+    const path = connectors.find((item) => item.id === 'claude')?.path
+    if (!path) throw new Error('Claude Code is not installed.')
+    if (!claudeAuth) {
+      claudeAuth = new ClaudeAuthService({
+        path,
+        helperPath: app.isPackaged ? join(process.resourcesPath, 'claude_pty.py') : join(app.getAppPath(), 'resources', 'claude_pty.py'),
+        onUrl: async (value) => {
+          try {
+            const url = new URL(value)
+            await shell.openExternal(url.toString())
+          } catch {}
+        }
+      })
+      claudeAuth.on('change', async (state) => {
+        pushProviderAuth(state)
+        if (state.status === 'connected') await refreshConnectors()
+      })
+    }
+    await claudeAuth.start({ method: options.method === 'console' ? 'console' : 'subscription' })
+    return { provider: 'claude', mode: 'embedded', method: claudeAuth.getState().method }
+  }
+  const opened = await openAgentSetup(agentId)
+  return { opened, agentId, provider: agentId, mode: 'terminal' }
+})
+ipcMain.handle('claude-auth-input', (_event, input) => claudeAuth?.input(input) || false)
+ipcMain.handle('claude-auth-cancel', () => claudeAuth?.cancel() || false)
+ipcMain.handle('get-midi', () => midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
+ipcMain.handle('midi-set-profile', (_event, profileId) => midiController?.setProfile(profileId) || false)
+ipcMain.handle('midi-vibe', () => midiController?.triggerVibe() || false)
 ipcMain.handle('midi-learn', (_event, actionId) => midiController?.learn(actionId) || false)
 ipcMain.handle('midi-cancel-learn', () => { midiController?.cancelLearn(); return true })
 ipcMain.handle('midi-clear-action', (_event, actionId) => midiController?.clearAction(actionId) || false)
 ipcMain.handle('midi-reset-mappings', () => { midiController?.resetMappings(); return true })
 ipcMain.handle('get-thread', (_event, id) => workspace.read(id))
+ipcMain.handle('rename-thread', async (_event, id, title) => {
+  const result = await workspace.rename(id, title)
+  sendToWindows('workspace-threads', await workspace.list())
+  return result
+})
 ipcMain.handle('send-thread-prompt', (_event, id, text) => workspace.send(id, text))
 ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))
@@ -537,6 +649,11 @@ ipcMain.handle('open-external-url', (_event, value) => {
   return shell.openExternal(url).then(() => true)
 })
 ipcMain.handle('show-controller', () => { win.showInactive(); return true })
+ipcMain.handle('hide-controller', () => {
+  if (!win || win.isDestroyed()) return false
+  win.hide()
+  return true
+})
 ipcMain.handle('show-workspace', (_event, id) => showWorkspace(id))
 ipcMain.handle('open-artifact', (_event, path) => shell.openPath(path))
 ipcMain.handle('present-preview', (_event, id) => presentWorkspacePreview(id))
@@ -894,19 +1011,35 @@ store.on('change', () => pushState())
 store.on('change', () => pushCompanions())
 store.on('change', () => midiController?.render())
 store.on('task-cache', (records) => saveTaskCache(records))
-usage.on('change', () => pushUsage())
+usage.on('change', (state) => {
+  pushUsage()
+  consumptionLedger?.observe(state)
+  void handovers?.evaluate(state)
+})
 companions.on('change', () => pushCompanions())
 
 app.whenReady().then(() => {
+  const prefs = loadPrefs()
   store.hydrateTasks(loadTaskCache())
   if (app.dock) app.dock.show()
   const loginItem = ensureLaunchAtLoginPreference()
-  workspace = new WorkspaceService(store, () => connectors)
+  workspace = new WorkspaceService(store, () => connectors, {
+    aliases: prefs.threadAliases,
+    onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases })
+  })
+  consumptionLedger = createConsumptionLedger({ file: join(app.getPath('userData'), 'consumption-ledger.json') })
+  consumptionLedger.on('change', (state) => sendToWindows('consumption-ledger', state))
+  handovers = new HandoverService({ workspace, usage })
+  handovers.on('change', (records) => sendToWindows('handovers', records))
   workspace.on('change', (snapshot) => sendToWindows('thread', snapshot))
+  workspace.on('provider-auth', async (payload) => {
+    if (payload.loginId && payload.loginId === pendingCodexLogin && ['connected', 'failed'].includes(payload.status)) pendingCodexLogin = ''
+    await refreshConnectors()
+    pushProviderAuth(payload)
+  })
   createWindow()
   createWorkspaceWindow()
   createTray()
-  const prefs = loadPrefs()
   voiceInput = createVoiceInput({
     tempRoot: app.getPath('temp'),
     onTranscript: sendVoicePrompt
@@ -923,11 +1056,17 @@ app.whenReady().then(() => {
     onRecordUnavailable: ({ column }) => {
       voiceInput?.reportError(new Error(`Record Arm ${column + 1} has no selected live agent. Select a blue, green, or red APC pad in that column first.`))
     },
+    selectedProfile: prefs.midiProfile || 'auto',
     mappings: prefs.apc40Mappings,
-    onMappingsChange: (apc40Mappings) => savePrefs({ ...loadPrefs(), apc40Mappings })
+    mappingsByProfile: prefs.midiMappings,
+    onPreferencesChange: ({ selectedProfile, mappingsByProfile }) => savePrefs({
+      ...loadPrefs(),
+      midiProfile: selectedProfile,
+      midiMappings: mappingsByProfile
+    })
   })
   midiController.onStatus((status) => {
-    console.log(`[midi] APC40 MKII ${status.connected ? `connected: ${status.device}` : `disconnected${status.error ? `: ${status.error}` : ''}`}`)
+    console.log(`[midi] ${status.shortModel || 'APC controller'} ${status.connected ? `connected: ${status.device}` : `disconnected${status.error ? `: ${status.error}` : ''}`}`)
     tray?.setContextMenu(buildTrayMenu())
     pushMidi()
   })
@@ -964,4 +1103,4 @@ app.whenReady().then(() => {
 // Tray app — closing the window doesn't quit.
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); claudeAuth?.stop(); companions.stop(); usage.stop() })

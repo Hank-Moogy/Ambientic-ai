@@ -2,30 +2,34 @@ import { execFile } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { claudeAccountStatus } from './claude-auth-service.mjs'
 
 const AGENTS = [
   {
     id: 'claude',
     label: 'Claude Code',
     command: 'claude',
+    executableCandidates: ['/opt/homebrew/bin/claude', '/usr/local/bin/claude', join(homedir(), '.local', 'bin', 'claude')],
     config: join(homedir(), '.claude', 'settings.json'),
-    setupCommand: 'claude',
+    setupCommand: 'claude /login',
     launchCommand: 'claude'
   },
   {
     id: 'codex',
     label: 'Codex',
     command: 'codex',
+    executableCandidates: ['/Applications/ChatGPT.app/Contents/Resources/codex', '/opt/homebrew/bin/codex', '/usr/local/bin/codex'],
     config: join(homedir(), '.codex', 'hooks.json'),
-    setupCommand: 'codex',
+    setupCommand: 'codex login',
     launchCommand: 'codex'
   },
   {
     id: 'hermes',
     label: 'Hermes',
     command: 'hermes',
+    executableCandidates: [join(homedir(), '.local', 'bin', 'hermes'), '/opt/homebrew/bin/hermes', '/usr/local/bin/hermes'],
     config: join(homedir(), '.hermes', 'plugins', 'agentbase', 'plugin.yaml'),
-    setupCommand: 'hermes setup',
+    setupCommand: 'hermes login',
     launchCommand: 'hermes'
   }
 ]
@@ -39,12 +43,12 @@ function run (file, args, timeout = 5000) {
   })
 }
 
-async function executablePath (command) {
+async function executablePath (agent) {
   try {
-    return await run('/bin/zsh', ['-lic', `command -v ${command}`], 4000)
-  } catch {
-    return ''
-  }
+    const path = await run('/bin/zsh', ['-lic', `command -v ${agent.command}`], 4000)
+    if (path) return path
+  } catch {}
+  return agent.executableCandidates.find((path) => existsSync(path)) || ''
 }
 
 function hookConfigured (agent) {
@@ -72,19 +76,39 @@ async function versionFor (path) {
 }
 
 function authStatus (agent, path) {
-  if (!path || agent.id !== 'claude') return Promise.resolve({ authenticated: true, authMessage: '' })
+  if (!path) return Promise.resolve({ authenticated: false, authMessage: 'CLI not installed', accountLabel: '' })
+  if (agent.id === 'claude') {
+    return claudeAccountStatus().then((status) => ({
+      authenticated: status.connected,
+      accountLabel: status.email,
+      authMessage: status.connected ? '' : 'Run claude /login'
+    }))
+  }
+  const args = agent.id === 'codex' ? ['login', 'status'] : ['status']
   return new Promise((resolve) => {
-    execFile(path, ['auth', 'status'], { timeout: 8000, maxBuffer: 256 * 1024 }, (error, stdout, stderr) => {
+    execFile(path, args, { timeout: 8000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
       const output = `${stdout || ''}\n${stderr || ''}`.trim()
-      const authenticated = !error && !/invalid|not logged|login required/i.test(output)
-      resolve({ authenticated, authMessage: authenticated ? '' : (output.split('\n').find((line) => /invalid|login/i.test(line)) || 'Run claude /login').slice(0, 160) })
+      const authenticated = agent.id === 'hermes'
+        ? !error && (/✓\s+logged in/i.test(output) || /✓\s+(?:exists|configured|set)/i.test(output))
+        : !error && Boolean(output) && !/invalid|not logged|login required/i.test(output)
+      const accountLabel = agent.id === 'codex'
+        ? (output.split('\n').find((line) => /logged in using/i.test(line)) || '')
+        : agent.id === 'hermes'
+            ? (output.split('\n').find((line) => /Provider:\s+/i.test(line)) || '').replace(/^.*Provider:\s*/i, '')
+            : ''
+      const fallback = agent.id === 'claude' ? 'Run claude /login' : agent.id === 'codex' ? 'Run codex login' : 'Run hermes login or hermes model'
+      resolve({
+        authenticated,
+        accountLabel: authenticated ? accountLabel.slice(0, 100) : '',
+        authMessage: authenticated ? '' : (output.split('\n').find((line) => /invalid|not logged|login required/i.test(line)) || fallback).slice(0, 160)
+      })
     })
   })
 }
 
 export async function connectorState () {
   return Promise.all(AGENTS.map(async (agent) => {
-    const path = await executablePath(agent.command)
+    const path = await executablePath(agent)
     const configured = hookConfigured(agent)
     const auth = await authStatus(agent, path)
     return {
@@ -115,5 +139,13 @@ async function openAgentCommand (agentId, field) {
 
 export function openAgentSetup (agentId) { return openAgentCommand(agentId, 'setupCommand') }
 export function openAgentTerminal (agentId) { return openAgentCommand(agentId, 'launchCommand') }
+
+export function providerConnectionCommand (agentId) {
+  return AGENTS.find((agent) => agent.id === agentId)?.setupCommand || ''
+}
+
+export function providerExecutableCandidates (agentId) {
+  return [...(AGENTS.find((agent) => agent.id === agentId)?.executableCandidates || [])]
+}
 
 export const CONNECTOR_IDS = AGENTS.map((agent) => agent.id)

@@ -238,7 +238,7 @@ function DisplayRoute ({ topology, onChoose }) {
   )
 }
 
-function ConnectorStrip ({ connectors, onInstall, onOpen, onRefresh }) {
+function ConnectorStrip ({ connectors, onInstall, onOpen, onConnect, onRefresh }) {
   return (
     <section className="connectors" aria-label="Local agent connections">
       <div className="connectors__header">
@@ -247,22 +247,39 @@ function ConnectorStrip ({ connectors, onInstall, onOpen, onRefresh }) {
       </div>
       <div className="connectors__list">
         {connectors.length === 0 && <div className="connectors__loading">Checking Claude Code, Codex, and Hermes…</div>}
-        {connectors.map((connector) => (
-          <div className="connector" key={connector.id} data-ready={connector.ready}>
+        {connectors.map((connector) => {
+          const connected = Boolean(connector.ready && connector.manageable !== false)
+          const status = !connector.installed
+            ? 'Not installed'
+            : connector.manageable === false
+                ? 'Login required'
+                : !connector.configured
+                    ? 'Needs AgentBase hook'
+                    : 'Connected'
+          const action = !connector.installed
+            ? 'Missing'
+            : connector.manageable === false
+                ? 'Sign in'
+                : connector.configured
+                    ? 'Open'
+                    : 'Connect'
+          return (
+          <div className="connector" key={connector.id} data-ready={connected}>
             <AgentIcon agent={connector.id} />
             <span className="connector__identity">
               <b>{connector.label}</b>
-              <span>{connector.ready ? 'Connected' : connector.installed ? 'Needs AgentBase hook' : 'Not installed'}</span>
+              <span>{status}</span>
             </span>
             <button
               type="button"
               disabled={!connector.installed}
-              onClick={() => connector.ready ? onOpen(connector.id) : onInstall()}
+              onClick={() => connector.manageable === false ? onConnect(connector.id) : connector.configured ? onOpen(connector.id) : onInstall()}
             >
-              {connector.ready ? 'Open' : connector.installed ? 'Connect' : 'Missing'}
+              {action}
             </button>
           </div>
-        ))}
+          )
+        })}
       </div>
     </section>
   )
@@ -278,16 +295,16 @@ function MidiMappingPanel ({ midi, onClose }) {
   const bindings = new Map()
   for (const [key, action] of Object.entries(midi?.mappings || {})) bindings.set(action, midiBindingLabel(key))
   return (
-    <section className="midi-map" aria-label="APC40 MKII mappings">
+    <section className="midi-map" aria-label={`${midi?.shortModel || 'APC'} mappings`}>
       <div className="midi-map__header">
         <span className="midi-map__device">
           <span className="midi-map__device-dot" data-connected={Boolean(midi?.connected)} />
-          <span><b>Akai APC40 MKII</b><small>{midi?.connected ? 'Connected · Alternate Ableton mode' : 'Connect the APC40 MKII to begin'}</small></span>
+          <span><b>{midi?.model || 'Akai APC controller'}</b><small>{midi?.connected ? `Connected · ${midi.gridLabel || ''} AgentBase mode` : `Connect the selected ${midi?.shortModel || 'APC controller'} to begin`}</small></span>
         </span>
         <button type="button" onClick={onClose}>Done</button>
       </div>
       <p className="midi-map__hint">
-        The 5×8 clip grid selects sessions by default. Learn any other APC40 MKII button, knob, or fader to an AgentBase action.
+        The {midi?.gridLabel || 'pad'} grid selects agent tasks by default. Learn any other button, knob, or fader to an AgentBase action.
       </p>
       <div className="midi-map__actions">
         {(midi?.actions || []).map((action) => {
@@ -295,7 +312,7 @@ function MidiMappingPanel ({ midi, onClose }) {
           const binding = bindings.get(action.id)
           return (
             <div className="midi-action" key={action.id} data-learning={learning}>
-              <span><b>{action.label}</b><small>{learning ? 'Touch a control on the APC40 MKII…' : binding || 'Unmapped'}</small></span>
+              <span><b>{action.label}</b><small>{learning ? `Touch a control on the ${midi?.shortModel || 'APC'}…` : binding || 'Unmapped'}</small></span>
               {binding && !learning && <button type="button" className="midi-action__clear" onClick={() => window.controller.midiClearAction(action.id)}>Clear</button>}
               <button type="button" className="midi-action__learn" disabled={!midi?.connected} onClick={() => learning ? window.controller.midiCancelLearn() : window.controller.midiLearn(action.id)}>
                 {learning ? 'Cancel' : 'Learn'}
@@ -403,7 +420,7 @@ export default function App () {
   const [displays, setDisplays] = useState(null)
   const [companions, setCompanions] = useState({ bySession: {} })
   const [connectors, setConnectors] = useState([])
-  const [midi, setMidi] = useState({ connected: false, model: 'Akai APC40 MKII', actions: [], mappings: {} })
+  const [midi, setMidi] = useState({ connected: false, model: 'Akai APC controller', actions: [], mappings: {} })
   const [voice, setVoice] = useState({ recording: false, transcribing: false, error: '', transcript: '' })
   const [showMidiMap, setShowMidiMap] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -473,7 +490,7 @@ export default function App () {
 
   const needy = sessions.filter((s) => s.state !== 'running').length
   const groupedSessions = stableGroupSessions(sessions, padLayoutRef.current)
-  const agentsReady = connectors.length > 0 && connectors.every((connector) => connector.ready)
+  const agentsReady = connectors.length > 0 && connectors.every((connector) => connector.ready && connector.manageable !== false)
 
   const onFocus = async (id) => {
     // Optimistic: drop the unseen pulse immediately.
@@ -545,9 +562,10 @@ export default function App () {
           <span className="titlebar__label">AgentBase</span>
           <DisplayRoute topology={displays} onChoose={() => window.controller.showDisplayMenu()} />
           <button className="titlebar__midi" type="button" data-connected={Boolean(midi?.connected)} onClick={() => setShowMidiMap((value) => !value)}>
-            APC40 <span />
+            {midi?.shortModel || 'APC'} <span />
           </button>
           <span className="titlebar__count">{sessions.length}{needy ? ` · ${needy}!` : ''}</span>
+          <button className="titlebar__close" type="button" aria-label="Close APC40 controller" title="Close controller" onClick={() => window.controller.hideController()}>×</button>
         </div>
 
         {needsAccess && (
@@ -564,6 +582,7 @@ export default function App () {
               connectors={connectors}
               onInstall={() => window.controller.installHooks()}
               onOpen={(agentId) => window.controller.openAgentSetup(agentId)}
+              onConnect={(agentId) => window.controller.connectProvider(agentId)}
               onRefresh={() => window.controller.refreshConnectors()}
             />
             <UsageStrip usage={usage} now={now} onRefresh={() => window.controller.refreshUsage()} />

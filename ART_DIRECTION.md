@@ -1,0 +1,58 @@
+# AgentBase art direction
+
+This document is the durable creative reference for AgentBase. Revisit it whenever a material interface, motion, sound, lighting, or hardware-expression decision is made.
+
+## The feeling
+
+AgentBase should feel **fluid, aerial, calm, and quietly alive**—closer to ambient music and reflected light than to a dense operations dashboard. It is a place where many agents can be active without making the user feel surrounded by alarms.
+
+The experience should suggest:
+
+- Light moving through mist, water, or translucent material.
+- Slow breathing and drifting rather than bouncing or snapping.
+- A deep, cool atmosphere with selective green, blue, violet, and soft neutral light.
+- Moments of digital texture or glitch used as punctuation, never constant noise.
+- Physical and screen interfaces behaving like two surfaces of the same instrument.
+
+## Interaction principles
+
+1. **Calm by default.** Persistent motion is slow, low-contrast, and safe to ignore.
+2. **Responsive under the hand.** Direct actions answer immediately, then settle with soft easing.
+3. **Meaning survives the mood.** Green running, red needs-input, and blue idle remain unambiguous. Expressive sequences are temporary and always restore operational state.
+4. **Depth without fog.** Translucency, bloom, and gradients create atmosphere, but text and controls retain strong contrast.
+5. **Rhythm over spectacle.** Animation should have phrasing, rests, and variation. Avoid uniform loading-spinner motion.
+6. **One instrument.** MIDI light, on-screen motion, preview transitions, and future sound should share timing and color language.
+
+## Motion and light language
+
+- Ambient cycles: roughly 6–16 seconds.
+- Interface transitions: roughly 180–500 ms with gentle acceleration and a long settle.
+- Hardware expressions: layered waves at different speeds, sparse deterministic glitches, cool color fields, and a clean return to task-state lighting.
+- Prefer spatial waves, opacity drift, blur, and subtle parallax.
+- Respect reduced-motion preferences and never obscure an approval or urgent task state for long.
+
+## First expression: Vibe
+
+The Overview **Vibe** button (or ⌘⇧V) cycles through four temporary lighting studies across the connected APC grid:
+
+1. **Center wave** — a cold blue, violet, cyan, and green pulse radiates from the center toward the edges.
+2. **Cold orbit** — cool-color rings rotate around the grid with layered angular motion.
+3. **8-bit life** — a hot-color cellular automaton evolves in chunky generations.
+4. **Illumination** — warm mosaic blocks turn on and off like an architectural light wall.
+
+The button identifies the queued and currently playing study. After about five seconds, AgentBase restores every live task LED and queues the next composition.
+
+Vibe is an expressive test surface, not a task command. It must never select, start, stop, or alter an agent. These four studies are intentionally temporary while the preferred motion language is selected.
+
+## Design review ritual
+
+For every material UI or hardware-expression change, ask:
+
+- Does it feel calmer and more spatial, or merely more decorated?
+- Is the hierarchy still readable at a glance?
+- Does motion communicate state, continuity, or atmosphere?
+- Does the hardware response belong to the same visual world?
+- Does the effect end cleanly and restore operational truth?
+- Is reduced motion, accessibility, and low-light use respected?
+
+Record meaningful additions or deliberate deviations in this document so the art direction evolves explicitly rather than by accident.

@@ -36,6 +36,18 @@ function codexThreadMessages (thread) {
   return (thread?.turns || []).flatMap((turn) => (turn.items || []).map(codexItem).filter(Boolean))
 }
 
+function codexActiveTurnId (thread) {
+  return [...(thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id || ''
+}
+
+function codexEventTurnId (event) {
+  return event?.params?.turn?.id || event?.params?.turnId || ''
+}
+
+function codexStatusIsRunning (status) {
+  return (status?.type || status) === 'active'
+}
+
 function claudeMessages (path) {
   if (!path || !existsSync(path)) return []
   const output = []
@@ -147,7 +159,7 @@ function execJson (file, args) {
 }
 
 export class WorkspaceService extends EventEmitter {
-  constructor (store, getConnectors) {
+  constructor (store, getConnectors, { aliases = {}, onAliasesChange } = {}) {
     super()
     this.store = store
     this.getConnectors = getConnectors
@@ -160,6 +172,8 @@ export class WorkspaceService extends EventEmitter {
     this.activeTurns = new Map()
     this.history = new Map()
     this.historyRefreshedAt = 0
+    this.aliases = new Map(Object.entries(aliases || {}).filter(([, title]) => String(title || '').trim()))
+    this.onAliasesChange = onAliasesChange
   }
 
   connector (id) { return this.getConnectors().find((item) => item.id === id) }
@@ -202,9 +216,12 @@ export class WorkspaceService extends EventEmitter {
     for (const session of this.store.list()) merged.set(session.id, session)
     for (const [id, snapshot] of this.snapshots) {
       const session = merged.get(id)
-      if (session) merged.set(id, { ...session, state: snapshot.state, task: snapshot.title || session.task })
+      if (session) merged.set(id, { ...session, state: this.effectiveState(session, snapshot), task: snapshot.title || session.task })
     }
-    return [...merged.values()].sort((left, right) => {
+    return [...merged.values()].map((session) => {
+      const alias = this.aliases.get(session.id)
+      return alias ? { ...session, task: alias, taskSource: 'user' } : session
+    }).sort((left, right) => {
       const leftLive = left.history ? 0 : 1
       const rightLive = right.history ? 0 : 1
       return rightLive - leftLive || (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0)
@@ -212,11 +229,12 @@ export class WorkspaceService extends EventEmitter {
   }
 
   baseSnapshot (session) {
+    const title = this.aliases.get(session.id) || session.task || session.project || `${PROVIDER_LABELS[session.agent] || 'Agent'} session`
     return {
       id: session.id,
       provider: session.agent,
       providerLabel: PROVIDER_LABELS[session.agent] || session.agent,
-      title: session.task || session.project || `${PROVIDER_LABELS[session.agent] || 'Agent'} session`,
+      title,
       project: session.project || basename(session.cwd || '') || 'Local session',
       cwd: session.cwd || '',
       state: session.state || 'idle',
@@ -229,9 +247,48 @@ export class WorkspaceService extends EventEmitter {
   emitSnapshot (snapshot) {
     snapshot.artifacts = [...new Map(snapshot.messages.flatMap((entry) => (entry.files || []).map((path) => [path, { path, name: basename(path), kind: 'file' }]))).values()]
     snapshot.approvals = [...this.pendingApprovals.values()].filter((approval) => approval.sessionId === snapshot.id)
+    // State has one owner. Callers set `running`/`error`/`messages`; the state
+    // is always derived here so live snapshots and list()/read() cannot diverge.
+    snapshot.state = this.effectiveState(this.sessionFor(snapshot.id), snapshot)
     this.snapshots.set(snapshot.id, snapshot)
     this.emit('change', snapshot)
     return snapshot
+  }
+
+  // True when the agent has paused waiting for the user to approve something —
+  // the only case in which a not-running thread genuinely "needs you".
+  hasPendingApproval (id) {
+    for (const approval of this.pendingApprovals.values()) if (approval.sessionId === id) return true
+    return false
+  }
+
+  isRunning (id, snapshot) {
+    return Boolean(snapshot?.running) || this.activeTurns.has(id)
+  }
+
+  // The single source of truth for a thread's UI state. Precedence:
+  // running > blocked-on-user (approval/error) > finished(idle) > history >
+  // hook-driven store lifecycle (for sessions with no managed snapshot yet).
+  effectiveState (session, snapshot) {
+    const id = session?.id ?? snapshot?.id
+    if (this.isRunning(id, snapshot)) return 'running'
+    if (snapshot?.error) return 'attention'
+    if (this.hasPendingApproval(id)) return 'attention'
+    if (snapshot) return session?.history ? 'history' : 'idle'
+    return session?.history ? 'history' : (session?.state || 'idle')
+  }
+
+  async rename (id, value) {
+    const session = this.sessionFor(id)
+    if (!session) throw new Error('This thread is no longer available.')
+    const title = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80)
+    if (!title) throw new Error('Enter a thread name.')
+    this.aliases.set(id, title)
+    this.store.updateTask(id, title, '', 'user')
+    this.onAliasesChange?.(Object.fromEntries(this.aliases))
+    const snapshot = this.snapshots.get(id)
+    if (snapshot) this.emitSnapshot({ ...snapshot, title })
+    return { id, title }
   }
 
   async read (id) {
@@ -239,8 +296,7 @@ export class WorkspaceService extends EventEmitter {
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
     const snapshot = { ...this.baseSnapshot(session), ...(this.snapshots.get(id) || {}) }
-    snapshot.state = session.state
-    snapshot.title = session.task || snapshot.title
+    snapshot.title = this.aliases.get(id) || session.task || snapshot.title
     snapshot.cwd = session.cwd || snapshot.cwd
     try {
       if (session.agent === 'codex') {
@@ -248,7 +304,10 @@ export class WorkspaceService extends EventEmitter {
         const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
         snapshot.messages = codexThreadMessages(result.thread)
         snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
-        snapshot.running = ['active', 'running'].includes(result.thread?.status?.type || result.thread?.status)
+        snapshot.running = codexStatusIsRunning(result.thread?.status)
+        const activeTurnId = codexActiveTurnId(result.thread)
+        if (snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
+        else if (!snapshot.running) this.activeTurns.delete(id)
       } else if (session.agent === 'claude') {
         snapshot.transcriptPath = findClaudeTranscript(session)
         const disk = claudeMessages(snapshot.transcriptPath)
@@ -280,6 +339,28 @@ export class WorkspaceService extends EventEmitter {
     return this.codexReady
   }
 
+  async connectCodexAccount () {
+    const rpc = await this.codexClient()
+    const result = await rpc.request('account/login/start', {
+      type: 'chatgpt',
+      useHostedLoginSuccessPage: true,
+      appBrand: 'chatgpt'
+    })
+    if (!result?.authUrl) throw new Error('Codex did not return a ChatGPT sign-in URL.')
+    return { provider: 'codex', mode: 'browser', loginId: result.loginId || '', authUrl: result.authUrl }
+  }
+
+  async codexAccountStatus () {
+    const rpc = await this.codexClient()
+    const result = await rpc.request('account/read', { refreshToken: false })
+    return {
+      connected: Boolean(result?.account),
+      accountType: result?.account?.type || '',
+      email: result?.account?.email || '',
+      planType: result?.account?.planType || ''
+    }
+  }
+
   async hermesClient () {
     if (this.hermesReady) return this.hermesReady
     this.hermesReady = (async () => {
@@ -308,7 +389,8 @@ export class WorkspaceService extends EventEmitter {
     }
     this.pendingApprovals.set(id, { ...approval, rpc, requestId: request.id })
     const snapshot = this.snapshots.get(sessionId)
-    if (snapshot) this.emitSnapshot({ ...snapshot, state: 'attention' })
+    // The approval is now pending, so emitSnapshot derives "attention".
+    if (snapshot) this.emitSnapshot({ ...snapshot })
   }
 
   async resolveApproval (approvalId, allow, remember = false) {
@@ -333,15 +415,23 @@ export class WorkspaceService extends EventEmitter {
     const snapshot = await this.read(id)
     snapshot.messages = [...snapshot.messages, message('user', text)]
     snapshot.running = true
-    snapshot.state = 'running'
     this.emitSnapshot(snapshot)
     if (!session.history) this.store.ingest({ event: 'prompt', session_id: id, agent: session.agent, cwd: session.cwd })
     if (session.agent === 'codex') {
       const rpc = await this.codexClient()
       const threadId = this.codexThreadId(session)
       await rpc.request('thread/resume', { threadId })
-      const result = await rpc.request('turn/start', { threadId, input: [{ type: 'text', text, text_elements: [] }] })
-      this.activeTurns.set(id, result.turn?.id || result.id)
+      const activeTurnId = this.activeTurns.get(id)
+      if (activeTurnId) {
+        await rpc.request('turn/steer', {
+          threadId,
+          expectedTurnId: activeTurnId,
+          input: [{ type: 'text', text, text_elements: [] }]
+        })
+      } else {
+        const result = await rpc.request('turn/start', { threadId, input: [{ type: 'text', text, text_elements: [] }] })
+        this.activeTurns.set(id, result.turn?.id || result.id)
+      }
     } else if (session.agent === 'hermes') {
       const rpc = await this.hermesClient()
       await rpc.request('session/resume', { sessionId: id, cwd: session.cwd || homedir(), mcpServers: [] })
@@ -383,9 +473,14 @@ export class WorkspaceService extends EventEmitter {
 
   runClaude (session, prompt) {
     const path = this.connector('claude')?.path || 'claude'
-    const resumable = /^[0-9a-f-]{30,}$/i.test(session.id)
+    // Resume only once Claude has actually persisted this session's transcript.
+    // A brand-new managed task carries a fresh UUID that Claude has never seen,
+    // so its first turn must CREATE the session with --session-id. Using
+    // --resume on an id that doesn't exist yet fails with "No conversation
+    // found with session ID" and exits non-zero ("Claude exited with code 1").
+    const started = Boolean(findClaudeTranscript(session))
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', 'acceptEdits']
-    args.push(resumable ? '--resume' : '--session-id', session.id)
+    args.push(started ? '--resume' : '--session-id', session.id)
     const child = spawn(path, args, { cwd: session.cwd || homedir(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
@@ -414,13 +509,43 @@ export class WorkspaceService extends EventEmitter {
   }
 
   codexNotification (event) {
+    if (event.method === 'account/login/completed') {
+      this.emit('provider-auth', {
+        provider: 'codex',
+        status: event.params?.success ? 'connected' : 'failed',
+        loginId: event.params?.loginId || '',
+        error: event.params?.error || ''
+      })
+      return
+    }
+    if (event.method === 'account/updated') {
+      this.emit('provider-auth', {
+        provider: 'codex',
+        status: event.params?.authMode ? 'connected' : 'disconnected',
+        accountType: event.params?.authMode || '',
+        planType: event.params?.planType || ''
+      })
+      return
+    }
     const providerId = event.params?.threadId || event.params?.thread?.id
     if (!providerId) return
     const id = this.uiSessionId('codex', providerId)
-    if (event.method === 'turn/completed') return void this.finish(id)
+    if (event.method === 'turn/started') {
+      const turnId = codexEventTurnId(event)
+      if (turnId) this.activeTurns.set(id, turnId)
+      const snapshot = this.snapshots.get(id)
+      if (snapshot) this.emitSnapshot({ ...snapshot, running: true })
+      return
+    }
+    if (event.method === 'turn/completed') {
+      const turnId = codexEventTurnId(event)
+      if (!turnId || this.activeTurns.get(id) !== turnId) return
+      return void this.finish(id, turnId)
+    }
     if (event.method === 'thread/status/changed') {
       const snapshot = this.snapshots.get(id)
-      if (snapshot) this.emitSnapshot({ ...snapshot, running: ['active', 'running'].includes(event.params?.status?.type || event.params?.status) })
+      const running = codexStatusIsRunning(event.params?.status)
+      if (snapshot) this.emitSnapshot({ ...snapshot, running })
       return
     }
     const item = event.params?.item
@@ -475,7 +600,8 @@ export class WorkspaceService extends EventEmitter {
     return true
   }
 
-  async finish (id) {
+  async finish (id, expectedTurnId = '') {
+    if (expectedTurnId && this.activeTurns.get(id) !== expectedTurnId) return false
     this.activeTurns.delete(id)
     const snapshot = this.snapshots.get(id)
     const session = this.sessionFor(id)
@@ -492,16 +618,29 @@ export class WorkspaceService extends EventEmitter {
           console.error('[agentbase] Hermes transcript reconciliation failed:', error.message)
         }
       }
+      if (session?.agent === 'codex') {
+        try {
+          const rpc = await this.codexClient()
+          const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
+          snapshot.messages = codexThreadMessages(result.thread)
+          snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
+        } catch (error) {
+          console.error('[agentbase] Codex transcript reconciliation failed:', error.message)
+        }
+      }
       for (const entry of snapshot.messages) delete entry.streaming
-      this.emitSnapshot({ ...snapshot, running: false, state: 'waiting' })
+      this.emitSnapshot({ ...snapshot, running: false })
     }
-    if (session) this.store.ingest({ event: 'stop', session_id: id, agent: session.agent, cwd: session.cwd })
+    // A finished turn is only "needs you" when the agent is actually blocked on
+    // a pending approval; otherwise it is simply idle/done, not red.
+    if (session) this.store.ingest({ event: this.hasPendingApproval(id) ? 'notification' : 'stop_idle', session_id: id, agent: session.agent, cwd: session.cwd })
+    return true
   }
 
   fail (id, error) {
     this.activeTurns.delete(id)
     const snapshot = this.snapshots.get(id)
-    if (snapshot) this.emitSnapshot({ ...snapshot, running: false, state: 'attention', error: error.message })
+    if (snapshot) this.emitSnapshot({ ...snapshot, running: false, error: error.message })
     const session = this.store.list().find((item) => item.id === id)
     if (session) this.store.ingest({ event: 'notification', session_id: id, agent: session.agent, cwd: session.cwd })
   }

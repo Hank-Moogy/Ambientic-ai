@@ -4,12 +4,21 @@ contextBridge.exposeInMainWorld('controller', {
   getState: () => ipcRenderer.invoke('get-state'),
   getWorkspaceThreads: () => ipcRenderer.invoke('get-workspace-threads'),
   getUsage: () => ipcRenderer.invoke('get-usage'),
+  getConsumptionLedger: () => ipcRenderer.invoke('get-consumption-ledger'),
   getDisplays: () => ipcRenderer.invoke('get-displays'),
   getCompanions: () => ipcRenderer.invoke('get-companions'),
   getConnectors: () => ipcRenderer.invoke('get-connectors'),
   refreshConnectors: () => ipcRenderer.invoke('refresh-connectors'),
+  getProviderAuth: () => ipcRenderer.invoke('get-provider-auth'),
+  getHandovers: () => ipcRenderer.invoke('get-handovers'),
+  generateHandover: (sessionId) => ipcRenderer.invoke('generate-handover', sessionId),
+  continueHandover: (sessionId, targetProvider) => ipcRenderer.invoke('continue-handover', sessionId, targetProvider),
   openAgentSetup: (agentId) => ipcRenderer.invoke('open-agent-setup', agentId),
+  connectProvider: (agentId, options = {}) => ipcRenderer.invoke('connect-provider', agentId, options),
+  claudeAuthInput: (input) => ipcRenderer.invoke('claude-auth-input', input),
+  claudeAuthCancel: () => ipcRenderer.invoke('claude-auth-cancel'),
   getThread: (id) => ipcRenderer.invoke('get-thread', id),
+  renameThread: (id, title) => ipcRenderer.invoke('rename-thread', id, title),
   sendThreadPrompt: (id, text) => ipcRenderer.invoke('send-thread-prompt', id, text),
   interruptThread: (id) => ipcRenderer.invoke('interrupt-thread', id),
   createManagedThread: (options) => ipcRenderer.invoke('create-managed-thread', options),
@@ -17,6 +26,7 @@ contextBridge.exposeInMainWorld('controller', {
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   showController: () => ipcRenderer.invoke('show-controller'),
+  hideController: () => ipcRenderer.invoke('hide-controller'),
   showWorkspace: (id) => ipcRenderer.invoke('show-workspace', id),
   openArtifact: (path) => ipcRenderer.invoke('open-artifact', path),
   presentPreview: (id) => ipcRenderer.invoke('present-preview', id),
@@ -24,6 +34,8 @@ contextBridge.exposeInMainWorld('controller', {
   getVoice: () => ipcRenderer.invoke('get-voice'),
   toggleVoice: () => ipcRenderer.invoke('toggle-voice'),
   midiLearn: (actionId) => ipcRenderer.invoke('midi-learn', actionId),
+  midiSetProfile: (profileId) => ipcRenderer.invoke('midi-set-profile', profileId),
+  midiVibe: () => ipcRenderer.invoke('midi-vibe'),
   midiCancelLearn: () => ipcRenderer.invoke('midi-cancel-learn'),
   midiClearAction: (actionId) => ipcRenderer.invoke('midi-clear-action', actionId),
   midiResetMappings: () => ipcRenderer.invoke('midi-reset-mappings'),
@@ -54,6 +66,11 @@ contextBridge.exposeInMainWorld('controller', {
     ipcRenderer.on('usage', handler)
     return () => ipcRenderer.removeListener('usage', handler)
   },
+  onConsumptionLedger: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('consumption-ledger', handler)
+    return () => ipcRenderer.removeListener('consumption-ledger', handler)
+  },
   onDisplays: (cb) => {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('displays', handler)
@@ -68,6 +85,16 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('connectors', handler)
     return () => ipcRenderer.removeListener('connectors', handler)
+  },
+  onProviderAuth: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('provider-auth', handler)
+    return () => ipcRenderer.removeListener('provider-auth', handler)
+  },
+  onHandovers: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('handovers', handler)
+    return () => ipcRenderer.removeListener('handovers', handler)
   },
   onMidi: (cb) => {
     const handler = (_e, payload) => cb(payload)

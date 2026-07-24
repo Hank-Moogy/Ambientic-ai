@@ -163,6 +163,27 @@ html, body {
 .titlebar__midi[data-connected="true"] { color: var(--text-secondary); }
 .titlebar__midi[data-connected="true"] > span { background: var(--green); box-shadow: 0 0 7px color-mix(in oklch, var(--green) 65%, transparent); }
 .titlebar__midi:hover { color: var(--text); border-color: rgba(255,255,255,.18); }
+.titlebar__close {
+  -webkit-app-region: no-drag;
+  width: 23px;
+  height: 23px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.titlebar__close:hover {
+  border-color: color-mix(in oklch, var(--red) 42%, transparent);
+  background: color-mix(in oklch, var(--red) 12%, transparent);
+  color: oklch(0.82 0.12 25);
+}
+.titlebar__close:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 
 /* ── local agent connections ───────────────────────────────────── */
 .connectors {

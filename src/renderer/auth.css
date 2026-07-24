@@ -1,0 +1,131 @@
+.provider-auth-toast {
+  position: fixed;
+  z-index: 60;
+  right: 22px;
+  top: 20px;
+  width: min(380px, calc(100vw - 44px));
+  padding: 13px 13px 13px 14px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #3d5547;
+  border-radius: 12px;
+  background: #152019f2;
+  box-shadow: 0 20px 60px #0009;
+  backdrop-filter: blur(20px);
+  color: #d8e8de;
+}
+
+.provider-auth-toast > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #62dc94;
+  color: #0b160f;
+  font-weight: 850;
+}
+
+.provider-auth-toast > div { display: grid; gap: 3px; }
+.provider-auth-toast b { font-size: 11px; }
+.provider-auth-toast small {
+  overflow: hidden;
+  color: #91a69a;
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.provider-auth-toast > button {
+  border: 0;
+  background: transparent;
+  color: #788980;
+  font-size: 19px;
+}
+
+.provider-auth-toast[data-status="waiting"] {
+  border-color: #4b5469;
+  background: #171b25f2;
+}
+
+.provider-auth-toast[data-status="waiting"] > span {
+  background: #7895df;
+  color: #101522;
+}
+
+.provider-auth-toast:not([data-status="waiting"]):not([data-status="connected"]) {
+  border-color: #70474c;
+  background: #281719f2;
+}
+
+.provider-auth-toast:not([data-status="waiting"]):not([data-status="connected"]) > span {
+  background: #e06a72;
+  color: #21090b;
+}
+
+.claude-auth-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #050609c7;
+  backdrop-filter: blur(8px);
+}
+
+.claude-auth-wizard {
+  width: min(650px, calc(100vw - 48px));
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid #51423b;
+  border-radius: 17px;
+  background: #171716;
+  box-shadow: 0 35px 120px #000;
+}
+
+.claude-auth-wizard > header {
+  min-height: 82px;
+  padding: 16px 19px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  border-bottom: 1px solid #332f2c;
+}
+
+.claude-auth-wizard > header > div { display: grid; gap: 4px; }
+.claude-auth-wizard > header small { color: #9f7d6a; font-size: 8px; font-weight: 750; text-transform: uppercase; letter-spacing: .12em; }
+.claude-auth-wizard > header h2 { margin: 0; font-size: 17px; }
+.claude-auth-wizard > header > button { margin-left: auto; border: 0; background: transparent; color: #8c8580; font-size: 24px; }
+.claude-auth-progress { min-height: 42px; padding: 0 19px; display: flex; align-items: center; gap: 8px; color: #9e938d; font-size: 9px; }
+.claude-auth-progress i { width: 7px; height: 7px; border-radius: 50%; background: #e1716c; }
+.claude-auth-progress i[data-active="true"] { background: #efa170; box-shadow: 0 0 12px #efa17088; }
+.claude-auth-wizard[data-status="connected"] .claude-auth-progress i { background: #66dd96; }
+.claude-auth-error { margin: 0 19px 10px; padding: 10px 12px; display: grid; gap: 4px; border: 1px solid #6c3f3f; border-radius: 9px; background: #271819; color: #dca3a0; font-size: 9px; }
+.claude-auth-error b { color: #f0bbb7; font-size: 8px; text-transform: uppercase; letter-spacing: .08em; }
+.claude-auth-wizard pre { min-height: 120px; max-height: 240px; margin: 10px 0 0; padding: 15px; overflow: auto; border: 1px solid #332f2d; border-radius: 10px; background: #0d0e0e; color: #c9c2bd; font: 11px/1.55 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; white-space: pre-wrap; user-select: text; }
+.claude-auth-wizard > p { margin: 13px 19px 9px; color: #847c77; font-size: 9px; line-height: 1.55; }
+.claude-auth-controls { margin: 0 19px 9px; display: flex; gap: 7px; }
+.claude-auth-controls button,.claude-auth-code button,.claude-auth-wizard > footer button { min-height: 32px; padding: 0 12px; border: 1px solid #443d39; border-radius: 8px; background: #211f1d; color: #aaa19b; font-size: 9px; font-weight: 700; }
+.claude-auth-controls button.primary,.claude-auth-wizard > footer button.primary { border-color: #8b5f48; background: #422b20; color: #f0b18c; }
+.claude-auth-step,.claude-auth-code { margin: 2px 19px 14px; padding: 18px; border: 1px solid #493c35; border-radius: 12px; background: linear-gradient(145deg,#211d1a,#171716); }
+.claude-auth-step { display: flex; align-items: flex-start; gap: 13px; }
+.claude-auth-step__mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; background: #3b2b23; color: #f0a67e; font-size: 16px; }
+.claude-auth-step h3,.claude-auth-code h3 { margin: 1px 0 6px; color: #eee9e5; font-size: 15px; }
+.claude-auth-step p,.claude-auth-code p { margin: 0; color: #9b918a; font-size: 10px; line-height: 1.6; }
+.claude-auth-code > div:first-child > span { color: #c48465; font-size: 8px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+.claude-auth-code__field { margin-top: 15px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.claude-auth-code__field input { min-width: 0; min-height: 42px; border: 1px solid #5b483e; border-radius: 9px; outline: 0; background: #0f100f; padding: 0 12px; color: #eee9e5; font: 11px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+.claude-auth-code__field input:focus { border-color: #c37b57; box-shadow: 0 0 0 3px #a45e3b24; }
+.claude-auth-code__field button.primary { min-height: 42px; border-color: #9a6248; background: #513224; color: #ffc29d; }
+.claude-auth-step--verifying { align-items: center; border-color: #47536c; background: linear-gradient(145deg,#1c202b,#171719); }
+.claude-auth-spinner { width: 26px; height: 26px; flex: 0 0 auto; border: 2px solid #3c465d; border-top-color: #89a8ef; border-radius: 50%; animation: claude-auth-spin .8s linear infinite; }
+.claude-auth-details { margin: 0 19px; color: #7f7772; font-size: 9px; }
+.claude-auth-details summary { padding: 8px 0; cursor: pointer; user-select: none; }
+.claude-auth-details[open] summary { color: #a79c95; }
+@keyframes claude-auth-spin { to { transform: rotate(360deg); } }
+.claude-auth-wizard > footer { min-height: 66px; padding: 13px 19px; display: flex; align-items: center; gap: 12px; border-top: 1px solid #332f2c; margin-top: 16px; }
+.claude-auth-wizard > footer span { color: #716b67; font-size: 8px; }
+.claude-auth-wizard > footer button { margin-left: auto; }

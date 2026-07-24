@@ -19,7 +19,8 @@ const TRANSITION = {
   prompt: STATE.RUNNING,
   tool: STATE.RUNNING,
   notification: STATE.ATTENTION,
-  stop: STATE.WAITING,
+  stop: STATE.WAITING, // terminal turn finished — "your move" (hook-driven sessions)
+  stop_idle: STATE.IDLE, // managed turn finished with nothing blocked on you
   session_end: STATE.ENDED
 }
 
@@ -238,7 +239,7 @@ export class SessionStore extends EventEmitter {
     for (const incoming of sessions) {
       const existing = this.map.get(incoming.id)
       if (!existing) {
-        this.map.set(incoming.id, {
+        const created = {
           ...incoming,
           seq: SEQ++,
           since: incoming.updatedAt || now,
@@ -251,13 +252,18 @@ export class SessionStore extends EventEmitter {
           unseen: incoming.state === STATE.WAITING || incoming.state === STATE.ATTENTION,
           discovered: false,
           externalSource: source
-        })
+        }
+        this.map.set(incoming.id, created)
+        this.applyCachedTask(created)
         changed = true
         continue
       }
 
       const previousState = existing.state
       for (const [key, value] of Object.entries(incoming)) {
+        // A persistent AgentBase label is authoritative over a provider index
+        // title. Provider refreshes may expose the full first prompt as title.
+        if (key === 'task' && ['user', 'model', 'cache'].includes(existing.taskSource)) continue
         if (existing[key] !== value) { existing[key] = value; changed = true }
       }
       existing.lastSeen = now

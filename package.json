@@ -41,6 +41,10 @@
       {
         "from": "hook",
         "to": "hook"
+      },
+      {
+        "from": "resources/claude_pty.py",
+        "to": "claude_pty.py"
       }
     ],
     "mac": {

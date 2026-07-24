@@ -49,22 +49,41 @@ async function pathExists (path) {
   }
 }
 
+export function knownUsageCommandCandidates (name, home = homedir()) {
+  const candidates = {
+    codex: [
+      '/Applications/ChatGPT.app/Contents/Resources/codex',
+      '/opt/homebrew/bin/codex',
+      '/usr/local/bin/codex',
+      join(home, '.local/bin/codex')
+    ],
+    claude: [
+      '/opt/homebrew/bin/claude',
+      '/usr/local/bin/claude',
+      join(home, '.local/bin/claude')
+    ],
+    kimi: [
+      join(home, '.kimi-code/bin/kimi'),
+      '/opt/homebrew/bin/kimi',
+      '/usr/local/bin/kimi'
+    ]
+  }
+  return candidates[name] || []
+}
+
 async function resolveCommand (name) {
   if (commandPaths.has(name)) return commandPaths.get(name)
 
-  const known = {
-    claude: [join(homedir(), '.local/bin/claude')],
-    kimi: [join(homedir(), '.kimi-code/bin/kimi')]
-  }
-  for (const candidate of known[name] || []) {
+  // Finder-launched apps receive a minimal PATH. Check stable app/Homebrew
+  // locations first so usage discovery matches provider connector discovery.
+  for (const candidate of knownUsageCommandCandidates(name)) {
     if (await pathExists(candidate)) {
       commandPaths.set(name, candidate)
       return candidate
     }
   }
 
-  // Finder-launched apps receive a minimal PATH. Resolve through the user's
-  // login shell so NVM/Homebrew-installed CLIs remain discoverable.
+  // Keep the login-shell fallback for custom installations.
   const { stdout } = await execFileAsync('/bin/zsh', [
     '-lc',
     'command -v -- "$1"',
@@ -100,6 +119,7 @@ export function parseClaudeUsage (stdout) {
       id: 'five-hour',
       label: 'All models',
       period: 'short',
+      durationMins: 300,
       usedPercent: clampPercent(session[1]),
       resetAt: resetTextToEpoch(session[2]),
       resetText: session[2].trim()
@@ -113,13 +133,24 @@ export function parseClaudeUsage (stdout) {
       id: rawLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       label: /^all models$/i.test(rawLabel) ? 'All models' : rawLabel,
       period: 'week',
+      durationMins: 7 * 24 * 60,
       usedPercent: clampPercent(match[2]),
       resetAt: resetTextToEpoch(match[3]),
       resetText: match[3].trim()
     })
   }
 
-  if (windows.length === 0) throw new Error('Claude usage output did not contain quota windows')
+  if (windows.length === 0) {
+    // Current Claude Code builds no longer run `/usage` in -p/--print mode: the
+    // argument is treated as a prompt and comes back as "Unknown skill: usage".
+    // Report that precisely so the UI can say quota is interactive-only instead
+    // of showing a vague failure. (Proper fix: scrape the interactive /usage TUI
+    // over a PTY, like the login flow.)
+    if (/unknown skill:\s*usage/i.test(text)) {
+      throw new Error('Claude Code no longer exposes /usage non-interactively; quota is available only in an interactive session.')
+    }
+    throw new Error('Claude usage output did not contain quota windows')
+  }
   return { plan: 'subscription', windows }
 }
 
@@ -163,6 +194,7 @@ function readCodexWindow (bucketId, bucket, slot, value) {
     id: `${bucketId}-${slot}`,
     label,
     period,
+    durationMins: Number.isFinite(duration) ? duration : null,
     usedPercent: clampPercent(value.usedPercent),
     resetAt: Number.isFinite(Number(value.resetsAt)) ? Number(value.resetsAt) : null,
     resetText: null
@@ -174,6 +206,23 @@ export function parseCodexRateLimits (result) {
   const windows = []
   let plan = null
   let credits = null
+  const resetSource = result?.rateLimitResetCredits
+  const resetCredits = {
+    availableCount: Number.isFinite(Number(resetSource?.availableCount))
+      ? Math.max(0, Math.trunc(Number(resetSource.availableCount)))
+      : null,
+    credits: Array.isArray(resetSource?.credits)
+      ? resetSource.credits.map((credit) => ({
+          id: String(credit?.id || ''),
+          resetType: String(credit?.resetType || ''),
+          status: String(credit?.status || ''),
+          title: String(credit?.title || ''),
+          description: String(credit?.description || ''),
+          grantedAt: Number.isFinite(Number(credit?.grantedAt)) ? Number(credit.grantedAt) : null,
+          expiresAt: Number.isFinite(Number(credit?.expiresAt)) ? Number(credit.expiresAt) : null
+        }))
+      : []
+  }
 
   for (const [bucketId, bucket] of Object.entries(source)) {
     if (!bucket || typeof bucket !== 'object') continue
@@ -188,7 +237,14 @@ export function parseCodexRateLimits (result) {
   }
 
   if (windows.length === 0) throw new Error('Codex returned no rate-limit windows')
-  return { plan, credits, windows }
+  return {
+    plan,
+    credits,
+    resetCredits,
+    limitReachedType: result?.rateLimitReachedType || null,
+    spendControlReached: Boolean(result?.spendControlReached),
+    windows
+  }
 }
 
 async function requestCodexRateLimits (command) {
