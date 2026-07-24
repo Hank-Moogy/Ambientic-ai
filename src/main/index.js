@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, screen, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -22,6 +22,7 @@ import { HandoverService } from './handover-service.mjs'
 import { ClaudeAuthService } from './claude-auth-service.mjs'
 import { normalizeExternalUrl } from './external-url.mjs'
 import { ensureEnhancedPath } from './env-path.mjs'
+import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-mode.mjs'
 
 // Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
 // Finder-launched app otherwise only has launchd's minimal PATH, which lacks
@@ -76,6 +77,7 @@ let workspace = null
 let handovers = null
 let consumptionLedger = null
 let claudeAuth = null
+let ambientMode = null
 let pendingWorkspaceSessionId = ''
 let workspaceListTimer = null
 
@@ -559,6 +561,12 @@ function buildTrayMenu () {
   return Menu.buildFromTemplate([
     { label: 'Open Ambientic workspace', click: () => showWorkspace() },
     { label: 'Show / Hide compact controller', click: () => (win.isVisible() ? win.hide() : win.showInactive()) },
+    {
+      label: 'Ambient mode',
+      type: 'checkbox',
+      checked: Boolean(ambientMode?.getState().enabled),
+      click: (item) => ambientMode?.setEnabled(item.checked)
+    },
     { label: 'Dock top-right', click: snapTopRight },
     {
       label: 'Launch at Login',
@@ -603,6 +611,20 @@ ipcMain.handle('get-state', () => store.list())
 ipcMain.handle('get-workspace-threads', () => workspace.list())
 ipcMain.handle('get-usage', () => usage.getState())
 ipcMain.handle('get-consumption-ledger', () => consumptionLedger?.getState() || null)
+ipcMain.handle('get-ambient-mode', () => ambientMode?.getState() || {
+  enabled: false,
+  startedAt: 0,
+  nextCheckAt: 0,
+  checkInDue: false,
+  checkInMinutes: DEFAULT_AMBIENT_CHECK_IN_MINUTES
+})
+ipcMain.handle('set-ambient-mode', (_event, enabled) => ambientMode?.setEnabled(Boolean(enabled)))
+ipcMain.handle('continue-ambient-mode', () => ambientMode?.continue())
+ipcMain.handle('set-ambient-mode-check-in', (_event, minutes) => {
+  const state = ambientMode?.setCheckInMinutes(minutes)
+  if (state) savePrefs({ ...loadPrefs(), ambientModeCheckInMinutes: state.checkInMinutes })
+  return state
+})
 ipcMain.handle('refresh-usage', () => usage.refresh())
 ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
 ipcMain.handle('refresh-connectors', () => refreshConnectors())
@@ -1086,6 +1108,14 @@ companions.on('change', () => pushCompanions())
 
 app.whenReady().then(() => {
   const prefs = loadPrefs()
+  ambientMode = new AmbientModeService({
+    blocker: powerSaveBlocker,
+    checkInMinutes: prefs.ambientModeCheckInMinutes
+  })
+  ambientMode.on('change', (state) => {
+    sendToWindows('ambient-mode', state)
+    tray?.setContextMenu(buildTrayMenu())
+  })
   store.hydrateTasks(loadTaskCache())
   if (app.dock) {
     const logoPath = app.isPackaged
@@ -1178,4 +1208,4 @@ app.whenReady().then(() => {
 // Tray app — closing the window doesn't quit.
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); claudeAuth?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); claudeAuth?.stop(); companions.stop(); usage.stop() })

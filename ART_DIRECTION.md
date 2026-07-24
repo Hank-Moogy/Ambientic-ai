@@ -54,6 +54,16 @@ The button identifies the queued and currently playing study. Ambientic sends on
 
 Vibe is an expressive test surface, not a task command. It must never select, start, stop, or alter an agent. The earlier hot-color Game of Life and illumination studies were removed because their hard on/off rhythm felt too stop-motion for Ambientic’s ambient direction.
 
+## Ambient mode: a sustained field
+
+Ambient mode keeps the Mac available for unattended agent work while the display is free to sleep. Its visual state should feel like a quiet field being held open, not an alarm or a power toggle:
+
+- Off is neutral, compact, and unlit.
+- On is unmistakable through its label plus a slow blue–violet–green hue, soft bloom, and a small green core.
+- The light breathes over several seconds and never flashes. Reduced-motion users keep the same illuminated color and contrast without animation.
+- The safety check-in reuses the same orbital light at a larger scale. It asks calmly whether to continue, explains that silence leaves active agents uninterrupted, and presents two equally legible exits.
+- Operational meaning remains explicit in text; color and bloom reinforce state but never carry it alone.
+
 ## First-run expression: Enter the field
 
 Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained four-step progress trace, floating symbols, and one unmistakable primary action.

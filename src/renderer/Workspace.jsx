@@ -387,16 +387,15 @@ function ThreadMosaicCard ({ session, index, onOpen }) {
   )
 }
 
-function Dashboard ({ sessions, connectors, usage, midi, onCreate, onOpenThreads, onOpenThread, onVibe, onRefreshUsage }) {
+function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, onOpenThreads, onOpenThread, onVibe, onRefreshUsage, onToggleAmbientMode }) {
   const live = sessions.filter((session) => !session.history)
   const active = live.filter((session) => session.state === 'running').length
   const needsInput = live.filter((session) => ['waiting', 'attention'].includes(session.state)).length
   const historyCount = sessions.filter((session) => session.history).length
   const providerCards = providerCatalog.map((provider) => connectors.find((connector) => connector.id === provider.id) || { ...provider, checking: true })
-  const vibeLabel = midi.vibeActive ? midi.vibeVariant?.label : midi.nextVibeVariant?.label
   return (
     <section className="dashboard">
-      <header className="dashboard-topbar"><span>Agent operating system</span><div><button type="button" onClick={onOpenThreads}>All threads</button><button className="dashboard-topbar__vibe" type="button" disabled={!midi.connected} data-active={Boolean(midi.vibeActive)} title="Each click plays the next APC composition · ⌘⇧V" onClick={onVibe}><i />{midi.vibeActive ? `${vibeLabel || 'Vibe'}…` : `Vibe · ${vibeLabel || 'Center wave'}`}</button><button className="dashboard-topbar__new" type="button" onClick={() => onCreate('')}>＋ New task</button></div></header>
+      <header className="dashboard-topbar"><span>Agent operating system</span><div><button type="button" onClick={onOpenThreads}>All threads</button><button className="dashboard-topbar__ambient" type="button" data-active={Boolean(ambientMode.enabled)} aria-pressed={Boolean(ambientMode.enabled)} title={ambientMode.enabled ? 'Ambient mode is keeping this Mac awake while the display may sleep.' : 'Keep this Mac awake so agents can continue working.'} onClick={() => onToggleAmbientMode(!ambientMode.enabled)}><i />Ambient mode · {ambientMode.enabled ? 'On' : 'Off'}</button><button className="dashboard-topbar__vibe" type="button" disabled={!midi.connected} data-active={Boolean(midi.vibeActive)} title="Play the next APC composition · ⌘⇧V" onClick={onVibe}><i />Vibe</button></div></header>
       <div className="dashboard-scroll">
         <section className="dashboard-hero">
           <div className="dashboard-hero__copy"><span className="eyebrow"><i /> Local intelligence, online</span><h1>Your agents,<br /><em>in one field.</em></h1><p>See who is working, who needs you, and where to send the next idea—without starting from a chat list.</p><div className="dashboard-statline"><span><b>{active}</b> active</span><span><b>{needsInput}</b> need input</span><span><b>{sessions.length}</b> threads</span><span><b>{midi.connected ? 'On' : 'Off'}</b> {midi.shortModel || 'APC'}</span></div></div>
@@ -416,6 +415,47 @@ function Dashboard ({ sessions, connectors, usage, midi, onCreate, onOpenThreads
         </section>
       </div>
     </section>
+  )
+}
+
+function ambientDurationLabel (minutes) {
+  if (minutes < 60) return `${minutes} minutes`
+  const hours = minutes / 60
+  return `${hours} hour${hours === 1 ? '' : 's'}`
+}
+
+function AmbientModeSettings ({ ambientMode, onToggle, onCheckInChange }) {
+  return (
+    <div className="ambient-settings">
+      <div className="provider-settings__intro"><span className="eyebrow"><i /> Uninterrupted local work</span><h2>Let your agents keep moving.</h2><p>Ambient mode prevents automatic idle sleep while allowing the display to turn off. It never edits macOS Energy settings, and it ends immediately when Ambientic quits.</p></div>
+      <section className="ambient-settings__card" data-active={Boolean(ambientMode.enabled)}>
+        <span className="ambient-settings__orb"><i /></span>
+        <div><span>{ambientMode.enabled ? 'Mac kept awake' : 'Normal sleep behavior'}</span><h3>Ambient mode is {ambientMode.enabled ? 'on' : 'off'}</h3><p>{ambientMode.enabled ? 'Your agents can continue working in the background. Closing the lid or choosing Sleep still puts the Mac to sleep.' : 'The Mac follows its normal automatic sleep schedule.'}</p></div>
+        <button type="button" data-active={Boolean(ambientMode.enabled)} onClick={() => onToggle(!ambientMode.enabled)}>{ambientMode.enabled ? 'Turn off' : 'Turn on'}</button>
+      </section>
+      <section className="ambient-settings__safety">
+        <div><span>Safety check-in</span><h3>Ask before leaving it on too long</h3><p>Ambientic will check whether you still want Ambient mode after this interval. It will not interrupt unattended agents if you do not respond.</p></div>
+        <label>Remind me after<select value={ambientMode.checkInMinutes || 240} onChange={(event) => onCheckInChange(Number(event.target.value))}>{(ambientMode.availableCheckIns || [30, 60, 120, 240, 480, 720]).map((minutes) => <option key={minutes} value={minutes}>{ambientDurationLabel(minutes)}</option>)}</select></label>
+      </section>
+      <div className="ambient-settings__notes"><span>◇</span><p><b>No elevated permission.</b> Ambientic uses the operating system’s temporary power assertion through Electron. It does not simulate input, change system settings, or run a detached keep-awake script.</p></div>
+    </div>
+  )
+}
+
+function AmbientModeCheckIn ({ ambientMode, onContinue, onTurnOff }) {
+  if (!ambientMode.checkInDue) return null
+  const elapsed = ambientMode.startedAt ? Math.max(1, Math.round((Date.now() - ambientMode.startedAt) / 3_600_000)) : 0
+  return (
+    <div className="modal-backdrop ambient-checkin">
+      <section>
+        <span className="ambient-checkin__orb"><i /></span>
+        <span className="eyebrow">Ambient mode check-in</span>
+        <h2>Still flowing?</h2>
+        <p>Ambient mode has kept this Mac awake for about {elapsed} hour{elapsed === 1 ? '' : 's'}. Keep it running for another {ambientDurationLabel(ambientMode.checkInMinutes || 240)}, or return to normal sleep behavior.</p>
+        <small>If you do nothing, Ambient mode remains on so active agents are not interrupted.</small>
+        <footer><button type="button" onClick={onTurnOff}>Turn off</button><button className="primary" type="button" onClick={onContinue}>Keep running</button></footer>
+      </section>
+    </div>
   )
 }
 
@@ -599,7 +639,7 @@ function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect,
   )
 }
 
-function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, midi, initialSection = 'providers', onRefresh, onRefreshUsage, onConnect, onInstallHooks, onMidiProfile, onReplayOnboarding }) {
+function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, midi, ambientMode, initialSection = 'providers', onRefresh, onRefreshUsage, onConnect, onInstallHooks, onMidiProfile, onAmbientToggle, onAmbientCheckIn, onReplayOnboarding }) {
   const [checking, setChecking] = useState(false)
   const [connecting, setConnecting] = useState('')
   const [notice, setNotice] = useState('')
@@ -668,11 +708,11 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
 
   return (
     <section className="settings-page">
-      <header className="settings-topbar"><div><span>Settings</span><h1>{section === 'providers' ? 'AI provider accounts' : section === 'usage' ? 'Usage & billing' : 'MIDI hardware'}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
+      <header className="settings-topbar"><div><span>Settings</span><h1>{section === 'providers' ? 'AI provider accounts' : section === 'usage' ? 'Usage & billing' : section === 'ambient' ? 'Ambient mode' : 'MIDI hardware'}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
       <div className="settings-scroll">
-        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart the first-run experience</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'usage' ? 'Measured honestly' : 'One controller at a time'}</b><p>{section === 'providers' ? 'Ambientic delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div></aside>
+        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'ambient'} onClick={() => setSection('ambient')}><b>Ambient Mode</b><small>Sleep prevention and safety</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart the first-run experience</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'usage' ? 'Measured honestly' : section === 'ambient' ? 'Temporary and reversible' : 'One controller at a time'}</b><p>{section === 'providers' ? 'Ambientic delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : section === 'ambient' ? 'Ambient mode is always user-controlled, leaves display sleep intact, and releases its assertion when the app quits.' : 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div></aside>
         <main className="provider-settings">
-          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : <>
+          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'ambient' ? <AmbientModeSettings ambientMode={ambientMode} onToggle={onAmbientToggle} onCheckInChange={onAmbientCheckIn} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : <>
           <div className="provider-settings__intro"><span className="eyebrow"><i /> Local account bridge</span><h2>Connect the agents you already use.</h2><p>Each provider keeps ownership of authentication. Ambientic checks the installed CLI, opens its official login flow, and uses that existing local session.</p></div>
           {notice && <div className="settings-notice"><span>i</span>{notice}</div>}
           <div className="provider-account-list">
@@ -714,6 +754,7 @@ export default function Workspace () {
   const [handovers, setHandovers] = useState([])
   const [midi, setMidi] = useState({ connected: false, model: 'Akai APC controller', shortModel: 'APC' })
   const [voice, setVoice] = useState({ recording: false, transcribing: false, error: '', transcript: '', sessionId: '', sessionLabel: '' })
+  const [ambientMode, setAmbientMode] = useState({ enabled: false, checkInDue: false, checkInMinutes: 240, availableCheckIns: [30, 60, 120, 240, 480, 720] })
   const [usage, setUsage] = useState(null)
   const [ledger, setLedger] = useState(null)
   const [companions, setCompanions] = useState({ bySession: {} })
@@ -762,8 +803,8 @@ export default function Workspace () {
 
   useEffect(() => {
     window.controller.getOnboarding().then(setOnboarding)
-    Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getProviderAuth(), window.controller.getHandovers(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getUsage(), window.controller.getConsumptionLedger(), window.controller.getCompanions()]).then(([state, agents, authState, handoverState, hardware, voiceState, usageState, ledgerState, companionState]) => {
-      setSessions(state); setConnectors(agents); setProviderAuth(authState); setHandovers(handoverState); setMidi(hardware); setVoice(voiceState); setUsage(usageState); setLedger(ledgerState); setCompanions(companionState)
+    Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getProviderAuth(), window.controller.getHandovers(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getAmbientMode(), window.controller.getUsage(), window.controller.getConsumptionLedger(), window.controller.getCompanions()]).then(([state, agents, authState, handoverState, hardware, voiceState, ambientState, usageState, ledgerState, companionState]) => {
+      setSessions(state); setConnectors(agents); setProviderAuth(authState); setHandovers(handoverState); setMidi(hardware); setVoice(voiceState); setAmbientMode(ambientState); setUsage(usageState); setLedger(ledgerState); setCompanions(companionState)
       if (state[0]) setSelectedId(state[0].id)
     })
     const disposers = [
@@ -773,6 +814,7 @@ export default function Workspace () {
       window.controller.onHandovers(setHandovers),
       window.controller.onMidi(setMidi),
       window.controller.onVoice(setVoice),
+      window.controller.onAmbientMode(setAmbientMode),
       window.controller.onUsage(setUsage),
       window.controller.onConsumptionLedger(setLedger),
       window.controller.onCompanions(setCompanions),
@@ -902,7 +944,7 @@ export default function Workspace () {
 
       {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in Ambientic.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. Ambientic is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => setProviderAuth((current) => ({ ...current, codex: null }))}>×</button></div>}
       {providerAuth.claude && providerAuth.claude.status !== 'idle' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => setProviderAuth((current) => ({ ...current, claude: null }))} />}
-      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
+      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
           <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef}>
@@ -945,6 +987,7 @@ export default function Workspace () {
         <section className="capabilities"><h3>Connection</h3><p>Provider credentials stay in the provider’s own local store. Ambientic never asks for or copies your API keys.</p></section>
       </aside></>}
       {newTask && <NewTask key={newTaskProvider || 'any'} connectors={connectors} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} />}
+      <AmbientModeCheckIn ambientMode={ambientMode} onContinue={() => window.controller.continueAmbientMode()} onTurnOff={() => window.controller.setAmbientMode(false)} />
     </main>
   )
 }

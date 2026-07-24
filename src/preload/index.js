@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('controller', {
   getWorkspaceThreads: () => ipcRenderer.invoke('get-workspace-threads'),
   getUsage: () => ipcRenderer.invoke('get-usage'),
   getConsumptionLedger: () => ipcRenderer.invoke('get-consumption-ledger'),
+  getAmbientMode: () => ipcRenderer.invoke('get-ambient-mode'),
+  setAmbientMode: (enabled) => ipcRenderer.invoke('set-ambient-mode', enabled),
+  continueAmbientMode: () => ipcRenderer.invoke('continue-ambient-mode'),
+  setAmbientModeCheckIn: (minutes) => ipcRenderer.invoke('set-ambient-mode-check-in', minutes),
   getDisplays: () => ipcRenderer.invoke('get-displays'),
   getCompanions: () => ipcRenderer.invoke('get-companions'),
   getConnectors: () => ipcRenderer.invoke('get-connectors'),
@@ -74,6 +78,11 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('consumption-ledger', handler)
     return () => ipcRenderer.removeListener('consumption-ledger', handler)
+  },
+  onAmbientMode: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('ambient-mode', handler)
+    return () => ipcRenderer.removeListener('ambient-mode', handler)
   },
   onDisplays: (cb) => {
     const handler = (_e, payload) => cb(payload)

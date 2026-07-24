@@ -6,6 +6,7 @@ import { constants } from 'node:fs'
 import { homedir, release as osRelease } from 'node:os'
 import { dirname, join } from 'node:path'
 import { collectClaudeActivity } from './claude-activity.mjs'
+import { collectClaudeUsageWindows } from './claude-usage-scrape.mjs'
 
 const execFileAsync = promisify(execFile)
 const REFRESH_MS = 2 * 60 * 1000
@@ -193,21 +194,27 @@ export function parseClaudeStatusLineUsage (payload, now = Date.now()) {
 }
 
 async function collectClaude () {
+  // Primary: scrape Claude's interactive /usage panel for the real 5-hour and
+  // weekly limit windows — the only local source of Claude's "% used", so the
+  // app can show the same gauge Codex gets. Cached, so this is cheap most calls.
   try {
-    let cached
-    try {
-      cached = await readFile(join(homedir(), '.ambientic', 'claude-usage.json'), 'utf8')
-    } catch {
-      // Preserve the last observation until the renamed hook runs once.
-      cached = await readFile(join(homedir(), '.agentbase', 'claude-usage.json'), 'utf8')
-    }
-    return parseClaudeStatusLineUsage(cached)
+    const command = await resolveCommand('claude')
+    const scraped = await collectClaudeUsageWindows(command)
+    const windows = scraped.windows.map((window) => ({
+      id: String(window.id || ''),
+      label: String(window.label || 'All models'),
+      period: window.period === 'week' ? 'week' : 'short',
+      durationMins: Number.isFinite(Number(window.durationMins)) ? Number(window.durationMins) : null,
+      usedPercent: clampPercent(window.usedPercent),
+      resetAt: resetTextToEpoch(window.resetText),
+      resetText: window.resetText || null
+    })).filter((window) => window.usedPercent !== null)
+    if (windows.length) return { plan: scraped.plan || 'subscription', source: 'claude-usage-scrape', windows }
+    throw new Error('Claude /usage produced no usable windows')
   } catch {
-    // Claude exposes no subscription quota (% used) to any local, non-interactive
-    // surface — not `claude -p` results, not the status-line payload, nothing on
-    // disk — so the status-line cache above is normally absent. Fall back to
-    // Claude's own recorded usage activity (messages/sessions/tokens this week)
-    // so the app shows honest Claude usage instead of nothing.
+    // Fallback: Claude's interactive /usage was unavailable (not logged in, TUI
+    // changed, timed out). Show real recorded activity from Claude's stats cache
+    // (messages/sessions this week) so the app still shows honest Claude usage.
     const activity = await collectClaudeActivity()
     if (!activity.available) throw new Error('Claude usage is unavailable until you use Claude Code at least once.')
     return { plan: 'subscription', windows: [], activity, source: 'claude-stats-cache' }

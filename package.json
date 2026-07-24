@@ -47,6 +47,10 @@
         "to": "claude_pty.py"
       },
       {
+        "from": "resources/claude_usage.py",
+        "to": "claude_usage.py"
+      },
+      {
         "from": "resources/ambientic-logo.png",
         "to": "ambientic-logo.png"
       }
