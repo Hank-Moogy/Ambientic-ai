@@ -70,13 +70,18 @@ committing them.
      `collectClaudeActivity()` (import added) when the status-line cache is
      absent, returning `{ plan:'subscription', windows: [], activity,
      source:'claude-stats-cache' }`.
-   - `src/renderer/Workspace.jsx`: `ConsumptionBoard` renders an activity card
-     ("N messages · N sessions this week", labelled "Local activity · no quota
-     API") when a provider has `activity` and no quota windows.
-   Verified live: the usage service returns `claude status: ok` with real weekly
-   activity. These two edits were intentionally NOT committed by me because the
-   files are the concurrent session's active work — commit them together with
-   that session's changes.
+   - `src/renderer/Workspace.jsx`: THREE spots now surface `activity` when a
+     provider has no quota windows:
+     - `ConsumptionBoard` (Settings -> Usage & Billing): activity card.
+     - `OverviewUsageBalance` (Overview "Provider balance" panel): shows
+       "N messages · N sessions this week" and N as the headline number.
+     - `compactUsage` (Overview provider pads): "N msgs this week" footer.
+   Verified end-to-end via smoke screenshot: the Overview shows Claude
+   "39 messages · 6 sessions this week". NOTE the Overview usage panel is blank
+   for ~20s on startup because the usage refresh is atomic and waits for the
+   slowest collector (Codex app-server); consider updating providers as each
+   collector resolves. These edits were intentionally NOT committed — commit
+   them with the concurrent session's usage work.
 
    Optional cleanup once confirmed: retire `hook/claude-statusline.py` and the
    `rate_limits` path in `collectClaude`, since Claude never sends that field.
