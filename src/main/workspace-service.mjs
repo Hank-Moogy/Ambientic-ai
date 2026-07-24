@@ -8,6 +8,12 @@ import { JsonRpcProcess } from './json-rpc-process.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
+// Prefix of the synthetic seed message written when a Claude thread is
+// auto-compacted. Used both to build the seed and to hide it from the
+// rendered transcript on reload.
+const COMPACTION_HEADER = 'You are resuming a conversation that exceeded the model'
+const COMPACTION_BUDGET = 24000
+
 function textContent (value) {
   if (typeof value === 'string') return value
   if (!Array.isArray(value)) return ''
@@ -69,6 +75,12 @@ function claudeMessages (path) {
     }
   }
   return output.slice(-300)
+}
+
+// The auto-compaction seed is one long synthetic user message. Hide it from the
+// rendered transcript so a compacted thread still reads naturally.
+function isCompactionSeed (entry) {
+  return entry?.role === 'user' && String(entry.text || '').startsWith(COMPACTION_HEADER)
 }
 
 function findClaudeTranscript (session) {
@@ -170,6 +182,11 @@ export class WorkspaceService extends EventEmitter {
     this.codexReady = null
     this.hermesReady = null
     this.activeTurns = new Map()
+    // Auto-compaction: when a Claude thread's history overflows the context
+    // window, we start a fresh, compacted Claude session and remap the UI
+    // thread id -> the new session id so the user continues in place.
+    this.claudeRemap = new Map()
+    this.claudeAttempts = new Map()
     this.history = new Map()
     this.historyRefreshedAt = 0
     this.aliases = new Map(Object.entries(aliases || {}).filter(([, title]) => String(title || '').trim()))
@@ -178,6 +195,12 @@ export class WorkspaceService extends EventEmitter {
 
   connector (id) { return this.getConnectors().find((item) => item.id === id) }
   codexThreadId (session) { return session.threadId || String(session.id || '').replace(/^codex-desktop:/, '') }
+  // The Claude session id backing a UI thread: the compacted replacement if the
+  // thread has been auto-compacted, otherwise the thread's own id.
+  claudeSessionId (session) { return this.claudeRemap.get(session.id) || String(session.id || '').split(':').at(-1) }
+  claudeTranscriptFor (session) {
+    return this.claudeRemap.has(session.id) ? findClaudeTranscript({ id: this.claudeSessionId(session) }) : findClaudeTranscript(session)
+  }
   uiSessionId (provider, providerId) {
     return this.store.list().find((item) => item.agent === provider && (provider === 'codex' ? this.codexThreadId(item) : item.id) === providerId)?.id ||
       [...this.history.values()].find((item) => item.agent === provider && item.id === providerId)?.id || providerId
@@ -311,8 +334,8 @@ export class WorkspaceService extends EventEmitter {
         if (snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
         else if (!snapshot.running) this.activeTurns.delete(id)
       } else if (session.agent === 'claude') {
-        snapshot.transcriptPath = findClaudeTranscript(session)
-        const disk = claudeMessages(snapshot.transcriptPath)
+        snapshot.transcriptPath = this.claudeTranscriptFor(session)
+        const disk = claudeMessages(snapshot.transcriptPath).filter((entry) => !isCompactionSeed(entry))
         if (disk.length) snapshot.messages = disk
       } else if (session.agent === 'hermes') {
         snapshot.messages = await this.hermesMessages(session.id)
@@ -474,16 +497,18 @@ export class WorkspaceService extends EventEmitter {
     throw new Error('Choose Codex, Claude Code, or Hermes.')
   }
 
-  runClaude (session, prompt) {
+  runClaude (session, prompt, { compacted = false } = {}) {
     const path = this.connector('claude')?.path || 'claude'
     // Resume only once Claude has actually persisted this session's transcript.
     // A brand-new managed task carries a fresh UUID that Claude has never seen,
     // so its first turn must CREATE the session with --session-id. Using
     // --resume on an id that doesn't exist yet fails with "No conversation
     // found with session ID" and exits non-zero ("Claude exited with code 1").
-    const started = Boolean(findClaudeTranscript(session))
+    const claudeId = this.claudeSessionId(session)
+    const started = Boolean(this.claudeTranscriptFor(session))
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', 'acceptEdits']
-    args.push(started ? '--resume' : '--session-id', session.id)
+    args.push(started ? '--resume' : '--session-id', claudeId)
+    this.claudeAttempts.set(session.id, { prompt, compacted, resultError: '' })
     const child = spawn(path, args, { cwd: session.cwd || homedir(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
@@ -494,7 +519,18 @@ export class WorkspaceService extends EventEmitter {
     })
     let stderr = ''
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-8000) })
-    child.on('exit', (code) => code === 0 ? this.finish(session.id) : this.fail(session.id, new Error(stderr.trim() || `Claude exited with code ${code}`)))
+    child.on('exit', (code) => {
+      const attempt = this.claudeAttempts.get(session.id) || {}
+      const errorText = attempt.resultError || (code !== 0 ? (stderr.trim() || `Claude exited with code ${code}`) : '')
+      if (!errorText) { this.claudeAttempts.delete(session.id); return this.finish(session.id) }
+      // First time a resume overflows the context window, compact and retry once
+      // so the user keeps going in the same thread instead of hitting a wall.
+      if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(errorText) && !attempt.compacted) {
+        return void this.compactClaudeAndRetry(session.id, attempt.prompt)
+      }
+      this.claudeAttempts.delete(session.id)
+      this.fail(session.id, new Error(this.claudeResultError(session.id, errorText)))
+    })
   }
 
   claudeEvent (id, line) {
@@ -509,7 +545,60 @@ export class WorkspaceService extends EventEmitter {
       }
       snapshot.updatedAt = Date.now()
       this.emitSnapshot({ ...snapshot })
-    } else if (event.type === 'result' && event.is_error) this.fail(id, new Error(event.result || 'Claude returned an error'))
+    } else if (event.type === 'result' && event.is_error) {
+      // Record the failure; the process 'exit' handler decides whether to
+      // compact-and-retry (context overflow) or surface the error.
+      const attempt = this.claudeAttempts.get(id)
+      if (attempt) attempt.resultError = event.result || 'Claude returned an error'
+      else this.fail(id, new Error(this.claudeResultError(id, event.result)))
+    }
+  }
+
+  // Build a compacted, tail-preserving text of a Claude conversation that fits
+  // comfortably inside the context window. Keeps the most recent user/assistant
+  // exchanges verbatim and notes how many older messages were dropped.
+  compactClaudeContext (session, budget = COMPACTION_BUDGET) {
+    const convo = claudeMessages(findClaudeTranscript(session))
+      .filter((entry) => (entry.role === 'user' || entry.role === 'assistant') && String(entry.text || '').trim() && !isCompactionSeed(entry))
+    const kept = []
+    let total = 0
+    for (let i = convo.length - 1; i >= 0; i -= 1) {
+      const line = `${convo[i].role === 'user' ? 'User' : 'Assistant'}: ${String(convo[i].text).trim()}`.slice(0, budget)
+      if (kept.length && total + line.length > budget) break
+      kept.unshift(line)
+      total += line.length
+    }
+    const omitted = Math.max(0, convo.length - kept.length)
+    const note = omitted ? `${omitted} earlier message(s) were omitted; ` : ''
+    return `${COMPACTION_HEADER}'s context window, so its history was compressed by AgentBase. ${note}the most recent exchanges are preserved verbatim below. Treat them as authoritative context and continue seamlessly without mentioning this compression.\n\n=== Recent conversation ===\n${kept.join('\n\n')}\n=== End of recent conversation ===`
+  }
+
+  // Start a fresh Claude session seeded with the compacted history, remap the UI
+  // thread to it, and re-run the user's prompt so the thread continues in place.
+  compactClaudeAndRetry (id, prompt) {
+    const session = this.sessionFor(id)
+    if (!session) { this.claudeAttempts.delete(id); return this.fail(id, new Error('This conversation is no longer available to compact.')) }
+    const summary = this.compactClaudeContext(session)
+    this.claudeRemap.set(id, randomUUID())
+    const snapshot = this.snapshots.get(id)
+    if (snapshot) {
+      snapshot.messages.push(message('activity', 'This conversation grew past the model context window. AgentBase compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
+      this.emitSnapshot({ ...snapshot, running: true })
+    }
+    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true })
+  }
+
+  // Turn known Claude -p failures into guidance the user can act on. A resumed
+  // conversation whose history exceeds the model context window returns
+  // "Prompt is too long"; -p mode cannot auto-compact the way interactive
+  // Claude Code does, so point the user at the ways forward.
+  claudeResultError (id, result) {
+    const text = String(result || 'Claude returned an error')
+    if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(text)) {
+      const cwd = this.sessionFor(id)?.cwd || ''
+      return `This conversation is too long for Claude to resume — its history exceeds the model's context window, and non-interactive turns can't compact it. Start a new task${cwd ? ` in ${cwd}` : ''}, or resume it in a terminal (\`claude --resume ${id}\`) and run /compact, then continue here.`
+    }
+    return text
   }
 
   codexNotification (event) {
