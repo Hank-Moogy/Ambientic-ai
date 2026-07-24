@@ -51,6 +51,8 @@
 .overview-usage__head > div b { font-size: 9px; }
 .overview-usage__head > div small { overflow: hidden; color: #69727d; font-size: 7px; white-space: nowrap; text-overflow: ellipsis; }
 .overview-usage__meters { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 14px; padding-left: 39px; }
+.overview-usage__gauge { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.overview-usage__reset { color: #626b76; font-size: 7px; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .overview-usage > footer { height: 29px; padding: 0 14px; display: flex; align-items: center; color: #626b76; font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
 
 .dashboard-topbar .dashboard-topbar__vibe {

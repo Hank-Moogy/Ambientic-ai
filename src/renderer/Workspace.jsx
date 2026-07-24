@@ -235,6 +235,21 @@ function resetLabel (window) {
   return `Resets in ${Math.floor(minutes / (24 * 60))}d`
 }
 
+// Live countdown to a window's reset, e.g. "resets in 3h 24m". `now` is passed
+// in so a ticking parent re-renders it.
+function formatCountdown (window, now) {
+  if (!window) return ''
+  if (!Number.isFinite(window.resetAt)) return window.resetText ? `resets ${window.resetText}` : ''
+  const ms = window.resetAt * 1000 - now
+  if (ms <= 0) return 'resetting…'
+  const totalMinutes = Math.floor(ms / 60000)
+  const days = Math.floor(totalMinutes / 1440)
+  const hours = Math.floor((totalMinutes % 1440) / 60)
+  const minutes = totalMinutes % 60
+  const span = days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`
+  return `resets in ${span}`
+}
+
 function quotaWindowLabel (window, fallback) {
   const minutes = Number(window?.durationMins)
   if (!Number.isFinite(minutes) || minutes <= 0) return fallback
@@ -332,6 +347,11 @@ function SpendActivity ({ ledger }) {
 }
 
 function OverviewUsageBalance ({ sessions, usage, onRefresh }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15000)
+    return () => clearInterval(timer)
+  }, [])
   const weekCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
   const providerRows = ['codex', 'claude', 'hermes'].map((providerId) => {
     const provider = usage?.providers?.[providerId]
@@ -363,8 +383,8 @@ function OverviewUsageBalance ({ sessions, usage, onRefresh }) {
             </div>
             {hasGauges && (
               <div className="overview-usage__meters">
-                <ConsumptionMeter label={quotaWindowLabel(short, '5h')} window={short} />
-                <ConsumptionMeter label={quotaWindowLabel(week, 'Week')} window={week} />
+                <div className="overview-usage__gauge"><ConsumptionMeter label={quotaWindowLabel(short, '5h')} window={short} /><span className="overview-usage__reset">{formatCountdown(short, now)}</span></div>
+                <div className="overview-usage__gauge"><ConsumptionMeter label={quotaWindowLabel(week, 'Week')} window={week} /><span className="overview-usage__reset">{formatCountdown(week, now)}</span></div>
               </div>
             )}
           </div>

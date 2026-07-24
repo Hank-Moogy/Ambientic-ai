@@ -1,9 +1,9 @@
 <!-- ambientic-handover -->
 # vibe-controller handover
 
-Generated: 2026-07-24T13:23:19.041Z
-Source provider: claude
-Source task: Ok now can you
+Generated: 2026-07-24T13:31:20.641Z  
+Source provider: claude  
+Source task: vibe-controller  
 Reason: 100% used · Current session
 
 ## Continue from here
@@ -26,46 +26,23 @@ The product should own the user experience and normalized session model, not pro
 
 ## Current objective
 
-Ok now can you
+vibe-controller
 
 ## Completed and material state
 
 Recent commits:
 
 ```text
+16f182a Overview: show both 5-hour and weekly limits as matching gauges per provider
 a2d3dea Claude usage gauge: scrape the interactive /usage panel for real limit windows
 83a8cb8 Stop tracking Python bytecode cache (__pycache__/*.pyc)
 e88f58f usage: publish each provider incrementally so one slow collector can't stall the panel
 eac0386 Combined checkpoint: Claude usage activity display + concurrent workspace work
-6c77020 NEXT_STEPS: Overview usage wiring + startup-refresh caveat
 ```
 
-Current working tree (preserve these changes):
+The working tree is clean or unavailable.
 
-```text
-M hook/controller-hook.py
- M hook/install.sh
- M src/main/index.js
- M src/main/server.js
- M src/main/workspace-service.mjs
- M src/renderer/Workspace.jsx
- M src/renderer/spend.css
- M test/workspace-service.test.mjs
-```
 
-Change footprint:
-
-```text
-hook/controller-hook.py         | 31 ++++++++++++++++++++
- hook/install.sh                 | 33 ++++++++++++++-------
- src/main/index.js               |  1 +
- src/main/server.js              | 30 ++++++++++++++++++-
- src/main/workspace-service.mjs  | 65 +++++++++++++++++++++++++++++++++++++++--
- src/renderer/Workspace.jsx      | 45 ++++++++++++++++++----------
- src/renderer/spend.css          | 16 +++++-----
- test/workspace-service.test.mjs | 35 ++++++++++++++++++++++
- 8 files changed, 218 insertions(+), 38 deletions(-)
-```
 
 ## Remaining direction
 
@@ -78,10 +55,6 @@ hook/controller-hook.py         | 31 ++++++++++++++++++++
 - Generic MIDI-controller output profiles.
 - Public auto-update infrastructure.
 - OpenClaw integration.
-
-Implemented after this handover was generated:
-
-- Claude and Codex approval cards now expose Deny, Allow once, and Always allow in the active thread. Claude’s command hook waits for Ambientic’s loopback decision and returns official `PermissionRequest` structured output; persisted approval uses only Claude-provided `permission_suggestions`, with the provider-native prompt as the timeout/unavailable fallback.
 
 ## Architecture
 
@@ -109,17 +82,16 @@ The Electron main process owns local system access, session state, connectors, p
 
 ## Recent decision context
 
-- **Agent result:** Now I'll rewrite `OverviewUsageBalance` to show both windows as matching meters. First the component:
-- **User direction:** The file /Users/samori/vibe-controller/src/renderer/Workspace.jsx has been updated successfully. (note: the file had been modified on disk since you last read it — the edit applied cleanly, but the file contains other changes not in your context. Read it before edits that depend on surrounding content.)
-- **Agent result:** Now the CSS — replace the grid row layout with the head + dual-meter layout:
-- **User direction:** 43	.overview-usage__row { --balance-accent: #67df98; min-height: 56px; padding: 9px 14px; display: grid; grid-template-columns: 30px minmax(90px, 1fr) 38px; gap: 10px; align-items: center; border-bottom: 1px solid #282d34; position: relative; } 44	.overview-usage__row[data-provider="claude"] { --balance-accent: #e49a70; } 45	.overview-usage__row[data-provider="hermes"] { --balance-accent: #898cff; } 46	.overview-usage__icon { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--balance-accent) 35%, #343a43); border-radius: 8px; background: color-mix(in srgb, var(--balance-accent) 7%, #15191e); color: var(--balance-accent); } 47	.overview-u
-- **User direction:** The file /Users/samori/vibe-controller/src/renderer/spend.css has been updated successfully. (file state is current in your context — no need to Read it back)
-- **Agent result:** Now build, test, and verify the dual-meter layout renders:
+- **User direction:** ✓ built in 321ms ✓ built in 17ms ✓ built in 687ms ℹ tests 79 ℹ pass 79 ℹ fail 0 [ambientic] workspace smoke screenshot: /tmp/dual.png -rw-r--r--@ 1 samori  wheel  1013946 Jul 24 15:24 /tmp/dual.png
+- **User direction:** [object Object]
+- **User direction:** [Image: original 2778x1684, displayed at 2000x1212. Multiply coordinates by 1.39 to map to original image.]
+- **Agent result:** The dual-gauge layout works cleanly. The **Provider Balance** panel now shows both windows side by side for each provider: - **Codex** (plus): `5H —` · `WEEK 41%` (green) - **Claude** (subscription): `5H 100%` (red — session maxed) · `WEEK 21%` (amber) - **Hermes**: activity fallback (no rate-limit API) Each provider keeps its accent color, with amber/red tinting when a window gets hot — identical treatment for both. (Codex's `5H` shows `—` because Codex didn't report its short window that refresh; the layout handles a missing window gracefully.) Let me commit, repackage, and reinstall:
+- **User direction:** 16f182a Overview: show both 5-hour and weekly limits as matching gauges per provider === repackage + reinstall ===   • skipped macOS notarization  reason=`notarize` options were unable to be generated installed + launched
+- **User direction:** 1 file delivered to user.
 
 ## Material artifacts
 
 - `/Users/samori/vibe-controller/src/renderer/Workspace.jsx`
-- `/Users/samori/vibe-controller/src/main/usage.js`
 - `/Users/samori/vibe-controller/NEXT_STEPS.md`
 - `/tmp/overview.png`
 - `/Users/samori/vibe-controller/src/main/index.js`
@@ -130,6 +102,7 @@ The Electron main process owns local system access, session state, connectors, p
 - `/Users/samori/vibe-controller/package.json`
 - `/tmp/gauge.png`
 - `/Users/samori/vibe-controller/src/renderer/spend.css`
+- `/tmp/dual.png`
 
 ## First action
 

@@ -110,6 +110,17 @@ async function resolveCommand (name) {
 function resetTextToEpoch (text) {
   if (!text) return null
   const clean = text.replace(/\s*\([^)]*\)\s*$/, '').replace(/\sat\s/i, ' ').trim()
+  // A time-only reset like "7:09pm" (Claude's 5-hour window) means the next
+  // occurrence of that local time — today, or tomorrow if it already passed.
+  const timeOnly = clean.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i)
+  if (timeOnly) {
+    const now = new Date()
+    let hour = Number(timeOnly[1]) % 12
+    if (/pm/i.test(timeOnly[3])) hour += 12
+    const reset = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, Number(timeOnly[2] || 0), 0, 0)
+    if (reset.getTime() <= now.getTime()) reset.setDate(reset.getDate() + 1)
+    return Math.floor(reset.getTime() / 1000)
+  }
   const compactTime = clean.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2})(?::(\d{2}))?(am|pm)$/i)
   const normalized = compactTime
     ? `${compactTime[1]} ${compactTime[2]} ${new Date().getFullYear()} ${compactTime[3]}:${compactTime[4] || '00'} ${compactTime[5].toUpperCase()}`
