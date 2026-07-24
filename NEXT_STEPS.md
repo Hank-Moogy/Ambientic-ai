@@ -64,13 +64,19 @@ committing them.
    setup, updates whenever Claude is used. Tested in
    `test/claude-activity.test.mjs`.
 
-   To wire it into the app (one small edit, left undone to avoid colliding with
-   the concurrent Usage/Billing rework in `usage.js`/`Workspace.jsx`):
-   - In `src/main/usage.js` `collectClaude`, on the ENOENT branch (no status-line
-     cache) call `collectClaudeActivity()` and return
-     `{ status: 'ok', plan: 'subscription', windows: [], activity }` instead of
-     throwing. Import from `./claude-activity.mjs`.
-   - In the Overview/Usage UI, when a provider has `activity` and no `windows`,
-     render "N messages · N sessions this week" (and optionally tokens) as an
-     honest activity card instead of a quota meter or "Quota unavailable".
-   - Label it "activity", never "quota" — the number is real usage, not a limit.
+   WIRED IN (uncommitted, in the concurrent session's shared files — review
+   before committing, do not drop):
+   - `src/main/usage.js`: `collectClaude` now falls back to
+     `collectClaudeActivity()` (import added) when the status-line cache is
+     absent, returning `{ plan:'subscription', windows: [], activity,
+     source:'claude-stats-cache' }`.
+   - `src/renderer/Workspace.jsx`: `ConsumptionBoard` renders an activity card
+     ("N messages · N sessions this week", labelled "Local activity · no quota
+     API") when a provider has `activity` and no quota windows.
+   Verified live: the usage service returns `claude status: ok` with real weekly
+   activity. These two edits were intentionally NOT committed by me because the
+   files are the concurrent session's active work — commit them together with
+   that session's changes.
+
+   Optional cleanup once confirmed: retire `hook/claude-statusline.py` and the
+   `rate_limits` path in `collectClaude`, since Claude never sends that field.
