@@ -43,6 +43,7 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - Settings → Usage & Billing with comparable Codex and Claude short/weekly quota meters, reset windows, stale/error states, manual refresh, and local weekly-session activity whenever a provider does not expose usable quota data.
 - Persistent local capacity ledger and Settings activity panel for provider limit hits, Codex reset-credit use, natural quota renewals, purchased-credit balance changes, and current observed balances. Codex reset allowance is shown beside its live plan without treating subscription capacity as currency spend.
 - Explicit Overview and Threads navigation, preserving the conventional conversation interface as a secondary tab rather than the product's default mental model.
+- Threads sidebar ordered globally by the latest known user or agent message across providers; project groups and conversations move together as activity changes, with compact logo filters for All, Codex, Claude Code, and Hermes.
 - Managed Codex conversations through Codex app-server, authenticated by the existing Codex installation.
 - Managed Hermes conversations through Hermes ACP, including streamed messages, tool activity, cancellation, and permission requests.
 - Completed Hermes turns are reconciled against Hermes' local database so dropped ACP chunks cannot leave a partial answer in the transcript.
@@ -63,7 +64,7 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - The thread header and Context panel show linked preview availability and can present it again on demand.
 - Akai APC40 MKII 5×8 clip-grid session selection and RGB state feedback.
 - Akai APC mini mk2 8×8 task grid, RGB state feedback, per-column push-to-talk, and MIDI Learn support through its dedicated Control port.
-- Overview **Vibe** sampler and ⌘⇧V shortcut cycling through four named five-second APC40 MKII/APC mini mk2 studies: cold center-out wave, cold circular orbit, hot 8-bit Game of Life, and hot illumination mosaic. The button shows the queued/playing study and restores live task-state LEDs after every composition.
+- Overview **Vibe** sampler and ⌘⇧V shortcut cycling between two named five-second APC40 MKII/APC mini mk2 studies: cold center-out wave and cold circular orbit. Delta-only LED updates support a smoother 60 ms frame cadence, slower color phases reduce stepping, and live task-state LEDs are restored after every composition.
 - Compact Overview provider-balance card with Codex and Claude quota remaining plus Hermes local activity; detailed resets, credits, history, and billing remain in Settings → Usage & Billing.
 - Settings → MIDI Hardware selector with Automatic, APC40 MKII, and APC mini mk2 modes; controller choice and device-specific learned mappings persist locally.
 - Push-to-talk voice prompts from the eight APC40 MKII per-track Record Arm buttons using the Mac microphone and installed Whisper `base` model.
@@ -281,9 +282,9 @@ Last updated: 2026-07-23
 
 ### Verification
 
-- `npm test`: 58 tests passing, including four distinct native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
+- `npm test`: 59 tests passing, including cross-provider latest-message ordering, two smoothed native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
 - Consumption-ledger regressions cover exact Codex reset-credit transitions, duplicate suppression, purchased-credit additions/consumption, and natural window renewal classification.
-- Vibe-sequence regressions verify all four distinct cold/hot compositions, full 40/64-pad native layouts, temporal movement, minimum composition duration, and a MIDI-safe frame rate.
+- Vibe-sequence regressions verify both cold compositions, full 40/64-pad native layouts, temporal movement, minimum composition duration, and delta-frame smoothing.
 - `npm run build`: production main, preload, and renderer bundles succeed.
 - Pad activation build verification confirms the renderer subscribes to hardware workspace selections, switches to Threads, resolves the selected ID through the existing workspace bridge, refreshes companion candidates, and exposes linked previews through the preload boundary.
 - Real Hermes transcript smoke renders at 15 px/26.1 px line height with four H2 sections, four H3 subsections, six ordered lists, six clickable links, four emphasized spans in the final message, and no visible raw `**` markers.

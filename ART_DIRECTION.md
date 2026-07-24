@@ -23,6 +23,8 @@ The experience should suggest:
 5. **Rhythm over spectacle.** Animation should have phrasing, rests, and variation. Avoid uniform loading-spinner motion.
 6. **One instrument.** MIDI light, on-screen motion, preview transitions, and future sound should share timing and color language.
 
+Provider filters should remain compact, icon-led, and softly illuminated in each provider’s accent. They organize attention without turning the sidebar into a toolbar.
+
 ## Motion and light language
 
 - Ambient cycles: roughly 6–16 seconds.
@@ -33,16 +35,14 @@ The experience should suggest:
 
 ## First expression: Vibe
 
-The Overview **Vibe** button (or ⌘⇧V) cycles through four temporary lighting studies across the connected APC grid:
+The Overview **Vibe** button (or ⌘⇧V) cycles through two temporary lighting studies across the connected APC grid:
 
 1. **Center wave** — a cold blue, violet, cyan, and green pulse radiates from the center toward the edges.
 2. **Cold orbit** — cool-color rings rotate around the grid with layered angular motion.
-3. **8-bit life** — a hot-color cellular automaton evolves in chunky generations.
-4. **Illumination** — warm mosaic blocks turn on and off like an architectural light wall.
 
-The button identifies the queued and currently playing study. After about five seconds, AgentBase restores every live task LED and queues the next composition.
+The button identifies the queued and currently playing study. AgentBase sends only LEDs that actually change, allowing a higher refresh rate without saturating MIDI; slower phase movement and denser neighboring cold colors soften the discrete hardware palette. After about five seconds, AgentBase restores every live task LED and queues the next composition.
 
-Vibe is an expressive test surface, not a task command. It must never select, start, stop, or alter an agent. These four studies are intentionally temporary while the preferred motion language is selected.
+Vibe is an expressive test surface, not a task command. It must never select, start, stop, or alter an agent. The earlier hot-color Game of Life and illumination studies were removed because their hard on/off rhythm felt too stop-motion for AgentBase’s ambient direction.
 
 ## Design review ritual
 

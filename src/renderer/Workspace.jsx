@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import './spend.css'
+import './thread-filters.css'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { AgentIcon } from './AgentIcon.jsx'
@@ -587,6 +588,7 @@ export default function Workspace () {
   const [loading, setLoading] = useState(false)
   const [composer, setComposer] = useState('')
   const [query, setQuery] = useState('')
+  const [providerFilter, setProviderFilter] = useState('all')
   const [newTask, setNewTask] = useState(false)
   const [newTaskProvider, setNewTaskProvider] = useState('')
   const transcriptRef = useRef(null)
@@ -644,14 +646,16 @@ export default function Workspace () {
   const grouped = useMemo(() => {
     const needle = query.toLowerCase()
     const result = new Map()
-    for (const session of sessions) {
+    const recentFirst = [...sessions].sort((left, right) => Number(right.updatedAt || right.lastSeen || 0) - Number(left.updatedAt || left.lastSeen || 0))
+    for (const session of recentFirst) {
+      if (providerFilter !== 'all' && session.agent !== providerFilter) continue
       if (needle && !`${sessionTitle(session)} ${session.project} ${session.agent}`.toLowerCase().includes(needle)) continue
       const key = session.project || 'Local agents'
       if (!result.has(key)) result.set(key, [])
       result.get(key).push(session)
     }
     return [...result]
-  }, [sessions, query])
+  }, [sessions, query, providerFilter])
   const selectedConnector = connectors.find((connector) => connector.id === thread?.provider)
   const canManage = Boolean(thread?.managed && selectedConnector?.manageable !== false)
   const canSteer = Boolean(canManage && thread?.provider === 'codex' && thread?.running)
@@ -693,10 +697,10 @@ export default function Workspace () {
         <header className="brand"><span className="brand__mark">A</span><div><b>AgentBase</b><small>Local agent workspace</small></div><button type="button" title="Open compact APC controller" onClick={() => window.controller.showController()}>⌘</button></header>
         <nav className="workspace-nav"><button type="button" data-selected={view === 'overview'} onClick={() => setView('overview')}><span>✦</span><b>Overview</b></button><button type="button" data-selected={view === 'threads'} onClick={() => setView('threads')}><span>☷</span><b>Threads</b><em>{sessions.length}</em></button><button type="button" data-selected={view === 'settings'} onClick={() => { setSettingsSection('providers'); setView('settings') }}><span>⚙</span><b>Settings</b></button></nav>
         <button className="new-task-button" type="button" onClick={() => openCreate()}><span>＋</span> New agent task <kbd>⌘N</kbd></button>
-        {view === 'threads' ? <><div className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" /></div>
+        {view === 'threads' ? <><div className="thread-provider-filters" role="group" aria-label="Filter threads by provider"><button type="button" data-selected={providerFilter === 'all'} onClick={() => setProviderFilter('all')} title="All providers" aria-label="All providers"><span>✦</span></button>{providerCatalog.map((provider) => <button type="button" key={provider.id} data-provider={provider.id} data-selected={providerFilter === provider.id} onClick={() => setProviderFilter(provider.id)} title={provider.label} aria-label={`Show ${provider.label} threads`}><AgentIcon agent={provider.id} /></button>)}</div><div className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" /></div>
         <nav className="thread-list">
           {grouped.map(([project, projectSessions]) => <section key={project}><h3>{project}<span>{projectSessions.length}</span></h3>{projectSessions.map((session) => <button type="button" key={session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{stateLabel[session.state] || session.state} · {session.agent}</small></span></button>)}</section>)}
-          {!sessions.length && <div className="sidebar-empty">No live tasks yet.<br />Start one here or install hooks to observe terminal sessions.</div>}
+          {!grouped.length && <div className="sidebar-empty">{sessions.length ? 'No threads match this provider and search.' : 'No live tasks yet. Start one here or install hooks to observe terminal sessions.'}</div>}
         </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage provider accounts while credentials remain in their native local stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
         <footer className="hardware"><i data-connected={midi.connected} /><div><b>{midi.shortModel || 'APC controller'}</b><span>{midi.connected ? `Connected · ${midi.device || 'ready'}` : 'Waiting for hardware'}</span></div><button type="button" onClick={() => { setSettingsSection('midi'); setView('settings') }}>Choose</button></footer>
       </aside>

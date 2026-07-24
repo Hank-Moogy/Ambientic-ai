@@ -28,8 +28,9 @@ The first production-shaped handover, provider account flows, and persistent con
 - `src/main/consumption-ledger.mjs` persists normalized capacity snapshots and events in Electron user data, detects exact Codex reset use from allowance and quota transitions, distinguishes natural renewals, and tracks provider credit balance deltas.
 - Settings → Usage & Billing contains the quota board and AI usage/spend-signals history with recent local activity, reset/limit counters, observed credit usage, and explicit provider coverage boundaries. Overview is intentionally agent-focused again.
 - `ART_DIRECTION.md` defines AgentBase’s fluid, aerial, ambient visual and physical-interaction language; `AGENTS.md` requires it to be revisited for material creative changes.
-- Overview Vibe cycles through four deterministic five-second APC40 MKII/APC mini mk2 studies at a MIDI-safe refresh rate: cold center wave, cold orbit, hot 8-bit life, and hot illumination mosaic. It labels the queued/playing study, blocks normal LED heartbeat painting during playback, and restores live task state afterward.
+- Overview Vibe cycles between cold center-wave and cold-orbit studies. It now sends only changed LEDs at a 60 ms cadence with slower phase movement and a denser cold palette, reducing visible stepping without saturating MIDI. The hot Game of Life and illumination studies were removed because their hard on/off rhythm conflicted with the ambient direction.
 - A compact Overview provider-balance card restores at-a-glance Codex/Claude quota and Hermes activity without moving detailed usage history or billing out of Settings.
+- Threads navigation is globally recency-first using the latest known message activity, including immediate managed user/agent updates. Project groups inherit the timestamp of their newest conversation, and an icon-only All/Codex/Claude/Hermes filter sits above search.
 - The current local ledger is seeded with the real Codex reset just used by the user (reported limit hit; exact 97% → 0% and reset allowance 1 → 0). The packaged runtime subsequently refreshed it to 2% used, confirming continued observation.
 - APC40 MKII pad selection, RGB state, MIDI Learn, and per-column push-to-talk.
 - APC mini mk2 native 8×8/64-pad task mode, RGB state, Track-button column push-to-talk, and Scene/fader MIDI Learn.
@@ -48,7 +49,7 @@ The first production-shaped handover, provider account flows, and persistent con
 - Claude’s official interactive `/login` now runs in a hidden pseudo-terminal behind an AgentBase wizard with browser handoff, minimal interaction controls, sanitized output, credential polling, and no separate Terminal window.
 - Claude authorization-code paste auto-submits once, immediately reports verification, never echoes or stores the code, and moves raw TUI redraws into collapsed diagnostics.
 - Claude verification recognizes the CLI success screen, reads only account identity metadata from Claude’s local provider-owned configuration, and times out to a retryable code step instead of spinning indefinitely.
-- Test suite currently has 58 passing tests, including four distinct native APC Vibe compositions, the persistent consumption ledger, reset and credit transitions, persistent alias/provider-refresh regressions, bundled-Codex usage discovery, weekly-only quota parsing, APC mini mk2 ordering/RGB/PTT, APC40 regressions, real PTY relay, OAuth-link validation, phase detection, non-retention, and secret-exclusion smokes.
+- Test suite currently has 59 passing tests, including cross-provider latest-message ordering, two smoothed native APC Vibe compositions, the persistent consumption ledger, reset and credit transitions, persistent alias/provider-refresh regressions, bundled-Codex usage discovery, weekly-only quota parsing, APC mini mk2 ordering/RGB/PTT, APC40 regressions, real PTY relay, OAuth-link validation, phase detection, non-retention, and secret-exclusion smokes.
 
 ## Architecture landmarks
 

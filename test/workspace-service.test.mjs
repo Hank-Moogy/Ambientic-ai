@@ -132,6 +132,28 @@ test('steers the exact active Codex turn instead of starting a second turn', asy
   assert.equal(requests[1].params.input[0].text, 'Use the newer screenshot.')
 })
 
+test('orders the workspace by latest message activity across providers', async () => {
+  const older = { id: 'claude-old', agent: 'claude', history: true, updatedAt: 100, cwd: '/tmp/old' }
+  const newer = { id: 'hermes-new', agent: 'hermes', history: true, updatedAt: 200, cwd: '/tmp/new' }
+  const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
+  service.history = new Map([[older.id, older], [newer.id, newer]])
+  service.historyRefreshedAt = Date.now()
+  service.snapshots.set(older.id, {
+    id: older.id,
+    provider: 'claude',
+    title: 'Recently continued',
+    updatedAt: 300,
+    messages: [],
+    artifacts: [],
+    approvals: [],
+    running: false
+  })
+
+  const result = await service.list()
+  assert.deepEqual(result.map((session) => session.id), ['claude-old', 'hermes-new'])
+  assert.equal(result[0].updatedAt, 300)
+})
+
 test('starts the official Codex ChatGPT browser login without a terminal', async () => {
   const requests = []
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
@@ -206,6 +228,6 @@ test('applies a persistent user alias to workspace lists and snapshots', async (
   assert.deepEqual(await service.rename(session.id, '  AgentBase  '), { id: session.id, title: 'AgentBase' })
   assert.deepEqual(renamed, { id: session.id, title: 'AgentBase', source: 'user' })
   assert.equal(saved[session.id], 'AgentBase')
-  assert.equal((await service.list())[0].task, 'AgentBase')
+  assert.equal((await service.list()).find((item) => item.id === session.id).task, 'AgentBase')
   assert.equal(service.baseSnapshot(session).title, 'AgentBase')
 })

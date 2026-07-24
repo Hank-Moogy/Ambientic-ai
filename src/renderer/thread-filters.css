@@ -1,0 +1,35 @@
+.thread-provider-filters {
+  margin: 12px 15px 3px;
+  padding: 4px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  border: 1px solid #292e36;
+  border-radius: 10px;
+  background: #111419;
+}
+
+.thread-provider-filters button {
+  --filter-accent: #7f8996;
+  height: 31px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #68717d;
+  transition: color .18s, border-color .18s, background .18s, box-shadow .18s;
+}
+
+.thread-provider-filters button[data-provider="codex"] { --filter-accent: #68e2a0; }
+.thread-provider-filters button[data-provider="claude"] { --filter-accent: #ec9d72; }
+.thread-provider-filters button[data-provider="hermes"] { --filter-accent: #8b8dff; }
+.thread-provider-filters button svg { width: 15px; height: 15px; }
+.thread-provider-filters button span { font-size: 13px; }
+.thread-provider-filters button:hover { color: var(--filter-accent); background: color-mix(in srgb, var(--filter-accent) 6%, transparent); }
+.thread-provider-filters button[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--filter-accent) 38%, #303640);
+  background: color-mix(in srgb, var(--filter-accent) 11%, #171b20);
+  color: var(--filter-accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--filter-accent) 9%, transparent);
+}

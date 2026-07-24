@@ -10,7 +10,7 @@ import {
   miniSelectedSessionForRecordColumn
 } from './apc-mini-mk2.mjs'
 import { APC40_ACTIONS, midiControlForMessage, normalizeMappings } from './midi-mappings.mjs'
-import { VIBE_SEQUENCE, VIBE_VARIANTS, vibeLedMessages } from './vibe-sequence.mjs'
+import { VIBE_SEQUENCE, VIBE_VARIANTS, changedVibeMessages, vibeLedMessages } from './vibe-sequence.mjs'
 
 const RECONNECT_MS = 3000
 const AUTO_PROFILE = 'auto'
@@ -284,6 +284,7 @@ export function createMidiController (store, {
     vibeActive = true
     vibeVariant = VIBE_VARIANTS[vibeIndex]
     let frame = 0
+    let previousFrame = []
     const paint = () => {
       if (!output || !activeProfile) {
         if (vibeTimer) clearInterval(vibeTimer)
@@ -294,7 +295,9 @@ export function createMidiController (store, {
         return
       }
       try {
-        for (const message of vibeLedMessages(activeProfile.id, frame, vibeVariant.id)) output.sendMessage(message)
+        const currentFrame = vibeLedMessages(activeProfile.id, frame, vibeVariant.id)
+        for (const message of changedVibeMessages(previousFrame, currentFrame)) output.sendMessage(message)
+        previousFrame = currentFrame
       } catch (error) {
         close()
         setStatus({ connected: false, device: '', error: error.message })

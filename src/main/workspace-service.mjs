@@ -216,16 +216,17 @@ export class WorkspaceService extends EventEmitter {
     for (const session of this.store.list()) merged.set(session.id, session)
     for (const [id, snapshot] of this.snapshots) {
       const session = merged.get(id)
-      if (session) merged.set(id, { ...session, state: this.effectiveState(session, snapshot), task: snapshot.title || session.task })
+      if (session) merged.set(id, {
+        ...session,
+        state: this.effectiveState(session, snapshot),
+        task: snapshot.title || session.task,
+        updatedAt: Math.max(Number(session.updatedAt || session.lastSeen || 0), Number(snapshot.updatedAt || 0))
+      })
     }
     return [...merged.values()].map((session) => {
       const alias = this.aliases.get(session.id)
       return alias ? { ...session, task: alias, taskSource: 'user' } : session
-    }).sort((left, right) => {
-      const leftLive = left.history ? 0 : 1
-      const rightLive = right.history ? 0 : 1
-      return rightLive - leftLive || (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0)
-    })
+    }).sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))
   }
 
   baseSnapshot (session) {
@@ -238,6 +239,7 @@ export class WorkspaceService extends EventEmitter {
       project: session.project || basename(session.cwd || '') || 'Local session',
       cwd: session.cwd || '',
       state: session.state || 'idle',
+      updatedAt: Number(session.updatedAt || session.lastSeen || 0),
       messages: [], artifacts: [], approvals: [], running: false, error: '',
       nativeAvailable: Boolean(session.deepLink || session.tty),
       managed: ['codex', 'claude', 'hermes'].includes(session.agent)
@@ -415,6 +417,7 @@ export class WorkspaceService extends EventEmitter {
     const snapshot = await this.read(id)
     snapshot.messages = [...snapshot.messages, message('user', text)]
     snapshot.running = true
+    snapshot.updatedAt = Date.now()
     this.emitSnapshot(snapshot)
     if (!session.history) this.store.ingest({ event: 'prompt', session_id: id, agent: session.agent, cwd: session.cwd })
     if (session.agent === 'codex') {
@@ -504,6 +507,7 @@ export class WorkspaceService extends EventEmitter {
         if (part.type === 'text') snapshot.messages.push(message('assistant', part.text))
         if (part.type === 'tool_use') snapshot.messages.push(message('activity', JSON.stringify(part.input || {}, null, 2), { kind: 'tool', title: part.name, files: [part.input?.file_path, part.input?.path].filter(Boolean) }))
       }
+      snapshot.updatedAt = Date.now()
       this.emitSnapshot({ ...snapshot })
     } else if (event.type === 'result' && event.is_error) this.fail(id, new Error(event.result || 'Claude returned an error'))
   }
@@ -555,6 +559,7 @@ export class WorkspaceService extends EventEmitter {
       const index = snapshot.messages.findIndex((entry) => entry.id === mapped.id)
       if (index >= 0) snapshot.messages[index] = mapped
       else snapshot.messages.push(mapped)
+      snapshot.updatedAt = Date.now()
       this.emitSnapshot({ ...snapshot })
     }
   }
@@ -575,6 +580,7 @@ export class WorkspaceService extends EventEmitter {
       const item = snapshot.messages.find((entry) => entry.id === update.toolCallId)
       if (item) item.status = update.status
     }
+    snapshot.updatedAt = Date.now()
     this.emitSnapshot({ ...snapshot })
   }
 
@@ -629,6 +635,7 @@ export class WorkspaceService extends EventEmitter {
         }
       }
       for (const entry of snapshot.messages) delete entry.streaming
+      snapshot.updatedAt = Date.now()
       this.emitSnapshot({ ...snapshot, running: false })
     }
     // A finished turn is only "needs you" when the agent is actually blocked on
