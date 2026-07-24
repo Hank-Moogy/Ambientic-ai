@@ -42,9 +42,35 @@ committing them.
 2. **Better compaction.** `compactClaudeContext` keeps the recent tail verbatim
    within a char budget and drops older messages. Optionally LLM-summarize the
    dropped head (bounded) and prepend it, so long-range context survives.
-3. **Claude usage display.** See the status-line bridge above. Open question:
-   confirm Claude Code actually sends `rate_limits` in the status-line stdin
-   payload, and that it populates for AgentBase-only users (managed `-p` turns
-   do NOT render a status line, so the cache only fills from interactive Claude
-   sessions). If it does not populate from normal AgentBase use, this needs a
-   different source.
+3. **Claude usage display — RESOLVED as far as data goes; needs UI wiring.**
+
+   Finding (verified empirically): Claude subscription quota % (the 5h/weekly
+   meters, like Codex) is NOT obtainable from any clean local source.
+   - `claude -p --output-format json` result carries no rate limits (only token
+     counts under `usage`).
+   - The status-line stdin payload has NO `rate_limits` field. Real top-level
+     keys: context_window, cost, cwd, exceeds_200k_tokens, model, output_style,
+     session_id, transcript_path, version, workspace.
+   - Nothing on disk caches the quota windows.
+   => The `hook/claude-statusline.py` + `collectClaude` (reads
+      `~/.agentbase/claude-usage.json`) approach cannot populate and should be
+      retired or repurposed. Quota % for Claude is only available via the
+      interactive `/usage` TUI (fragile scrape) or the credentialed API
+      (off-limits). Do not fake a percentage.
+
+   Clean, working alternative (implemented): `src/main/claude-activity.mjs`
+   reads `~/.claude/stats-cache.json` and returns real weekly Claude *activity*
+   (messages, sessions, tool calls, tokens by model). Always available, zero
+   setup, updates whenever Claude is used. Tested in
+   `test/claude-activity.test.mjs`.
+
+   To wire it into the app (one small edit, left undone to avoid colliding with
+   the concurrent Usage/Billing rework in `usage.js`/`Workspace.jsx`):
+   - In `src/main/usage.js` `collectClaude`, on the ENOENT branch (no status-line
+     cache) call `collectClaudeActivity()` and return
+     `{ status: 'ok', plan: 'subscription', windows: [], activity }` instead of
+     throwing. Import from `./claude-activity.mjs`.
+   - In the Overview/Usage UI, when a provider has `activity` and no `windows`,
+     render "N messages · N sessions this week" (and optionally tokens) as an
+     honest activity card instead of a quota meter or "Quota unavailable".
+   - Label it "activity", never "quota" — the number is real usage, not a limit.
