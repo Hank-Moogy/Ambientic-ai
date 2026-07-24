@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { VIBE_SEQUENCE, VIBE_VARIANTS, changedVibeMessages, vibeLedMessages, vibePalette } from '../src/main/vibe-sequence.mjs'
+import { VIBE_SEQUENCE, VIBE_VARIANTS, changedVibeMessages, shouldCelebrateMidiConnection, vibeLedMessages, vibePalette } from '../src/main/vibe-sequence.mjs'
 
 test('fills the native APC grids with a cool multi-color vibe frame', () => {
   const mini = vibeLedMessages('apc-mini-mk2', 7)
@@ -26,4 +26,10 @@ test('provides two distinct cold compositions with delta-frame smoothing', () =>
   const first = vibeLedMessages('apc-mini-mk2', 20, 'center-wave')
   const next = vibeLedMessages('apc-mini-mk2', 21, 'center-wave')
   assert.ok(changedVibeMessages(first, next).length < next.length)
+})
+
+test('plays a welcome composition only when a MIDI controller becomes connected', () => {
+  assert.equal(shouldCelebrateMidiConnection({ connected: false }, { connected: true }), true)
+  assert.equal(shouldCelebrateMidiConnection({ connected: true }, { connected: true }), false)
+  assert.equal(shouldCelebrateMidiConnection({ connected: true }, { connected: false }), false)
 })

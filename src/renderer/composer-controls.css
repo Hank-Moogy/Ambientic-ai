@@ -1,0 +1,23 @@
+.composer > .composer-tools { height: auto; min-height: 38px; padding: 7px 9px 5px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid #ffffff08; }
+.composer-tools button { border: 1px solid #333b46; background: #171c23; color: #8e98a4; cursor: pointer; transition: border-color .2s, color .2s, background .2s, box-shadow .2s; }
+.composer-tools button:hover:not(:disabled) { border-color: #526171; color: #d3dbe2; }
+.composer-tools button:disabled { cursor: default; opacity: .35; }
+.composer .composer-attach { width: auto; height: 26px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border-radius: 8px; font-size: 8px; font-weight: 750; }
+.composer-attach span { color: #83b8dd; font-size: 13px; }
+.composer-modes { margin-left: auto; padding: 2px; display: flex; gap: 2px; border: 1px solid #2d343d; border-radius: 9px; background: #0e1217; }
+.composer .composer-modes button { width: auto; height: 22px; min-width: 47px; padding: 0 8px; border-color: transparent; border-radius: 6px; background: transparent; font-size: 7px; font-weight: 750; }
+.composer-modes button[data-selected="true"] { border-color: #40505f; background: linear-gradient(135deg, #26333f, #1a232c); color: #dbe8f1; box-shadow: 0 0 16px #6ebcff15; }
+.composer-modes button:nth-child(2)[data-selected="true"] { border-color: #5a5073; background: linear-gradient(135deg, #302b40, #211d2c); color: #d9ccf1; box-shadow: 0 0 16px #a68cff18; }
+.composer-modes button:nth-child(3)[data-selected="true"] { border-color: #3f6254; background: linear-gradient(135deg, #21362d, #17261f); color: #bfe8d2; box-shadow: 0 0 16px #6ce6a018; }
+.composer > .composer-attachments { height: auto; padding: 7px 9px 2px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.composer-attachments > span { max-width: 220px; height: 27px; padding: 0 5px 0 8px; display: flex; align-items: center; gap: 6px; border: 1px solid #364553; border-radius: 8px; background: #151d25; color: #aab6c0; box-shadow: inset 0 1px #ffffff07; }
+.composer-attachments i { color: #75afd4; font-size: 10px; font-style: normal; }
+.composer-attachments b { min-width: 0; overflow: hidden; font-size: 8px; font-weight: 700; white-space: nowrap; text-overflow: ellipsis; }
+.composer .composer-attachments button { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #67727d; cursor: pointer; }
+.composer-attachments button:hover { background: #29323c; color: #eef4f7; }
+.composer-tools + textarea,
+.composer-attachments + textarea { padding-top: 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-tools button { transition: none; }
+}

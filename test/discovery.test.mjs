@@ -17,9 +17,11 @@ test('uses provider-owned account login commands', () => {
   assert.equal(providerConnectionCommand('claude'), 'claude /login')
   assert.equal(providerConnectionCommand('codex'), 'codex login')
   assert.equal(providerConnectionCommand('hermes'), 'hermes login')
+  assert.equal(providerConnectionCommand('kimi'), 'kimi login')
   assert.equal(providerConnectionCommand('unknown'), '')
 })
 
 test('detects Codex from the bundled desktop app without relying on PATH', () => {
   assert.ok(providerExecutableCandidates('codex').includes('/Applications/ChatGPT.app/Contents/Resources/codex'))
+  assert.ok(providerExecutableCandidates('kimi').includes('/Users/tester/.local/bin/kimi') || providerExecutableCandidates('kimi').some((path) => path.endsWith('/.local/bin/kimi')))
 })

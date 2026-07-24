@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, clipboard, ipcMain, nativeImage, screen, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, screen, shell, systemPreferences } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -29,6 +29,10 @@ ensureEnhancedPath()
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// A disposable state directory makes the first-run experience replayable in
+// automated visual smokes without touching the user's real AgentBase data.
+if (process.env.AGENTBASE_STATE_DIR) app.setPath('userData', process.env.AGENTBASE_STATE_DIR)
+
 const DEFAULT_WIDTH = 232
 const MIN_WIDTH = 232
 const MIN_HEIGHT = 220
@@ -55,6 +59,7 @@ let handovers = null
 let consumptionLedger = null
 let claudeAuth = null
 let pendingWorkspaceSessionId = ''
+let workspaceListTimer = null
 
 function sendToWindows (channel, payload) {
   for (const target of [win, workspaceWin]) {
@@ -353,6 +358,14 @@ async function pushWorkspaceThreads (force = false) {
   try { sendToWindows('workspace-threads', await workspace.list({ force })) } catch (error) { console.error('[agentbase] workspace index failed:', error.message) }
 }
 
+function scheduleWorkspaceThreads () {
+  if (workspaceListTimer) clearTimeout(workspaceListTimer)
+  workspaceListTimer = setTimeout(() => {
+    workspaceListTimer = null
+    void pushWorkspaceThreads()
+  }, 80)
+}
+
 function pushSys () {
   sendToWindows('sys', { accessibility: accessibilityGranted(false) })
 }
@@ -574,6 +587,30 @@ ipcMain.handle('refresh-usage', () => usage.refresh())
 ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
 ipcMain.handle('refresh-connectors', () => refreshConnectors())
 ipcMain.handle('get-provider-auth', () => Object.fromEntries(providerAuthState))
+ipcMain.handle('get-onboarding', () => {
+  const value = loadPrefs().onboarding
+  return value && typeof value === 'object'
+    ? { completed: false, step: 0, name: '', ...value }
+    : { completed: false, step: 0, name: '' }
+})
+ipcMain.handle('save-onboarding', (_event, patch = {}) => {
+  const prefs = loadPrefs()
+  const current = prefs.onboarding && typeof prefs.onboarding === 'object' ? prefs.onboarding : {}
+  const onboarding = {
+    completed: Boolean(patch.completed ?? current.completed),
+    step: Math.max(0, Math.min(3, Number(patch.step ?? current.step) || 0)),
+    name: String(patch.name ?? current.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 48),
+    completedAt: patch.completed ? Date.now() : (current.completedAt || null)
+  }
+  savePrefs({ ...prefs, onboarding })
+  return onboarding
+})
+ipcMain.handle('reset-onboarding', () => {
+  const prefs = loadPrefs()
+  const onboarding = { completed: false, step: 0, name: '' }
+  savePrefs({ ...prefs, onboarding })
+  return onboarding
+})
 ipcMain.handle('get-handovers', () => handovers?.list() || [])
 ipcMain.handle('generate-handover', (_event, sessionId) => handovers.generate(sessionId))
 ipcMain.handle('continue-handover', async (_event, sessionId, targetProvider) => {
@@ -635,7 +672,16 @@ ipcMain.handle('rename-thread', async (_event, id, title) => {
   sendToWindows('workspace-threads', await workspace.list())
   return result
 })
-ipcMain.handle('send-thread-prompt', (_event, id, text) => workspace.send(id, text))
+ipcMain.handle('choose-thread-context', async () => {
+  const result = await dialog.showOpenDialog(workspaceWin || win, {
+    title: 'Attach files or folders',
+    buttonLabel: 'Attach',
+    properties: ['openFile', 'openDirectory', 'multiSelections']
+  })
+  if (result.canceled) return []
+  return result.filePaths.slice(0, 12).map((path) => ({ path }))
+})
+ipcMain.handle('send-thread-prompt', (_event, id, text, options = {}) => workspace.send(id, text, options))
 ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))
 ipcMain.handle('resolve-approval', (_event, id, allow, remember) => workspace.resolveApproval(id, allow, remember))
@@ -1031,7 +1077,10 @@ app.whenReady().then(() => {
   consumptionLedger.on('change', (state) => sendToWindows('consumption-ledger', state))
   handovers = new HandoverService({ workspace, usage })
   handovers.on('change', (records) => sendToWindows('handovers', records))
-  workspace.on('change', (snapshot) => sendToWindows('thread', snapshot))
+  workspace.on('change', (snapshot) => {
+    sendToWindows('thread', snapshot)
+    scheduleWorkspaceThreads()
+  })
   workspace.on('provider-auth', async (payload) => {
     if (payload.loginId && payload.loginId === pendingCodexLogin && ['connected', 'failed'].includes(payload.status)) pendingCodexLogin = ''
     await refreshConnectors()
@@ -1103,4 +1152,4 @@ app.whenReady().then(() => {
 // Tray app — closing the window doesn't quit.
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); claudeAuth?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); claudeAuth?.stop(); companions.stop(); usage.stop() })

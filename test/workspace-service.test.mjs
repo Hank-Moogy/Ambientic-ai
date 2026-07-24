@@ -58,7 +58,7 @@ test('a completed turn blocked on a pending approval stays "attention"', async (
 
 test('effectiveState is the single source of truth with clear precedence', () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
-  // running wins over everything
+  // running is shown only when no stronger user-required signal exists
   assert.equal(service.effectiveState({ id: 'x' }, { id: 'x', running: true }), 'running')
   // an active turn counts as running even without snapshot.running
   service.activeTurns.set('y', {})
@@ -68,10 +68,16 @@ test('effectiveState is the single source of truth with clear precedence', () =>
   assert.equal(service.effectiveState({ id: 'x' }, { id: 'x', error: 'boom' }), 'attention')
   service.pendingApprovals.set('a', { sessionId: 'x' })
   assert.equal(service.effectiveState({ id: 'x' }, { id: 'x' }), 'attention')
+  service.activeTurns.set('x', {})
+  assert.equal(service.effectiveState({ id: 'x' }, { id: 'x', running: true }), 'attention')
+  service.activeTurns.delete('x')
   service.pendingApprovals.clear()
   // a finished managed snapshot is idle; a history record is history
   assert.equal(service.effectiveState({ id: 'x' }, { id: 'x' }), 'idle')
   assert.equal(service.effectiveState({ id: 'x', history: true }, { id: 'x' }), 'history')
+  // live terminal hooks remain authoritative even after a passive transcript read
+  assert.equal(service.effectiveState({ id: 'live', state: 'running', tty: '/dev/ttys1' }, { id: 'live', running: false }), 'running')
+  assert.equal(service.effectiveState({ id: 'live', state: 'waiting', tty: '/dev/ttys1' }, { id: 'live', running: true }), 'waiting')
   // with no managed snapshot, the store's hook-driven lifecycle state is honored
   assert.equal(service.effectiveState({ id: 'x', state: 'waiting' }, null), 'waiting')
 })
@@ -130,6 +136,72 @@ test('steers the exact active Codex turn instead of starting a second turn', asy
   assert.deepEqual(requests.map((entry) => entry.method), ['thread/resume', 'turn/steer'])
   assert.equal(requests[1].params.expectedTurnId, 'active-turn')
   assert.equal(requests[1].params.input[0].text, 'Use the newer screenshot.')
+})
+
+test('replaces the optimistic Codex user row when the canonical item arrives', () => {
+  const session = { id: 'codex-desktop:thread-1', threadId: 'thread-1', agent: 'codex', cwd: '/tmp/project', state: 'running' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, {
+    id: session.id,
+    provider: 'codex',
+    messages: [{
+      id: 'local-message',
+      role: 'user',
+      text: 'Only show this once.',
+      pendingProvider: true,
+      mode: 'plan',
+      files: ['/tmp/reference.md']
+    }],
+    artifacts: [],
+    approvals: [],
+    running: true,
+    state: 'running'
+  })
+
+  service.codexNotification({
+    method: 'item/started',
+    params: {
+      threadId: 'thread-1',
+      item: { id: 'provider-message', type: 'userMessage', content: [{ type: 'text', text: 'Only show this once.' }] }
+    }
+  })
+
+  const messages = service.snapshots.get(session.id).messages
+  assert.equal(messages.length, 1)
+  assert.equal(messages[0].id, 'provider-message')
+  assert.equal(messages[0].pendingProvider, undefined)
+  assert.equal(messages[0].mode, 'plan')
+  assert.deepEqual(messages[0].files, ['/tmp/reference.md'])
+})
+
+test('sends Codex folders as native mentions and uses its native plan preset', async () => {
+  const session = { id: 'codex-desktop:thread-plan', threadId: 'thread-plan', agent: 'codex', cwd: '/tmp', state: 'idle' }
+  const requests = []
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.history.set(session.id, session)
+  service.read = async () => ({
+    id: session.id, provider: 'codex', messages: [], artifacts: [], approvals: [],
+    running: false, state: 'idle'
+  })
+  service.codexClient = async () => ({
+    request: async (method, params) => {
+      requests.push({ method, params })
+      if (method === 'collaborationMode/list') return { data: [{ name: 'Plan', mode: 'plan', model: 'test-model', reasoning_effort: 'medium' }] }
+      if (method === 'turn/start') return { turn: { id: 'turn-plan' } }
+      return {}
+    }
+  })
+
+  await service.send(session.id, 'Review this folder.', {
+    mode: 'plan',
+    attachments: [{ path: '/tmp' }]
+  })
+
+  const start = requests.find((entry) => entry.method === 'turn/start').params
+  assert.deepEqual(start.input[1], { type: 'mention', name: 'tmp', path: '/tmp' })
+  assert.equal(start.collaborationMode.mode, 'plan')
+  assert.equal(start.collaborationMode.settings.model, 'test-model')
+  assert.ok(start.clientUserMessageId)
 })
 
 test('orders the workspace by latest message activity across providers', async () => {

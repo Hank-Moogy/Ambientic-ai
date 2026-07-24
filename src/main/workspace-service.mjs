@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 
@@ -13,6 +13,9 @@ const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes
 // rendered transcript on reload.
 const COMPACTION_HEADER = 'You are resuming a conversation that exceeded the model'
 const COMPACTION_BUDGET = 24000
+const AGENTBASE_CONTEXT = /<agentbase-context\b[^>]*>[\s\S]*?<\/agentbase-context>\s*/i
+const CHAT_MODES = new Set(['build', 'plan', 'ask'])
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 
 function textContent (value) {
   if (typeof value === 'string') return value
@@ -24,9 +27,79 @@ function message (role, text, extra = {}) {
   return { id: extra.id || randomUUID(), role, text: String(text || ''), ...extra }
 }
 
+function stripAgentBaseContext (text) {
+  return String(text || '').replace(AGENTBASE_CONTEXT, '').trim()
+}
+
+export function reconcileProviderMessage (messages, incoming) {
+  const list = [...(messages || [])]
+  let index = list.findIndex((entry) => entry.id === incoming.id)
+  if (index < 0 && incoming.role === 'user') {
+    const cleanIncoming = stripAgentBaseContext(incoming.text)
+    index = list.findLastIndex((entry) => (
+      entry.role === 'user' &&
+      entry.pendingProvider &&
+      stripAgentBaseContext(entry.text) === cleanIncoming
+    ))
+  }
+  if (index >= 0) {
+    const optimistic = list[index]
+    list[index] = {
+      ...incoming,
+      ...(optimistic.files?.length && !incoming.files?.length ? { files: optimistic.files } : {}),
+      ...(optimistic.mode && !incoming.mode ? { mode: optimistic.mode } : {})
+    }
+  }
+  else list.push(incoming)
+  return list
+}
+
+function normalizePromptOptions (options = {}) {
+  const mode = CHAT_MODES.has(options.mode) ? options.mode : 'build'
+  const attachments = []
+  for (const item of Array.isArray(options.attachments) ? options.attachments.slice(0, 12) : []) {
+    const path = String(item?.path || '')
+    if (!isAbsolute(path)) continue
+    try {
+      const stats = statSync(path)
+      attachments.push({
+        path,
+        name: basename(path),
+        kind: stats.isDirectory() ? 'folder' : 'file'
+      })
+    } catch {}
+  }
+  return { mode, attachments }
+}
+
+function providerPrompt (text, { mode, attachments }) {
+  const guidance = mode === 'plan'
+    ? 'Planning mode: inspect and reason, but do not modify files or run destructive commands. Return a concise implementation plan.'
+    : mode === 'ask'
+        ? 'Ask mode: answer and explain only. Do not modify files or run destructive commands.'
+        : ''
+  if (!guidance && !attachments.length) return text
+  const paths = attachments.length
+    ? `\nAttached local context:\n${attachments.map((item) => `- ${item.kind}: ${item.path}`).join('\n')}`
+    : ''
+  return `<agentbase-context mode="${mode}">\n${guidance}${paths}\n</agentbase-context>\n${text}`
+}
+
+function codexInputs (text, attachments) {
+  const input = [{ type: 'text', text, text_elements: [] }]
+  for (const item of attachments) {
+    if (item.kind === 'file' && IMAGE_EXTENSIONS.has(extname(item.path).toLowerCase())) {
+      input.push({ type: 'localImage', path: item.path, detail: 'auto' })
+    } else {
+      input.push({ type: 'mention', name: item.name, path: item.path })
+    }
+  }
+  return input
+}
+
 function codexItem (item) {
   if (!item) return null
-  if (item.type === 'userMessage') return message('user', textContent(item.content), { id: item.id })
+  if (item.type === 'userMessage') return message('user', stripAgentBaseContext(textContent(item.content)), { id: item.id })
   if (item.type === 'agentMessage') return message('assistant', item.text, { id: item.id })
   if (item.type === 'reasoning') return message('activity', textContent(item.summary || item.content), { id: item.id, kind: 'reasoning', title: 'Reasoning' })
   if (item.type === 'commandExecution') return message('activity', item.aggregatedOutput || item.command || '', { id: item.id, kind: 'command', title: item.command || 'Command', status: item.status })
@@ -62,7 +135,7 @@ function claudeMessages (path) {
     let row
     try { row = JSON.parse(line) } catch { continue }
     if (row.type === 'user') {
-      const text = textContent(row.message?.content)
+      const text = stripAgentBaseContext(textContent(row.message?.content))
       if (text && !text.startsWith('<task-notification>')) output.push(message('user', text, { id: row.uuid }))
     } else if (row.type === 'assistant') {
       for (const part of row.message?.content || []) {
@@ -115,7 +188,7 @@ function readFileSlice (path, position, length) {
 
 function meaningfulClaudeUserText (row) {
   if (row?.type !== 'user') return ''
-  const value = textContent(row.message?.content).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const value = stripAgentBaseContext(textContent(row.message?.content)).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
   if (!value || value.startsWith('<') || /^\/?(?:clear|compact|help)$/i.test(value)) return ''
   return value
 }
@@ -182,6 +255,7 @@ export class WorkspaceService extends EventEmitter {
     this.codexReady = null
     this.hermesReady = null
     this.activeTurns = new Map()
+    this.codexCollaborationModes = undefined
     // Auto-compaction: when a Claude thread's history overflows the context
     // window, we start a fresh, compacted Claude session and remap the UI
     // thread id -> the new session id so the user continues in place.
@@ -264,6 +338,7 @@ export class WorkspaceService extends EventEmitter {
       state: session.state || 'idle',
       updatedAt: Number(session.updatedAt || session.lastSeen || 0),
       messages: [], artifacts: [], approvals: [], running: false, error: '',
+      turnStateKnown: false,
       nativeAvailable: Boolean(session.deepLink || session.tty),
       managed: ['codex', 'claude', 'hermes'].includes(session.agent)
     }
@@ -291,16 +366,32 @@ export class WorkspaceService extends EventEmitter {
     return Boolean(snapshot?.running) || this.activeTurns.has(id)
   }
 
-  // The single source of truth for a thread's UI state. Precedence:
-  // running > blocked-on-user (approval/error) > finished(idle) > history >
-  // hook-driven store lifecycle (for sessions with no managed snapshot yet).
+  // The single source of truth for a thread's UI state. Explicit user-required
+  // signals win over process liveness: a provider can keep its process alive
+  // while blocked on approval/input. Live hook lifecycle remains authoritative
+  // for passive terminal snapshots that cannot inspect the provider turn.
   effectiveState (session, snapshot) {
     const id = session?.id ?? snapshot?.id
-    if (this.isRunning(id, snapshot)) return 'running'
     if (snapshot?.error) return 'attention'
     if (this.hasPendingApproval(id)) return 'attention'
+    if (session?.state === 'attention' || session?.state === 'waiting') return session.state
+    if (snapshot?.turnStateKnown) return this.isRunning(id, snapshot) ? 'running' : (session?.history ? 'history' : 'idle')
+    if (this.isRunning(id, snapshot) || session?.state === 'running') return 'running'
     if (snapshot) return session?.history ? 'history' : 'idle'
     return session?.history ? 'history' : (session?.state || 'idle')
+  }
+
+  ingestLifecycle (id, event) {
+    const session = this.sessionFor(id)
+    if (!session || !this.store?.ingest) return
+    this.store.ingest({
+      event,
+      session_id: id,
+      agent: session.agent,
+      project: session.project,
+      cwd: session.cwd,
+      tty: session.tty
+    })
   }
 
   async rename (id, value) {
@@ -330,9 +421,14 @@ export class WorkspaceService extends EventEmitter {
         snapshot.messages = codexThreadMessages(result.thread)
         snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
         snapshot.running = codexStatusIsRunning(result.thread?.status)
+        snapshot.turnStateKnown = true
         const activeTurnId = codexActiveTurnId(result.thread)
         if (snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
         else if (!snapshot.running) this.activeTurns.delete(id)
+        // Reading dormant history must not promote it onto the live hardware
+        // surface. A genuinely active provider turn is promoted immediately;
+        // existing live sessions are also corrected back to idle.
+        if (snapshot.running || !session.history) this.ingestLifecycle(id, snapshot.running ? 'tool' : 'stop_idle')
       } else if (session.agent === 'claude') {
         snapshot.transcriptPath = this.claudeTranscriptFor(session)
         const disk = claudeMessages(snapshot.transcriptPath).filter((entry) => !isCompactionSeed(entry))
@@ -354,7 +450,11 @@ export class WorkspaceService extends EventEmitter {
       const rpc = new JsonRpcProcess(path, ['app-server', '--stdio'])
       rpc.on('notification', (event) => this.codexNotification(event))
       rpc.on('request', (request) => this.providerApproval('codex', rpc, request))
-      rpc.on('exit', () => { this.codex = null; this.codexReady = null })
+      rpc.on('exit', () => {
+        this.codex = null
+        this.codexReady = null
+        this.codexCollaborationModes = undefined
+      })
       rpc.start()
       await rpc.request('initialize', { clientInfo: { name: 'agentbase', title: 'AgentBase', version: '0.8.1' } })
       rpc.notify('initialized')
@@ -386,6 +486,28 @@ export class WorkspaceService extends EventEmitter {
     }
   }
 
+  async codexCollaborationMode (rpc, requestedMode) {
+    if (this.codexCollaborationModes === undefined) {
+      try {
+        const result = await rpc.request('collaborationMode/list', {})
+        this.codexCollaborationModes = Array.isArray(result?.data) ? result.data : []
+      } catch {
+        this.codexCollaborationModes = []
+      }
+    }
+    const desired = requestedMode === 'build' ? 'default' : 'plan'
+    const preset = this.codexCollaborationModes.find((item) => item.mode === desired && item.model)
+    if (!preset) return null
+    return {
+      mode: desired,
+      settings: {
+        model: preset.model,
+        reasoning_effort: preset.reasoning_effort ?? null,
+        developer_instructions: null
+      }
+    }
+  }
+
   async hermesClient () {
     if (this.hermesReady) return this.hermesReady
     this.hermesReady = (async () => {
@@ -413,6 +535,7 @@ export class WorkspaceService extends EventEmitter {
       options: request.params?.options || []
     }
     this.pendingApprovals.set(id, { ...approval, rpc, requestId: request.id })
+    this.ingestLifecycle(sessionId, 'notification')
     const snapshot = this.snapshots.get(sessionId)
     // The approval is now pending, so emitSnapshot derives "attention".
     if (snapshot) this.emitSnapshot({ ...snapshot })
@@ -428,43 +551,61 @@ export class WorkspaceService extends EventEmitter {
       approval.rpc.respond(approval.requestId, { decision: allow ? (remember ? 'acceptForSession' : 'accept') : 'decline' })
     }
     this.pendingApprovals.delete(approvalId)
+    this.ingestLifecycle(approval.sessionId, this.activeTurns.has(approval.sessionId) ? 'tool' : 'stop_idle')
     const snapshot = this.snapshots.get(approval.sessionId)
     if (snapshot) this.emitSnapshot({ ...snapshot })
     return true
   }
 
-  async send (id, text) {
+  async send (id, text, options = {}) {
     if (!this.history.size) await this.list()
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
     const snapshot = await this.read(id)
-    snapshot.messages = [...snapshot.messages, message('user', text)]
+    const promptOptions = normalizePromptOptions(options)
+    const pending = message('user', text, {
+      pendingProvider: true,
+      mode: promptOptions.mode,
+      files: promptOptions.attachments.map((item) => item.path)
+    })
+    snapshot.messages = [...snapshot.messages, pending]
     snapshot.running = true
+    snapshot.turnStateKnown = true
     snapshot.updatedAt = Date.now()
+    this.ingestLifecycle(id, 'prompt')
     this.emitSnapshot(snapshot)
-    if (!session.history) this.store.ingest({ event: 'prompt', session_id: id, agent: session.agent, cwd: session.cwd })
     if (session.agent === 'codex') {
       const rpc = await this.codexClient()
       const threadId = this.codexThreadId(session)
       await rpc.request('thread/resume', { threadId })
       const activeTurnId = this.activeTurns.get(id)
+      const collaborationMode = activeTurnId ? null : await this.codexCollaborationMode(rpc, promptOptions.mode)
+      const providerText = collaborationMode && promptOptions.mode !== 'ask'
+        ? text
+        : providerPrompt(text, promptOptions)
+      const input = codexInputs(providerText, promptOptions.attachments)
       if (activeTurnId) {
         await rpc.request('turn/steer', {
           threadId,
           expectedTurnId: activeTurnId,
-          input: [{ type: 'text', text, text_elements: [] }]
+          input
         })
       } else {
-        const result = await rpc.request('turn/start', { threadId, input: [{ type: 'text', text, text_elements: [] }] })
+        const result = await rpc.request('turn/start', {
+          threadId,
+          input,
+          clientUserMessageId: pending.id,
+          ...(collaborationMode ? { collaborationMode } : {})
+        })
         this.activeTurns.set(id, result.turn?.id || result.id)
       }
     } else if (session.agent === 'hermes') {
       const rpc = await this.hermesClient()
       await rpc.request('session/resume', { sessionId: id, cwd: session.cwd || homedir(), mcpServers: [] })
       this.activeTurns.set(id, id)
-      void rpc.request('session/prompt', { sessionId: id, prompt: [{ type: 'text', text }] }, 60 * 60 * 1000).then(() => this.finish(id)).catch((error) => this.fail(id, error))
+      void rpc.request('session/prompt', { sessionId: id, prompt: [{ type: 'text', text: providerPrompt(text, promptOptions) }] }, 60 * 60 * 1000).then(() => this.finish(id)).catch((error) => this.fail(id, error))
     } else if (session.agent === 'claude') {
-      this.runClaude(session, text)
+      this.runClaude(session, providerPrompt(text, promptOptions), { mode: promptOptions.mode })
     } else throw new Error(`Managed prompts are not supported for ${session.agent}.`)
     return this.emitSnapshot(snapshot)
   }
@@ -497,7 +638,7 @@ export class WorkspaceService extends EventEmitter {
     throw new Error('Choose Codex, Claude Code, or Hermes.')
   }
 
-  runClaude (session, prompt, { compacted = false } = {}) {
+  runClaude (session, prompt, { compacted = false, mode = 'build' } = {}) {
     const path = this.connector('claude')?.path || 'claude'
     // Resume only once Claude has actually persisted this session's transcript.
     // A brand-new managed task carries a fresh UUID that Claude has never seen,
@@ -506,9 +647,10 @@ export class WorkspaceService extends EventEmitter {
     // found with session ID" and exits non-zero ("Claude exited with code 1").
     const claudeId = this.claudeSessionId(session)
     const started = Boolean(this.claudeTranscriptFor(session))
-    const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', 'acceptEdits']
+    const permissionMode = mode === 'build' ? 'acceptEdits' : 'plan'
+    const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', permissionMode]
     args.push(started ? '--resume' : '--session-id', claudeId)
-    this.claudeAttempts.set(session.id, { prompt, compacted, resultError: '' })
+    this.claudeAttempts.set(session.id, { prompt, compacted, mode, resultError: '' })
     const child = spawn(path, args, { cwd: session.cwd || homedir(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
@@ -526,7 +668,7 @@ export class WorkspaceService extends EventEmitter {
       // First time a resume overflows the context window, compact and retry once
       // so the user keeps going in the same thread instead of hitting a wall.
       if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(errorText) && !attempt.compacted) {
-        return void this.compactClaudeAndRetry(session.id, attempt.prompt)
+        return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode })
       }
       this.claudeAttempts.delete(session.id)
       this.fail(session.id, new Error(this.claudeResultError(session.id, errorText)))
@@ -575,7 +717,7 @@ export class WorkspaceService extends EventEmitter {
 
   // Start a fresh Claude session seeded with the compacted history, remap the UI
   // thread to it, and re-run the user's prompt so the thread continues in place.
-  compactClaudeAndRetry (id, prompt) {
+  compactClaudeAndRetry (id, prompt, { mode = 'build' } = {}) {
     const session = this.sessionFor(id)
     if (!session) { this.claudeAttempts.delete(id); return this.fail(id, new Error('This conversation is no longer available to compact.')) }
     const summary = this.compactClaudeContext(session)
@@ -585,7 +727,7 @@ export class WorkspaceService extends EventEmitter {
       snapshot.messages.push(message('activity', 'This conversation grew past the model context window. AgentBase compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
       this.emitSnapshot({ ...snapshot, running: true })
     }
-    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true })
+    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode })
   }
 
   // Turn known Claude -p failures into guidance the user can act on. A resumed
@@ -626,6 +768,7 @@ export class WorkspaceService extends EventEmitter {
     if (event.method === 'turn/started') {
       const turnId = codexEventTurnId(event)
       if (turnId) this.activeTurns.set(id, turnId)
+      this.ingestLifecycle(id, 'tool')
       const snapshot = this.snapshots.get(id)
       if (snapshot) this.emitSnapshot({ ...snapshot, running: true })
       return
@@ -645,9 +788,7 @@ export class WorkspaceService extends EventEmitter {
     const mapped = codexItem(item)
     const snapshot = this.snapshots.get(id)
     if (mapped && snapshot) {
-      const index = snapshot.messages.findIndex((entry) => entry.id === mapped.id)
-      if (index >= 0) snapshot.messages[index] = mapped
-      else snapshot.messages.push(mapped)
+      snapshot.messages = reconcileProviderMessage(snapshot.messages, mapped)
       snapshot.updatedAt = Date.now()
       this.emitSnapshot({ ...snapshot })
     }
@@ -680,7 +821,7 @@ export class WorkspaceService extends EventEmitter {
     const rows = await execJson('/usr/bin/sqlite3', ['-json', db, `select id,role,content,tool_name,tool_calls,timestamp from messages where session_id='${escaped}' and active=1 order by timestamp asc limit 300`])
     return rows.map((row) => row.tool_name
       ? message('activity', row.content || row.tool_calls || '', { id: `hermes:${row.id}`, kind: 'tool', title: row.tool_name })
-      : message(row.role === 'assistant' ? 'assistant' : 'user', row.content || '', { id: `hermes:${row.id}` }))
+      : message(row.role === 'assistant' ? 'assistant' : 'user', row.role === 'assistant' ? (row.content || '') : stripAgentBaseContext(row.content || ''), { id: `hermes:${row.id}` }))
       .filter((entry) => entry.role === 'activity' || entry.text.trim())
   }
 
@@ -725,20 +866,19 @@ export class WorkspaceService extends EventEmitter {
       }
       for (const entry of snapshot.messages) delete entry.streaming
       snapshot.updatedAt = Date.now()
-      this.emitSnapshot({ ...snapshot, running: false })
+      this.ingestLifecycle(id, this.hasPendingApproval(id) ? 'notification' : 'stop_idle')
+      this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true })
     }
     // A finished turn is only "needs you" when the agent is actually blocked on
     // a pending approval; otherwise it is simply idle/done, not red.
-    if (session) this.store.ingest({ event: this.hasPendingApproval(id) ? 'notification' : 'stop_idle', session_id: id, agent: session.agent, cwd: session.cwd })
     return true
   }
 
   fail (id, error) {
     this.activeTurns.delete(id)
+    this.ingestLifecycle(id, 'notification')
     const snapshot = this.snapshots.get(id)
-    if (snapshot) this.emitSnapshot({ ...snapshot, running: false, error: error.message })
-    const session = this.store.list().find((item) => item.id === id)
-    if (session) this.store.ingest({ event: 'notification', session_id: id, agent: session.agent, cwd: session.cwd })
+    if (snapshot) this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true, error: error.message })
   }
 
   stop () {

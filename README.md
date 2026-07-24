@@ -43,6 +43,7 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - Settings → Usage & Billing with comparable Codex and Claude short/weekly quota meters, reset windows, stale/error states, manual refresh, and local weekly-session activity whenever a provider does not expose usable quota data.
 - Persistent local capacity ledger and Settings activity panel for provider limit hits, Codex reset-credit use, natural quota renewals, purchased-credit balance changes, and current observed balances. Codex reset allowance is shown beside its live plan without treating subscription capacity as currency spend.
 - Explicit Overview and Threads navigation, preserving the conventional conversation interface as a secondary tab rather than the product's default mental model.
+- Activity-first Threads sidebar with a persistent local “last opened by you” signal: the latest user-interacted conversation stays first, recently updated/actionable conversations are highlighted under **Recent & active**, and dormant history is separated under **Earlier threads**. Provider and search filters apply consistently to both lanes.
 - Threads sidebar ordered globally by the latest known user or agent message across providers; project groups and conversations move together as activity changes, with compact logo filters for All, Codex, Claude Code, and Hermes.
 - Managed Codex conversations through Codex app-server, authenticated by the existing Codex installation.
 - Managed Hermes conversations through Hermes ACP, including streamed messages, tool activity, cancellation, and permission requests.
@@ -57,7 +58,7 @@ This increment is deliberately personal and local. It adds the first full AgentB
 - Read-only import of the eight most recently active Codex desktop tasks from Codex's local index.
 - Direct `codex://threads/<id>` navigation back to imported Codex desktop tasks.
 - Session cards named from the active task, provider surface, or meaningful project instead of the macOS account folder.
-- Lifecycle events normalized into running, waiting, attention, idle, and ended states. A completed managed turn is idle/done, not red — a thread only signals "needs you" when it is genuinely blocked on a pending approval. Thread state has a single resolver (`WorkspaceService.effectiveState`), so live snapshots, the thread list, and per-thread reads can no longer disagree; resolving an approval immediately clears the "needs you" signal.
+- Lifecycle events normalized into running, waiting, attention, idle, and ended states. A completed managed turn is idle/done, not red. The provider-neutral resolver is shared by workspace cards, transcript headers, compact controller, and APC LEDs: explicit approval/user-input signals override a still-live provider process; known managed turns override stale hooks; passive Claude/Hermes transcript reads preserve live terminal hook state; lifecycle changes synchronize before rendering and resolving an approval immediately clears the signal.
 - Exact Ghostty pane focus when its TTY AppleScript API is available.
 - Localhost and simulator companion previews.
 - APC40 task activation is a complete context switch: exact thread selection, immediate preview rescan, automatic presentation on the configured preview display, and a right-side single-display fallback.
@@ -249,6 +250,16 @@ Last updated: 2026-07-23
 - [x] Existing task-label cache is applied before new external Codex sessions render and remains authoritative across subsequent provider-index refreshes.
 - [x] Codex usage discovery now finds the binary bundled inside ChatGPT.app, matching connector discovery instead of depending on a shell `codex` command.
 - [x] Overview quota meters retain the provider's real window duration and clearly distinguish a missing short-term window from a failed collector.
+- [x] Overview provider balance has a manual refresh control again, with disabled/spinning feedback while all provider collectors update.
+- [x] Claude quota collection now uses Claude Code's local status-line `rate_limits` telemetry instead of submitting `/usage` through print mode; the hook stores only normalized five-hour/seven-day percentages and reset times under `~/.agentbase/`.
+- [x] Claude quota cache validation rejects observations older than 24 hours, and Overview surfaces the collector's actionable reason in the row tooltip instead of implying a fabricated balance.
+- [x] Native four-screen first-run experience added: mysterious Welcome, local display-name capture, provider connection/first-task choice, and skippable MIDI controller discovery before Overview.
+- [x] Onboarding uses full-screen single decisions, oversized type, floating spatial objects, provider-specific connection cards, one dominant CTA, reduced-motion support, and the ambient game/instrument language recorded in `ART_DIRECTION.md`.
+- [x] Codex and Claude reuse their guided AgentBase authentication; Hermes opens its provider-owned local setup; Kimi Code is detected as an account-only connector and links to its official install path when absent.
+- [x] APC40 MKII and APC mini mk2 connection transitions automatically play one temporary cold Vibe composition, then restore truthful task LEDs.
+- [x] First-run state is local and replayable from Settings → Replay onboarding or `⌘⇧O`; `AGENTBASE_STATE_DIR` provides disposable isolated state for repeatable developer smokes.
+- [x] Thread composer now supports native file/folder selection plus Build, Plan, and Ask modes. Codex receives images and path mentions through app-server inputs; Claude uses its native planning permission mode where applicable; Hermes receives a compact provider-neutral local-context instruction.
+- [x] Codex user-message echoes reconcile against AgentBase's optimistic row by stable client ID or normalized text, so the temporary local message is replaced rather than briefly duplicated. Attachment and mode metadata survive the replacement.
 
 ### In progress
 
@@ -262,13 +273,16 @@ Last updated: 2026-07-23
 - [ ] Validate one real managed prompt and interrupt on each locally authenticated provider after the packaged app relaunch.
 - [ ] Explore a supported shared-host transport for live Codex desktop mirroring. Today AgentBase and Codex desktop share persisted task history, but their separate stdio app-server processes do not share the same in-memory active turn; reopen the task in Codex to refresh it after an AgentBase-owned turn.
 - [ ] Validate Codex and Hermes approval cards against a real tool permission request.
-- [ ] Obtain Claude quota windows: the current CLI treats `-p /usage` as a prompt (returns "Unknown skill: usage") and caches no quota windows on disk, so the collector now reports an explicit interactive-only reason and Overview shows local session activity instead of a fabricated percentage. Proper fix pending: scrape the interactive `/usage` TUI over a PTY (reuse the `claude_pty.py` login harness).
+- [ ] Restart Claude Code and send one real message so its newly installed AgentBase status-line bridge receives the first subscription `rate_limits` payload; confirm five-hour and seven-day balances appear after Overview refresh.
+- [ ] Run one human-paced onboarding pass from a clean profile, including Codex browser login, Claude embedded login, first-task creation, controller skip, and replay from Settings.
+- [ ] Physically repeat the arrival-light test with the APC mini mk2; automated coverage confirms the same 64-pad Vibe path, while the connected visual smoke used an APC40 MKII.
 - [ ] Use a thread's **Hand off →** action (or the near-limit banner) as the first live cross-provider takeover test now that Claude is connected.
 - [ ] Validate automatic handover regeneration against a real provider window crossing 85%, including reset-window deduplication.
 
 ### Next
 
 - [ ] Add a proper AgentBase application icon.
+- [ ] Replace terminal-owned Hermes and Kimi setup with guided provider-native browser/device-code ceremonies where their supported local protocols expose reliable completion callbacks.
 - [ ] Bundle a supported recording/transcription runtime so voice prompts do not depend on Homebrew tools in public builds.
 - [ ] Configure Apple notarization for distribution beyond the development Mac.
 - [ ] Add an in-app reconnect message when another older controller process owns port `47600`.
@@ -282,9 +296,11 @@ Last updated: 2026-07-23
 
 ### Verification
 
-- `npm test`: 59 tests passing, including cross-provider latest-message ordering, two smoothed native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
+- `npm test`: 73 tests passing, including activity-first thread ordering/recent separation, Codex optimistic-message reconciliation, native attachment/mode payloads, Claude status-line quota parsing/staleness, Claude long-context compaction/error guidance, provider connection commands including Kimi, MIDI arrival-light transition, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
 - Consumption-ledger regressions cover exact Codex reset-credit transitions, duplicate suppression, purchased-credit additions/consumption, and natural window renewal classification.
 - Vibe-sequence regressions verify both cold compositions, full 40/64-pad native layouts, temporal movement, minimum composition duration, and delta-frame smoothing.
+- Thread-order regressions verify latest-user-interaction priority, recent/archive separation, and provider/search filtering.
+- Turn-state regressions verify approval-over-running precedence, passive-terminal running/waiting preservation, completed-turn idle behavior, approval clearing, and stale Codex completion protection.
 - `npm run build`: production main, preload, and renderer bundles succeed.
 - Pad activation build verification confirms the renderer subscribes to hardware workspace selections, switches to Threads, resolves the selected ID through the existing workspace bridge, refreshes companion candidates, and exposes linked previews through the preload boundary.
 - Real Hermes transcript smoke renders at 15 px/26.1 px line height with four H2 sections, four H3 subsections, six ordered lists, six clickable links, four emphasized spans in the final message, and no visible raw `**` markers.
@@ -298,7 +314,7 @@ Last updated: 2026-07-23
 - Overview visual smoke uses 27 real local conversations and renders all three provider pads, one active Codex signal, Claude login-required state, Hermes ready state, four top metrics, create-task pad, and cross-provider mosaic.
 - Overview interaction smoke confirms a Codex provider pad preselects Codex in the task dialog, a mosaic card opens its exact conversation, and Overview/Threads tab switching works without creating or modifying a provider task.
 - Usage & Billing is isolated in Settings so Overview remains focused on agent providers, tasks, status, and hardware; the detailed three-provider quota board and persistent activity ledger retain their refresh behavior and data.
-- Live read-only quota smoke returned Codex's current weekly window successfully (50% used during verification). Claude's current local CLI exposed no usable non-interactive quota window, so its row falls back to locally indexed weekly activity after refresh.
+- Live read-only quota smoke returned Codex's current weekly window successfully. Claude Code 2.1.31 proved that `/usage` is an interactive-only subscription command and that `claude -p /usage` is not a safe quota API; AgentBase no longer executes it. The replacement status-line bridge passed a privacy smoke with synthetic limits and persisted no supplied transcript or token field. The real Claude balance will populate after the next response from a restarted subscription-authenticated Claude session.
 - The reported Hermes conversation was recovered directly from `state.db` with its complete 4,052-character assistant response; the normalized view contains 13 useful messages and no empty assistant placeholders.
 - Live bridge smoke: Codex app-server initialized and read this exact Codex task with 19 turns; Hermes ACP initialized as `hermes-agent` 0.19.0; Claude CLI authentication check correctly identified the currently invalid local login.
 - Cross-host Codex diagnostic confirmed the desktop host reports this task live while a separately spawned, read-only app-server reports it `notLoaded` and sees only the persisted checkpoint. The lifecycle fix therefore guarantees exact-turn state inside AgentBase and persisted transcript continuity; instantaneous mirroring into an already-open Codex desktop view remains a provider-host limitation.
@@ -316,6 +332,7 @@ Last updated: 2026-07-23
 - Latest thread-alias build is packaged at `release/mac-arm64/AgentBase.app`; the current Codex task ID has a persistent `AgentBase` alias in local preferences and task cache. Quit and reopen the app once to load the new bundle.
 - Live Codex quota verification through the bundled ChatGPT binary returned Plus plan data with a 7-day window at 97% used; the provider response currently contains no secondary/short-term window, which the Overview now reports explicitly.
 - Post-reset packaged runtime verification recorded the reported limit hit, exact one-credit reset transition (97% → 0%, available resets 1 → 0), and subsequent 2% consumption in the renewed Codex window. The app is healthy at `/health`, and the ledger persisted across the packaged-app restart.
+- Isolated first-run visual smokes at 1420×880 verified the Welcome, four-provider connection field, and connected-controller screens. The real APC40 MKII was detected as 40 pads ready and played the new arrival composition; the same transition is unit-covered for the native APC mini mk2 64-pad path.
 
 ## Local development
 
@@ -336,6 +353,12 @@ Run tests and build verification:
 npm test
 npm run build
 ```
+
+Replay onboarding without changing any provider account or conversation data:
+
+- In the app: **Settings → Replay onboarding**
+- From anywhere in the workspace: `⌘⇧O`
+- For an isolated developer smoke: launch with `AGENTBASE_STATE_DIR=/tmp/your-agentbase-smoke`
 
 ## Local data and permissions
 

@@ -7,6 +7,9 @@ import { AgentIcon } from './AgentIcon.jsx'
 import './workspace.css'
 import './auth.css'
 import './improve.css'
+import './onboarding.css'
+import './composer-controls.css'
+import { organizeThreads } from './thread-order.mjs'
 
 const stateLabel = { running: 'Running', waiting: 'Your move', attention: 'Needs input', idle: 'Idle', history: 'History' }
 const providerCatalog = [
@@ -14,11 +17,22 @@ const providerCatalog = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'hermes', label: 'Hermes' }
 ]
+const onboardingProviderCatalog = [
+  ...providerCatalog,
+  { id: 'kimi', label: 'Kimi Code' }
+]
+const providerInstallUrls = {
+  codex: 'https://developers.openai.com/codex/cli/',
+  claude: 'https://docs.anthropic.com/en/docs/claude-code/setup',
+  hermes: 'https://github.com/NousResearch/hermes-agent',
+  kimi: 'https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html'
+}
 
 // A provider that can receive a handed-off task, near-limit threshold matching
 // the main-process HandoverService.
 const HANDOVER_PROVIDERS = ['codex', 'claude', 'hermes']
 const HANDOVER_THRESHOLD = 85
+const THREAD_INTERACTIONS_KEY = 'agentbase.thread-interactions.v1'
 
 function handoverLabel (provider, fallback) {
   return provider === 'claude' ? 'Claude' : (fallback || provider)
@@ -178,7 +192,8 @@ function Approval ({ approval, onResolve }) {
 }
 
 function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
-  const [provider, setProvider] = useState(initialProvider || connectors.find((item) => item.manageable !== false)?.id || 'codex')
+  const taskConnectors = connectors.filter((item) => item.taskCapable !== false && providerCatalog.some((provider) => provider.id === item.id))
+  const [provider, setProvider] = useState(initialProvider || taskConnectors.find((item) => item.manageable !== false)?.id || 'codex')
   const [cwd, setCwd] = useState('/Users/samori')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
@@ -191,7 +206,7 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
       <form className="new-task" onSubmit={submit}>
         <header><div><span>New managed task</span><h2>Put an agent to work</h2></div><button type="button" onClick={onClose}>×</button></header>
         <label>Provider<div className="provider-choices">
-          {connectors.map((connector) => <button key={connector.id} type="button" data-selected={provider === connector.id} disabled={!connector.installed || connector.manageable === false} title={connector.authMessage || ''} onClick={() => setProvider(connector.id)}><AgentIcon agent={connector.id} /><span>{connector.label}<small>{!connector.installed ? 'Not installed' : connector.manageable === false ? 'Run /login first' : 'Uses local login'}</small></span></button>)}
+          {taskConnectors.map((connector) => <button key={connector.id} type="button" data-selected={provider === connector.id} disabled={!connector.installed || connector.manageable === false} title={connector.authMessage || ''} onClick={() => setProvider(connector.id)}><AgentIcon agent={connector.id} /><span>{connector.label}<small>{!connector.installed ? 'Not installed' : connector.manageable === false ? 'Run /login first' : 'Uses local login'}</small></span></button>)}
         </div></label>
         <label>Working folder<input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/path/to/project" /></label>
         <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should this agent do? (optional)" autoFocus /></label>
@@ -202,9 +217,12 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
 }
 
 function compactUsage (usage, providerId) {
-  const windows = usage?.providers?.[providerId]?.windows || []
+  const provider = usage?.providers?.[providerId]
+  const windows = provider?.windows || []
   const window = windows.find((item) => item.period === 'short') || windows[0]
-  return Number.isFinite(window?.usedPercent) ? `${Math.round(window.usedPercent)}% used` : 'Local account'
+  if (Number.isFinite(window?.usedPercent)) return `${Math.round(window.usedPercent)}% used`
+  if (provider?.activity?.available) return `${provider.activity.weekly.messages} msgs this week`
+  return 'Local account'
 }
 
 function resetLabel (window) {
@@ -258,6 +276,10 @@ function ConsumptionBoard ({ sessions, usage, onRefresh }) {
           const week = provider?.windows?.find((window) => window.period === 'week' && /all models|weekly/i.test(window.label)) || provider?.windows?.find((window) => window.period === 'week')
           const noQuotaData = provider?.status === 'error' && !provider?.windows?.length
           const localActivity = activityFor(providerId)
+          // Claude exposes no subscription quota to local tools, so show its own
+          // recorded weekly activity (messages/sessions) instead of a quota meter.
+          const usageActivity = provider?.activity
+          if (usageActivity?.available && !short && !week) return <div className="consumption-row" key={providerId} data-provider={providerId} title="Claude does not expose subscription quota to local tools; showing your recorded Claude activity this week."><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude'}</b><small>Local activity · no quota API</small></div><div className="consumption-activity"><b>{usageActivity.weekly.messages}</b><span>messages this week</span></div><div className="consumption-activity"><b>{usageActivity.weekly.sessions}</b><span>sessions this week</span></div></div>
           if (noQuotaData) return <div className="consumption-row" key={providerId} data-provider={providerId} title={provider?.error || ''}><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude'}</b><small>Quota unavailable · local activity</small></div><div className="consumption-activity"><b>{localActivity.weekly}</b><span>sessions this week</span></div><div className="consumption-activity"><b>{localActivity.total}</b><span>tracked locally</span></div></div>
           const providerDetail = provider?.status === 'error'
             ? 'Unavailable'
@@ -307,19 +329,29 @@ function SpendActivity ({ ledger }) {
   )
 }
 
-function OverviewUsageBalance ({ sessions, usage }) {
+function OverviewUsageBalance ({ sessions, usage, onRefresh }) {
   const providerRows = ['codex', 'claude', 'hermes'].map((providerId) => {
     const provider = usage?.providers?.[providerId]
     const window = provider?.windows?.find((candidate) => candidate.period === 'week') || provider?.windows?.[0]
     const used = Number.isFinite(window?.usedPercent) ? Math.round(window.usedPercent) : null
     const recent = sessions.filter((session) => session.agent === providerId && Number(session.updatedAt || session.lastSeen || 0) >= Date.now() - 7 * 24 * 60 * 60 * 1000).length
-    return { providerId, provider, used, recent }
+    // Claude exposes no quota %, so show its real recorded activity this week.
+    const activity = provider?.activity
+    const unavailable = used === null && provider?.error
+    const detail = used !== null
+      ? `${provider?.plan || 'Subscription'} · ${100 - used}% left`
+      : activity?.available
+        ? `${activity.weekly.messages} messages · ${activity.weekly.sessions} sessions this week`
+        : unavailable
+          ? provider.error
+          : `${recent} active this week`
+    return { providerId, provider, used, recent, detail, activity }
   })
   return (
     <section className="overview-usage">
-      <header><span>Provider balance</span><b>Capacity at a glance</b></header>
+      <header><div><span>Provider balance</span><b>Capacity at a glance</b></div><button type="button" aria-label="Refresh provider usage" title="Refresh provider usage" data-refreshing={Boolean(usage?.refreshing)} disabled={Boolean(usage?.refreshing)} onClick={onRefresh}>↻</button></header>
       <div>
-        {providerRows.map(({ providerId, provider, used, recent }) => <div className="overview-usage__row" key={providerId} data-provider={providerId}><span className="overview-usage__icon"><AgentIcon agent={providerId} /></span><div><b>{providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude' : 'Hermes'}</b><small>{used === null ? `${recent} active this week` : `${provider?.plan || 'Subscription'} · ${100 - used}% left`}</small></div><strong>{used === null ? '—' : `${used}%`}</strong><i><em style={{ '--overview-usage': `${used || 0}%` }} /></i></div>)}
+        {providerRows.map(({ providerId, used, detail, activity }) => <div className="overview-usage__row" key={providerId} data-provider={providerId} title={detail}><span className="overview-usage__icon"><AgentIcon agent={providerId} /></span><div><b>{providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude' : 'Hermes'}</b><small>{detail}</small></div><strong>{used !== null ? `${used}%` : activity?.available ? activity.weekly.messages : '—'}</strong><i><em style={{ '--overview-usage': `${used || 0}%` }} /></i></div>)}
       </div>
       <footer>Detailed limits and spend are in Settings</footer>
     </section>
@@ -353,7 +385,7 @@ function ThreadMosaicCard ({ session, index, onOpen }) {
   )
 }
 
-function Dashboard ({ sessions, connectors, usage, midi, onCreate, onOpenThreads, onOpenThread, onVibe }) {
+function Dashboard ({ sessions, connectors, usage, midi, onCreate, onOpenThreads, onOpenThread, onVibe, onRefreshUsage }) {
   const live = sessions.filter((session) => !session.history)
   const active = live.filter((session) => session.state === 'running').length
   const needsInput = live.filter((session) => ['waiting', 'attention'].includes(session.state)).length
@@ -366,7 +398,7 @@ function Dashboard ({ sessions, connectors, usage, midi, onCreate, onOpenThreads
       <div className="dashboard-scroll">
         <section className="dashboard-hero">
           <div className="dashboard-hero__copy"><span className="eyebrow"><i /> Local intelligence, online</span><h1>Your agents,<br /><em>in one field.</em></h1><p>See who is working, who needs you, and where to send the next idea—without starting from a chat list.</p><div className="dashboard-statline"><span><b>{active}</b> active</span><span><b>{needsInput}</b> need input</span><span><b>{sessions.length}</b> threads</span><span><b>{midi.connected ? 'On' : 'Off'}</b> {midi.shortModel || 'APC'}</span></div></div>
-          <OverviewUsageBalance sessions={sessions} usage={usage} />
+          <OverviewUsageBalance sessions={sessions} usage={usage} onRefresh={onRefreshUsage} />
         </section>
 
         <section className="provider-field" aria-label="Agent providers">
@@ -463,7 +495,109 @@ function UsageSettings ({ sessions, usage, ledger, onRefresh }) {
   )
 }
 
-function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, midi, initialSection = 'providers', onRefresh, onRefreshUsage, onConnect, onInstallHooks, onMidiProfile }) {
+function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect, onRefresh, onInstallHooks, onCreate, onFinish }) {
+  const [name, setName] = useState(state.name || '')
+  const [busyProvider, setBusyProvider] = useState('')
+  const [notice, setNotice] = useState('')
+  const step = Math.max(0, Math.min(3, Number(state.step) || 0))
+
+  useEffect(() => { setName(state.name || '') }, [state.name])
+  useEffect(() => {
+    const refresh = () => onRefresh()
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [onRefresh])
+
+  const advance = async (next, patch = {}) => {
+    const saved = await onSave({ ...patch, step: next })
+    if (saved?.name !== undefined) setName(saved.name)
+  }
+  const connect = async (provider) => {
+    const connector = connectors.find((item) => item.id === provider.id)
+    if (!connector?.installed) {
+      await window.controller.openExternalUrl(providerInstallUrls[provider.id])
+      setNotice(`${provider.label} installation guide opened. Return here when the CLI is installed.`)
+      return
+    }
+    if (connector.manageable !== false && provider.id !== 'kimi') return
+    setBusyProvider(provider.id)
+    setNotice('')
+    try {
+      const result = await onConnect(provider.id)
+      setNotice(result?.mode === 'browser'
+        ? 'Finish signing in with ChatGPT in your browser. AgentBase will confirm it here.'
+        : result?.mode === 'embedded'
+            ? 'Complete Claude’s secure connection in AgentBase.'
+            : `${provider.label} setup opened in Terminal. Complete the provider’s own login, then return here.`)
+    } catch (error) {
+      setNotice(error.message)
+    } finally {
+      setBusyProvider('')
+    }
+  }
+
+  const providerState = (provider) => {
+    const connector = connectors.find((item) => item.id === provider.id)
+    const auth = providerAuth?.[provider.id]
+    if (!connector) return { tone: 'working', label: 'Checking this Mac…', cta: 'Checking…' }
+    if (!connector?.installed) return { tone: 'missing', label: 'Install required', cta: `Install ${provider.label}` }
+    if (auth?.status === 'waiting' || ['starting', 'interactive'].includes(auth?.status)) return { tone: 'working', label: 'Connecting…', cta: 'Connecting…' }
+    if (auth?.status === 'connected' || (connector.manageable !== false && provider.id !== 'kimi')) return { tone: 'connected', label: 'Connected', cta: 'Connected' }
+    if (provider.id === 'kimi') return { tone: 'ready', label: 'CLI detected', cta: 'Open Kimi login' }
+    return { tone: 'ready', label: 'Ready to connect', cta: 'Connect account' }
+  }
+
+  return (
+    <main className="onboarding-shell" data-step={step}>
+      <div className="onboarding-ambient" aria-hidden="true"><i /><i /><i /></div>
+      <header className="onboarding-topbar">
+        <div className="onboarding-brand"><span>AB</span><b>AgentBase</b></div>
+        <div className="onboarding-progress" aria-label={`Step ${step + 1} of 4`}>{[0, 1, 2, 3].map((value) => <i key={value} data-active={value <= step} />)}</div>
+        <small>{String(step + 1).padStart(2, '0')} / 04</small>
+      </header>
+
+      {step === 0 && <section className="onboarding-stage onboarding-welcome">
+        <div className="onboarding-orb" aria-hidden="true"><span>AB</span><i /><i /></div>
+        <div className="onboarding-copy"><span className="eyebrow">Your agents are already out there</span><h1>Bring them into<br /><em>one field.</em></h1><p>AgentBase turns every coding agent and physical controller into one calm, playable workspace.</p></div>
+        <button className="onboarding-primary" type="button" onClick={() => advance(1)}>Enter AgentBase <span>→</span></button>
+      </section>}
+
+      {step === 1 && <section className="onboarding-stage onboarding-name">
+        <div className="onboarding-symbol" aria-hidden="true"><span>⌁</span></div>
+        <div className="onboarding-copy"><span className="eyebrow">First, an introduction</span><h1>How should I<br /><em>call you?</em></h1><p>This stays on this Mac and is used only to make AgentBase feel like your space.</p></div>
+        <form onSubmit={(event) => { event.preventDefault(); if (name.trim()) advance(2, { name }) }}>
+          <input value={name} autoFocus maxLength={48} autoComplete="name" onChange={(event) => setName(event.target.value)} placeholder="Your name" aria-label="Your name" />
+          <button className="onboarding-primary" type="submit" disabled={!name.trim()}>Continue <span>→</span></button>
+        </form>
+      </section>}
+
+      {step === 2 && <section className="onboarding-stage onboarding-providers">
+        <div className="onboarding-copy"><span className="eyebrow">Your existing intelligence</span><h1>Connect your <em>agents.</em></h1><p>AgentBase uses each provider’s official local login. Your passwords and tokens never enter AgentBase.</p></div>
+        <div className="onboarding-provider-grid">
+          {onboardingProviderCatalog.map((provider) => {
+            const status = providerState(provider)
+            return <article key={provider.id} data-provider={provider.id} data-tone={status.tone}><span className="onboarding-provider-icon"><AgentIcon agent={provider.id} /></span><div><h2>{provider.label}</h2><p>{provider.id === 'codex' ? 'ChatGPT browser sign-in' : provider.id === 'claude' ? 'Claude subscription sign-in' : provider.id === 'hermes' ? 'Local Hermes provider' : 'Kimi Code account'}</p><small><i />{status.label}</small></div><button type="button" disabled={status.tone === 'connected' || status.tone === 'working' || busyProvider === provider.id} onClick={() => connect(provider)}>{busyProvider === provider.id ? 'Opening…' : status.cta}</button></article>
+          })}
+        </div>
+        {notice && <div className="onboarding-notice"><span>i</span>{notice}</div>}
+        <footer className="onboarding-actions"><button className="onboarding-secondary" type="button" disabled={!connectors.some((item) => item.taskCapable !== false && item.manageable !== false)} onClick={onCreate}>＋ Create first task</button><button className="onboarding-primary" type="button" onClick={() => { onInstallHooks(); advance(3) }}>Continue <span>→</span></button></footer>
+      </section>}
+
+      {step === 3 && <section className="onboarding-stage onboarding-controller" data-connected={Boolean(midi.connected)}>
+        <div className="onboarding-copy"><span className="eyebrow">Optional physical layer</span><h1>Connect your <em>controller.</em></h1><p>Plug in an APC40 MKII or APC mini mk2. AgentBase detects it automatically and answers with light.</p></div>
+        <div className="onboarding-hardware">
+          <div className="onboarding-pad-field" data-model={midi.activeProfile || 'waiting'} aria-hidden="true">
+            {Array.from({ length: midi.activeProfile === 'apc40-mkii' ? 40 : 64 }, (_, index) => <i key={index} style={{ '--pad-index': index }} />)}
+          </div>
+          <div className="onboarding-hardware-status"><span><i /></span><div><b>{midi.connected ? `${midi.shortModel} is alive` : 'Listening for MIDI…'}</b><small>{midi.connected ? `${midi.device} · ${midi.padCount} pads ready` : 'Connect by USB. You can also do this later in Settings.'}</small></div></div>
+        </div>
+        <footer className="onboarding-actions">{!midi.connected && <button className="onboarding-secondary" type="button" onClick={onFinish}>Skip for now</button>}<button className="onboarding-primary" type="button" onClick={onFinish}>{midi.connected ? 'Enter overview' : 'Continue without controller'} <span>→</span></button></footer>
+      </section>}
+    </main>
+  )
+}
+
+function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, midi, initialSection = 'providers', onRefresh, onRefreshUsage, onConnect, onInstallHooks, onMidiProfile, onReplayOnboarding }) {
   const [checking, setChecking] = useState(false)
   const [connecting, setConnecting] = useState('')
   const [notice, setNotice] = useState('')
@@ -534,7 +668,7 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
     <section className="settings-page">
       <header className="settings-topbar"><div><span>Settings</span><h1>{section === 'providers' ? 'AI provider accounts' : section === 'usage' ? 'Usage & billing' : 'MIDI hardware'}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
       <div className="settings-scroll">
-        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'usage' ? 'Measured honestly' : 'One controller at a time'}</b><p>{section === 'providers' ? 'AgentBase delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : 'AgentBase opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div></aside>
+        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart the first-run experience</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'usage' ? 'Measured honestly' : 'One controller at a time'}</b><p>{section === 'providers' ? 'AgentBase delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : 'AgentBase opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div></aside>
         <main className="provider-settings">
           {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : <>
           <div className="provider-settings__intro"><span className="eyebrow"><i /> Local account bridge</span><h2>Connect the agents you already use.</h2><p>Each provider keeps ownership of authentication. AgentBase checks the installed CLI, opens its official login flow, and uses that existing local session.</p></div>
@@ -581,14 +715,20 @@ export default function Workspace () {
   const [usage, setUsage] = useState(null)
   const [ledger, setLedger] = useState(null)
   const [companions, setCompanions] = useState({ bySession: {} })
+  const [onboarding, setOnboarding] = useState(null)
   const [view, setView] = useState('overview')
   const [settingsSection, setSettingsSection] = useState('providers')
   const [selectedId, setSelectedId] = useState('')
   const [thread, setThread] = useState(null)
   const [loading, setLoading] = useState(false)
   const [composer, setComposer] = useState('')
+  const [attachments, setAttachments] = useState([])
+  const [chatMode, setChatMode] = useState('build')
   const [query, setQuery] = useState('')
   const [providerFilter, setProviderFilter] = useState('all')
+  const [threadInteractions, setThreadInteractions] = useState(() => {
+    try { return JSON.parse(window.localStorage.getItem(THREAD_INTERACTIONS_KEY) || '{}') } catch { return {} }
+  })
   const [newTask, setNewTask] = useState(false)
   const [newTaskProvider, setNewTaskProvider] = useState('')
   const transcriptRef = useRef(null)
@@ -601,6 +741,12 @@ export default function Workspace () {
       if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'v') {
         event.preventDefault()
         window.controller.midiVibe()
+      } else if (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault()
+        window.controller.resetOnboarding().then((state) => {
+          setOnboarding(state)
+          setView('overview')
+        })
       }
     }
     window.addEventListener('keydown', triggerVibe)
@@ -608,6 +754,7 @@ export default function Workspace () {
   }, [])
 
   useEffect(() => {
+    window.controller.getOnboarding().then(setOnboarding)
     Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getProviderAuth(), window.controller.getHandovers(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getUsage(), window.controller.getConsumptionLedger(), window.controller.getCompanions()]).then(([state, agents, authState, handoverState, hardware, voiceState, usageState, ledgerState, companionState]) => {
       setSessions(state); setConnectors(agents); setProviderAuth(authState); setHandovers(handoverState); setMidi(hardware); setVoice(voiceState); setUsage(usageState); setLedger(ledgerState); setCompanions(companionState)
       if (state[0]) setSelectedId(state[0].id)
@@ -630,10 +777,21 @@ export default function Workspace () {
 
   useEffect(() => {
     if (!selectedId || view !== 'threads') { if (!selectedId) setThread(null); return }
+    setThreadInteractions((current) => {
+      const next = { ...current, [selectedId]: Date.now() }
+      const bounded = Object.fromEntries(Object.entries(next).sort((left, right) => Number(right[1]) - Number(left[1])).slice(0, 200))
+      try { window.localStorage.setItem(THREAD_INTERACTIONS_KEY, JSON.stringify(bounded)) } catch {}
+      return bounded
+    })
     window.controller.selectSession(selectedId)
     setLoading(true)
     window.controller.getThread(selectedId).then(setThread).catch((error) => setThread({ id: selectedId, messages: [], error: error.message })).finally(() => setLoading(false))
   }, [selectedId, view])
+
+  useEffect(() => {
+    setAttachments([])
+    setChatMode('build')
+  }, [selectedId])
 
   useEffect(() => {
     if (!selectedId && sessions[0]) setSelectedId(sessions[0].id)
@@ -643,31 +801,32 @@ export default function Workspace () {
     if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
   }, [thread?.messages?.length, thread?.messages?.at(-1)?.text])
 
-  const grouped = useMemo(() => {
-    const needle = query.toLowerCase()
-    const result = new Map()
-    const recentFirst = [...sessions].sort((left, right) => Number(right.updatedAt || right.lastSeen || 0) - Number(left.updatedAt || left.lastSeen || 0))
-    for (const session of recentFirst) {
-      if (providerFilter !== 'all' && session.agent !== providerFilter) continue
-      if (needle && !`${sessionTitle(session)} ${session.project} ${session.agent}`.toLowerCase().includes(needle)) continue
-      const key = session.project || 'Local agents'
-      if (!result.has(key)) result.set(key, [])
-      result.get(key).push(session)
-    }
-    return [...result]
-  }, [sessions, query, providerFilter])
+  const threadGroups = useMemo(() => organizeThreads(
+    sessions.map((session) => ({ ...session, task: sessionTitle(session) })),
+    { interactions: threadInteractions, provider: providerFilter, query }
+  ), [sessions, query, providerFilter, threadInteractions])
   const selectedConnector = connectors.find((connector) => connector.id === thread?.provider)
   const canManage = Boolean(thread?.managed && selectedConnector?.manageable !== false)
   const canSteer = Boolean(canManage && thread?.provider === 'codex' && thread?.running)
   const selectedPreview = companions?.bySession?.[selectedId]
+  const saveOnboarding = async (patch) => {
+    const next = await window.controller.saveOnboarding(patch)
+    setOnboarding(next)
+    return next
+  }
 
   const send = async () => {
-    const value = composer.trim()
+    const value = composer.trim() || (attachments.length ? 'Please inspect the attached context.' : '')
     if (!value || !selectedId || (thread?.running && !canSteer)) return
+    const selectedAttachments = attachments
+    const selectedMode = chatMode
     setComposer('')
+    setAttachments([])
     try {
-      setThread(await window.controller.sendThreadPrompt(selectedId, value))
+      setThread(await window.controller.sendThreadPrompt(selectedId, value, { attachments: selectedAttachments, mode: selectedMode }))
     } catch (error) {
+      setComposer((current) => current || value)
+      setAttachments((current) => current.length ? current : selectedAttachments)
       try {
         const latest = await window.controller.getThread(selectedId)
         setThread({ ...latest, error: error.message })
@@ -676,10 +835,20 @@ export default function Workspace () {
       }
     }
   }
+  const chooseContext = async () => {
+    const selected = await window.controller.chooseThreadContext()
+    setAttachments((current) => {
+      const paths = new Map(current.map((item) => [item.path, item]))
+      for (const item of selected || []) paths.set(item.path, item)
+      return [...paths.values()].slice(0, 12)
+    })
+  }
 
   const create = async (options) => {
     const id = await window.controller.createManagedThread(options)
-    setNewTask(false); setSelectedId(id); setView('threads')
+    setNewTask(false); setSelectedId(id)
+    if (onboarding && !onboarding.completed) await saveOnboarding({ step: 3 })
+    else setView('threads')
   }
 
   const openCreate = (provider = '') => { setNewTaskProvider(provider); setNewTask(true) }
@@ -691,6 +860,24 @@ export default function Workspace () {
     if (result?.targetSessionId) setSelectedId(result.targetSessionId)
   }
 
+  if (onboarding === null) {
+    return <main className="onboarding-loading"><span>AB</span><p>Assembling your field…</p></main>
+  }
+
+  if (!onboarding.completed) {
+    const finishOnboarding = async () => {
+      await saveOnboarding({ completed: true, step: 3 })
+      setView('overview')
+    }
+    return (
+      <>
+        <Onboarding state={onboarding} connectors={connectors} providerAuth={providerAuth} midi={midi} onSave={saveOnboarding} onConnect={(id) => window.controller.connectProvider(id)} onRefresh={() => window.controller.refreshConnectors()} onInstallHooks={() => window.controller.installHooks()} onCreate={() => setNewTask(true)} onFinish={finishOnboarding} />
+        {providerAuth.claude && providerAuth.claude.status !== 'idle' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => setProviderAuth((current) => ({ ...current, claude: null }))} />}
+        {newTask && <NewTask connectors={connectors} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} />}
+      </>
+    )
+  }
+
   return (
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
@@ -699,15 +886,16 @@ export default function Workspace () {
         <button className="new-task-button" type="button" onClick={() => openCreate()}><span>＋</span> New agent task <kbd>⌘N</kbd></button>
         {view === 'threads' ? <><div className="thread-provider-filters" role="group" aria-label="Filter threads by provider"><button type="button" data-selected={providerFilter === 'all'} onClick={() => setProviderFilter('all')} title="All providers" aria-label="All providers"><span>✦</span></button>{providerCatalog.map((provider) => <button type="button" key={provider.id} data-provider={provider.id} data-selected={providerFilter === provider.id} onClick={() => setProviderFilter(provider.id)} title={provider.label} aria-label={`Show ${provider.label} threads`}><AgentIcon agent={provider.id} /></button>)}</div><div className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" /></div>
         <nav className="thread-list">
-          {grouped.map(([project, projectSessions]) => <section key={project}><h3>{project}<span>{projectSessions.length}</span></h3>{projectSessions.map((session) => <button type="button" key={session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{stateLabel[session.state] || session.state} · {session.agent}</small></span></button>)}</section>)}
-          {!grouped.length && <div className="sidebar-empty">{sessions.length ? 'No threads match this provider and search.' : 'No live tasks yet. Start one here or install hooks to observe terminal sessions.'}</div>}
+          {threadGroups.recent.length > 0 && <section className="thread-group thread-group--recent"><h3>Recent & active<span>{threadGroups.recent.length}</span></h3>{threadGroups.recent.map((session) => <button type="button" key={session.id} data-recent="true" data-latest={threadGroups.latestInteractedId === session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{stateLabel[session.state] || session.state} · {session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
+          {threadGroups.earlier.length > 0 && <section className="thread-group thread-group--earlier"><h3>Earlier threads<span>{threadGroups.earlier.length}</span></h3>{threadGroups.earlier.map((session) => <button type="button" key={session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
+          {!threadGroups.recent.length && !threadGroups.earlier.length && <div className="sidebar-empty">{sessions.length ? 'No threads match this provider and search.' : 'No live tasks yet. Start one here or install hooks to observe terminal sessions.'}</div>}
         </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage provider accounts while credentials remain in their native local stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
         <footer className="hardware"><i data-connected={midi.connected} /><div><b>{midi.shortModel || 'APC controller'}</b><span>{midi.connected ? `Connected · ${midi.device || 'ready'}` : 'Waiting for hardware'}</span></div><button type="button" onClick={() => { setSettingsSection('midi'); setView('settings') }}>Choose</button></footer>
       </aside>
 
       {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in AgentBase.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. AgentBase is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => setProviderAuth((current) => ({ ...current, codex: null }))}>×</button></div>}
       {providerAuth.claude && providerAuth.claude.status !== 'idle' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => setProviderAuth((current) => ({ ...current, claude: null }))} />}
-      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} /> : <><section className="workspace-main">
+      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
           <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef}>
@@ -724,8 +912,19 @@ export default function Workspace () {
             {thread?.error && <div className="thread-error"><span>!</span>{thread.error}</div>}
             {thread?.approvals?.map((approval) => <Approval key={approval.id} approval={approval} onResolve={(...args) => window.controller.resolveApproval(...args)} />)}
             <div className="composer" data-running={thread?.running}>
+              <div className="composer-tools">
+                <button type="button" className="composer-attach" disabled={!canManage} onClick={chooseContext} title="Attach files or folders"><span>＋</span> Attach</button>
+                <div className="composer-modes" role="group" aria-label="Agent mode">
+                  {[
+                    { id: 'build', label: 'Build', title: 'Implement and edit' },
+                    { id: 'plan', label: 'Plan', title: 'Inspect and make a plan without editing' },
+                    { id: 'ask', label: 'Ask', title: 'Answer and explain without editing' }
+                  ].map((mode) => <button type="button" key={mode.id} data-selected={chatMode === mode.id} onClick={() => setChatMode(mode.id)} title={thread?.running ? `${mode.title}. The current Codex turn keeps its existing mode while steering.` : mode.title}>{mode.label}</button>)}
+                </div>
+              </div>
+              {attachments.length > 0 && <div className="composer-attachments">{attachments.map((item) => <span key={item.path} title={item.path}><i>⌁</i><b>{item.path.split('/').filter(Boolean).at(-1) || item.path}</b><button type="button" aria-label={`Remove ${item.path}`} onClick={() => setAttachments((current) => current.filter((candidate) => candidate.path !== item.path))}>×</button></span>)}</div>}
               <textarea value={composer} disabled={!canManage} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } }} placeholder={!thread?.managed ? 'This provider session is read-only' : selectedConnector?.manageable === false ? `${thread.providerLabel} needs /login before it can resume` : `Message ${thread.providerLabel || 'agent'}…`} />
-              <div><span>{canSteer ? 'Codex is working · send to steer this turn' : thread?.running ? 'Agent is working…' : 'Enter to send · Shift+Enter for newline'}</span>{canSteer && <button className="send" type="button" disabled={!composer.trim()} title="Add guidance to the running Codex turn" onClick={send}>↑</button>}{thread?.running ? <button className="stop" type="button" title="Stop this turn" onClick={() => window.controller.interruptThread(selectedId)}>■</button> : !canSteer && <button className="send" type="button" disabled={!composer.trim()} onClick={send}>↑</button>}</div>
+              <div><span>{canSteer ? 'Codex is working · send to steer this turn' : thread?.running ? 'Agent is working…' : `${chatMode === 'plan' ? 'Plan mode · planning requested' : chatMode === 'ask' ? 'Ask mode · answer only' : 'Build mode · implementation allowed'} · Enter to send`}</span>{canSteer && <button className="send" type="button" disabled={!composer.trim() && !attachments.length} title="Add guidance to the running Codex turn" onClick={send}>↑</button>}{thread?.running ? <button className="stop" type="button" title="Stop this turn" onClick={() => window.controller.interruptThread(selectedId)}>■</button> : !canSteer && <button className="send" type="button" disabled={!composer.trim() && !attachments.length} onClick={send}>↑</button>}</div>
             </div>
           </div>
         </>}

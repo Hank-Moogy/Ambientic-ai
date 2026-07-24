@@ -33,3 +33,20 @@
   color: var(--filter-accent);
   box-shadow: 0 0 16px color-mix(in srgb, var(--filter-accent) 9%, transparent);
 }
+
+.thread-group--recent {
+  margin: 7px 0 11px;
+  padding: 3px 4px 7px;
+  border: 1px solid #33423c;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #16201c99, #12171a66);
+}
+
+.thread-list .thread-group--recent h3 { margin-top: 9px; color: #73b990; }
+.thread-list button[data-recent="true"] { position: relative; background: #19221f88; }
+.thread-list button[data-recent="true"]:hover { background: #202d28; }
+.thread-list button[data-latest="true"] { background: #22312b; box-shadow: inset 0 0 0 1px #416453; }
+.thread-list button[data-latest="true"]::after { content: "Latest"; position: absolute; top: 7px; right: 8px; color: #76dba0; font-size: 7px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.thread-list button[data-latest="true"] .thread-list__copy { padding-right: 34px; }
+.thread-group--earlier { opacity: .82; }
+.thread-group--earlier:hover { opacity: 1; }

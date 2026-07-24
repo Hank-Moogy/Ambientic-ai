@@ -10,7 +10,7 @@ import {
   miniSelectedSessionForRecordColumn
 } from './apc-mini-mk2.mjs'
 import { APC40_ACTIONS, midiControlForMessage, normalizeMappings } from './midi-mappings.mjs'
-import { VIBE_SEQUENCE, VIBE_VARIANTS, changedVibeMessages, vibeLedMessages } from './vibe-sequence.mjs'
+import { VIBE_SEQUENCE, VIBE_VARIANTS, changedVibeMessages, shouldCelebrateMidiConnection, vibeLedMessages } from './vibe-sequence.mjs'
 
 const RECONNECT_MS = 3000
 const AUTO_PROFILE = 'auto'
@@ -121,8 +121,13 @@ export function createMidiController (store, {
 
   function setStatus (next) {
     if (JSON.stringify(next) === JSON.stringify(status)) return
+    const celebrate = shouldCelebrateMidiConnection(status, next)
     status = next
     notify()
+    if (celebrate) {
+      const timer = setTimeout(() => triggerVibe(), 180)
+      if (timer.unref) timer.unref()
+    }
   }
 
   function saveMappings () {

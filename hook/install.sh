@@ -16,6 +16,8 @@ mkdir -p "$AGENTBASE_DIR"
 SRC_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cp "$SRC_DIR/controller-hook.py" "$AGENTBASE_DIR/hook.py"
 chmod +x "$AGENTBASE_DIR/hook.py"
+cp "$SRC_DIR/claude-statusline.py" "$AGENTBASE_DIR/claude-statusline.py"
+chmod +x "$AGENTBASE_DIR/claude-statusline.py"
 
 # Hermes loads a small, explicit local plugin so its native lifecycle callbacks
 # feed the same normalized hook used by Claude and Codex.
@@ -45,6 +47,7 @@ import json, os, shutil
 
 agentbase_dir = os.path.join(os.path.expanduser("~"), ".agentbase")
 hook = os.path.join(agentbase_dir, "hook.py")
+claude_statusline = os.path.join(agentbase_dir, "claude-statusline.py")
 legacy_hook = os.path.join(os.path.expanduser("~"), ".claude-controller", "hook.py")
 quoted = '"%s"' % hook
 
@@ -126,8 +129,26 @@ ok = []
 
 if "claude" in agents:
     try:
-        add_json_hooks(os.path.expanduser("~/.claude/settings.json"), quoted)
-        print("  ✓ Claude Code — ~/.claude/settings.json")
+        claude_settings_path = os.path.expanduser("~/.claude/settings.json")
+        add_json_hooks(claude_settings_path, quoted)
+        with open(claude_settings_path, encoding="utf-8") as f:
+            claude_settings = json.load(f)
+        current_statusline = claude_settings.get("statusLine")
+        if current_statusline is None:
+            claude_settings["statusLine"] = {
+                "type": "command",
+                "command": '"%s"' % claude_statusline,
+            }
+            backup(claude_settings_path)
+            with open(claude_settings_path, "w", encoding="utf-8") as f:
+                json.dump(claude_settings, f, indent=2)
+            statusline_note = "quota bridge installed"
+        elif (isinstance(current_statusline, dict) and
+              claude_statusline in str(current_statusline.get("command", ""))):
+            statusline_note = "quota bridge active"
+        else:
+            statusline_note = "existing status line preserved; quota bridge skipped"
+        print("  ✓ Claude Code — ~/.claude/settings.json (%s)" % statusline_note)
         ok.append("claude")
     except Exception as e:
         print("  ✗ Claude Code — %s" % e)

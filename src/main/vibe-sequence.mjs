@@ -11,6 +11,10 @@ export const VIBE_VARIANTS = [
   { id: 'cold-orbit', label: 'Cold orbit', tone: 'cold' }
 ]
 
+export function shouldCelebrateMidiConnection (previous, next) {
+  return !previous?.connected && Boolean(next?.connected)
+}
+
 const COLD_PALETTES = {
   'apc40-mkii': [37, 37, 41, 45, 45, 49, 53, 49, 45, 41, 33, 21, 33],
   [APC_MINI_MK2.ID]: [45, 45, 41, 49, 49, 53, 37, 53, 49, 41, 33, 21, 33]

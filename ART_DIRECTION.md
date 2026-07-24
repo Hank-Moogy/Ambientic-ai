@@ -44,6 +44,19 @@ The button identifies the queued and currently playing study. AgentBase sends on
 
 Vibe is an expressive test surface, not a task command. It must never select, start, stop, or alter an agent. The earlier hot-color Game of Life and illumination studies were removed because their hard on/off rhythm felt too stop-motion for AgentBase’s ambient direction.
 
+## First-run expression: Enter the field
+
+Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained four-step progress trace, floating symbols, and one unmistakable primary action.
+
+- Welcome is mysterious but immediately legible: one breathing AgentBase object, one promise, one entrance.
+- Identity asks only for a local display name. The input and next action are the entire interaction.
+- Provider connection presents four large playable objects—Codex, Claude Code, Hermes, and Kimi—with provider color used only for identity and connection truth.
+- Hardware connection visualizes the controller as an instrument waiting in darkness. Detection wakes both the on-screen grid and the real APC with the same temporary cold-water composition.
+- Skipping hardware is always possible. Expressive light never blocks setup and operational green/red/blue state returns after the welcome phrase.
+- Reduced-motion settings stop drifting, orbiting, and pulsing while preserving hierarchy, connection state, and every action.
+
+The intended balance is **minimalist game introduction + ambient instrument**, never neon arcade spectacle. Large elements earn their scale by reducing choice and explaining state.
+
 ## Design review ritual
 
 For every material UI or hardware-expression change, ask:

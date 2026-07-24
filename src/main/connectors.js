@@ -31,6 +31,21 @@ const AGENTS = [
     config: join(homedir(), '.hermes', 'plugins', 'agentbase', 'plugin.yaml'),
     setupCommand: 'hermes login',
     launchCommand: 'hermes'
+  },
+  {
+    id: 'kimi',
+    label: 'Kimi Code',
+    command: 'kimi',
+    executableCandidates: [
+      '/opt/homebrew/bin/kimi',
+      '/usr/local/bin/kimi',
+      join(homedir(), '.local', 'bin', 'kimi'),
+      join(homedir(), '.kimi-code', 'bin', 'kimi')
+    ],
+    config: join(homedir(), '.kimi-code', 'config.toml'),
+    setupCommand: 'kimi login',
+    launchCommand: 'kimi',
+    accountOnly: true
   }
 ]
 
@@ -77,6 +92,13 @@ async function versionFor (path) {
 
 function authStatus (agent, path) {
   if (!path) return Promise.resolve({ authenticated: false, authMessage: 'CLI not installed', accountLabel: '' })
+  if (agent.id === 'kimi') {
+    return Promise.resolve({
+      authenticated: false,
+      accountLabel: '',
+      authMessage: 'Kimi Code is installed. Login is managed by Kimi in its official terminal flow.'
+    })
+  }
   if (agent.id === 'claude') {
     return claudeAccountStatus().then((status) => ({
       authenticated: status.connected,
@@ -118,6 +140,7 @@ export async function connectorState () {
       configured,
       ready: Boolean(path && configured),
       manageable: Boolean(path && auth.authenticated),
+      taskCapable: !agent.accountOnly,
       ...auth,
       path,
       version: await versionFor(path)

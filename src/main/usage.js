@@ -5,6 +5,7 @@ import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises
 import { constants } from 'node:fs'
 import { homedir, release as osRelease } from 'node:os'
 import { dirname, join } from 'node:path'
+import { collectClaudeActivity } from './claude-activity.mjs'
 
 const execFileAsync = promisify(execFile)
 const REFRESH_MS = 2 * 60 * 1000
@@ -154,35 +155,48 @@ export function parseClaudeUsage (stdout) {
   return { plan: 'subscription', windows }
 }
 
-async function collectClaude () {
-  const command = await resolveCommand('claude')
-  const commonArguments = [
-    '--no-session-persistence',
-    '-p',
-    '/usage',
-    '--output-format',
-    'json'
-  ]
-  let stdout
-  try {
-    ;({ stdout } = await execFileAsync(command, [
-      '--safe-mode',
-      ...commonArguments
-    ], { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 }))
-  } catch (error) {
-    // Recent Claude Code builds removed --safe-mode. Keep the legacy path for
-    // installations that still expose /usage, then retry with an equivalent
-    // no-tools, no-persistence invocation on current builds.
-    if (!/unknown option ['‘’"]?--safe-mode/i.test(`${error?.stderr || ''}\n${error?.message || ''}`)) throw error
-    ;({ stdout } = await execFileAsync(command, [
-      '--permission-mode',
-      'dontAsk',
-      '--tools',
-      '',
-      ...commonArguments
-    ], { timeout: COMMAND_TIMEOUT_MS, maxBuffer: 2 * 1024 * 1024 }))
+export function parseClaudeStatusLineUsage (payload, now = Date.now()) {
+  const document = typeof payload === 'string' ? JSON.parse(payload) : payload
+  if (!document || document.provider !== 'claude' || !Array.isArray(document.windows)) {
+    throw new Error('Claude usage cache is invalid')
   }
-  return parseClaudeUsage(stdout)
+  const observedAt = Number(document.observedAt)
+  if (!Number.isFinite(observedAt)) throw new Error('Claude usage cache has no observation time')
+  if (now - observedAt > 24 * 60 * 60 * 1000) {
+    throw new Error('Claude limits are stale. Send one Claude Code message to update them.')
+  }
+  const windows = document.windows.map((window) => ({
+    id: String(window?.id || ''),
+    label: String(window?.label || 'All models'),
+    period: window?.period === 'week' ? 'week' : 'short',
+    durationMins: Number.isFinite(Number(window?.durationMins)) ? Number(window.durationMins) : null,
+    usedPercent: clampPercent(window?.usedPercent),
+    resetAt: Number.isFinite(Number(window?.resetAt)) ? Number(window.resetAt) : null,
+    resetText: typeof window?.resetText === 'string' ? window.resetText : null
+  })).filter((window) => window.id && window.usedPercent !== null)
+  if (!windows.length) throw new Error('Claude usage cache contains no quota windows')
+  return {
+    plan: document.plan || 'subscription',
+    observedAt,
+    source: 'claude-status-line',
+    windows
+  }
+}
+
+async function collectClaude () {
+  try {
+    const cached = await readFile(join(homedir(), '.agentbase', 'claude-usage.json'), 'utf8')
+    return parseClaudeStatusLineUsage(cached)
+  } catch {
+    // Claude exposes no subscription quota (% used) to any local, non-interactive
+    // surface — not `claude -p` results, not the status-line payload, nothing on
+    // disk — so the status-line cache above is normally absent. Fall back to
+    // Claude's own recorded usage activity (messages/sessions/tokens this week)
+    // so the app shows honest Claude usage instead of nothing.
+    const activity = await collectClaudeActivity()
+    if (!activity.available) throw new Error('Claude usage is unavailable until you use Claude Code at least once.')
+    return { plan: 'subscription', windows: [], activity, source: 'claude-stats-cache' }
+  }
 }
 
 function readCodexWindow (bucketId, bucket, slot, value) {
