@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('controller', {
   getState: () => ipcRenderer.invoke('get-state'),
+  getBuildInfo: () => ipcRenderer.invoke('get-build-info'),
   getWorkspaceThreads: () => ipcRenderer.invoke('get-workspace-threads'),
   getUsage: () => ipcRenderer.invoke('get-usage'),
   getConsumptionLedger: () => ipcRenderer.invoke('get-consumption-ledger'),

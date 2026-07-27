@@ -95,6 +95,25 @@ The current prerelease target is **Ambientic 0.8.1 alpha 1** for Apple-silicon M
 
 This build is ad-hoc signed and integrity-verified, but it is not Apple-notarized yet. A tester may need to move `Ambientic.app` into Applications, Control-click it, choose **Open**, and confirm the macOS warning. Accessibility is needed for terminal focus; microphone and screen-recording permissions are only requested when their corresponding hardware or preview features are used.
 
+## Multi-agent development and local releases
+
+Claude and Codex should never package from the same dirty checkout. Give each agent a dedicated branch and worktree, then review or cherry-pick its finished commit into the integration worktree:
+
+```bash
+git worktree add ../ambientic-claude -b agent/claude-feature
+git worktree add ../ambientic-codex -b agent/codex-feature
+```
+
+Only the integration worktree installs the shared app in `/Applications`. Once the selected changes are committed and the tree is clean, the canonical local release is:
+
+```bash
+npm run release:local
+```
+
+That command takes an exclusive local release lock, refuses uncommitted input, records the Git commit, branch, version, and build time, runs the complete tests and packaging flow, validates the packaged manifest, replaces `/Applications/Ambientic.app`, restarts it, and waits for the local health endpoint. Settings shows the installed version, short commit, and build time so an agent or tester can identify the running build without guessing.
+
+This is the personal-development release lane. Public beta releases still require signing/notarization, update distribution, and a release branch policy.
+
 ## Architecture
 
 ```text
@@ -159,6 +178,8 @@ Last updated: 2026-07-27
 
 ### Completed
 
+- [x] Canonical clean-tree `npm run release:local` workflow with a cross-process lock, tests, packaging, manifest verification, `/Applications` installation, restart, and health check.
+- [x] Installed build identity (version, Git commit, and build time) exposed in Settings for reliable Claude/Codex handoff and testing.
 - [x] Floating Electron session grid and menu-bar state.
 - [x] Claude Code, Codex, and Kimi lifecycle hook bridge.
 - [x] Live terminal-process discovery.

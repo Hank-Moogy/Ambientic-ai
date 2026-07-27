@@ -23,6 +23,7 @@ import { ClaudeAuthService } from './claude-auth-service.mjs'
 import { normalizeExternalUrl } from './external-url.mjs'
 import { ensureEnhancedPath } from './env-path.mjs'
 import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-mode.mjs'
+import { readBuildInfo } from './build-info.mjs'
 
 // Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
 // Finder-launched app otherwise only has launchd's minimal PATH, which lacks
@@ -30,6 +31,11 @@ import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-
 ensureEnhancedPath()
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const buildInfo = readBuildInfo({
+  resourcesPath: process.resourcesPath,
+  appPath: app.getAppPath(),
+  version: app.getVersion()
+})
 
 // A disposable state directory makes first-run replayable without touching the
 // user's real data. Keep the old variable as a compatibility alias.
@@ -608,6 +614,7 @@ function createTray () {
 
 // ── IPC ───────────────────────────────────────────────────────────────────
 ipcMain.handle('get-state', () => store.list())
+ipcMain.handle('get-build-info', () => buildInfo)
 ipcMain.handle('get-workspace-threads', () => workspace.list())
 ipcMain.handle('get-usage', () => usage.getState())
 ipcMain.handle('get-consumption-ledger', () => consumptionLedger?.getState() || null)

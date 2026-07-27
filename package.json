@@ -9,6 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "release:local": "node scripts/release-local.mjs",
     "install-hooks": "sh hook/install.sh",
     "pack": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder"
@@ -53,6 +54,10 @@
       {
         "from": "resources/ambientic-logo.png",
         "to": "ambientic-logo.png"
+      },
+      {
+        "from": "resources/build-info.json",
+        "to": "build-info.json"
       }
     ],
     "mac": {

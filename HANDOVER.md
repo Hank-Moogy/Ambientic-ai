@@ -33,6 +33,7 @@ vibe-controller
 Recent commits:
 
 ```text
+4c871e4 Checkpoint usage tracking and responsive agent threads
 5efb10c Overview: live countdown to each rate-limit reset
 16f182a Overview: show both 5-hour and weekly limits as matching gauges per provider
 a2d3dea Claude usage gauge: scrape the interactive /usage panel for real limit windows
@@ -40,39 +41,13 @@ a2d3dea Claude usage gauge: scrape the interactive /usage panel for real limit w
 e88f58f usage: publish each provider incrementally so one slow collector can't stall the panel
 ```
 
-Current working tree (preserve these changes):
-
-```text
-M HANDOVER.md
- M README.md
- M resources/claude_usage.py
- M src/main/claude-usage-scrape.mjs
- M src/main/usage.js
- M src/renderer/Workspace.jsx
- M src/renderer/workspace.css
- M test/usage.test.mjs
-?? src/renderer/thread-scroll.mjs
-?? test/thread-scroll.test.mjs
-```
-
-Change footprint:
-
-```text
-HANDOVER.md                      | 22 +++++++--------
- README.md                        |  5 ++--
- resources/claude_usage.py        | 51 +++++++++++++++++++++++++++++------
- src/main/claude-usage-scrape.mjs |  6 ++++-
- src/main/usage.js                | 58 +++++++++++++++++++++++++++++++++++++---
- src/renderer/Workspace.jsx       | 45 ++++++++++++++++++++++++++++---
- src/renderer/workspace.css       |  1 +
- test/usage.test.mjs              | 11 +++++++-
- 8 files changed, 169 insertions(+), 30 deletions(-)
-```
+The integration tree should remain clean between features. Use separate worktrees for simultaneous Claude and Codex implementation, then merge reviewed commits here.
 
 ## Remaining direction
 
 - Claude's Codex-style usage gauges are implemented and packaged. The installed app was refreshed on 2026-07-24 and its bundled collector reports `CLAUDE_SUBSCRIPTION_REQUIRED`: Claude Code's active credential is API Usage Billing, so the user must reconnect Claude Code with the restored Pro/Max subscription before five-hour and weekly limits become available.
-- The 2026-07-27 audit found `out/` newer than both packaged copies: repository `Ambientic.app` was dated July 25 and `/Applications/Ambientic.app` July 24. The combined shared tree now includes Claude's provider-environment/thread-scroll changes plus a Codex composer responsiveness fix that isolates draft rendering, memoizes Markdown, shows **Starting agent…**, and restores failed drafts. It passes 83 tests and a production build; package/install verification follows from this exact tree.
+- The combined provider-environment, thread-scroll, usage/billing, and responsive-composer work is preserved in commit `4c871e4`.
+- The single-agent integration lane is implemented: separate Claude/Codex worktrees feed reviewed commits into one clean integration worktree, and only that worktree may run `npm run release:local`. The release command locks packaging, embeds clean/dirty status plus commit/build identity, installs the app, restarts it, and verifies health. Settings displays the installed identity.
 
 - Ambientic accounts or a cloud backend.
 - Universal monetary spend totals from consumer subscriptions. Exact currency reporting requires an optional provider billing connection (for example an OpenAI organization Admin API key); Claude subscription spend is not exposed by the local CLI, and Hermes costs belong to its configured upstream provider.
