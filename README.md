@@ -110,7 +110,7 @@ Only the integration worktree installs the shared app in `/Applications`. Once t
 npm run release:local
 ```
 
-That command takes an exclusive local release lock, refuses uncommitted input, records the Git commit, branch, version, and build time, runs the complete tests and packaging flow, validates the packaged manifest, replaces `/Applications/Ambientic.app`, restarts it, and waits for the local health endpoint. Settings shows the installed version, short commit, and build time so an agent or tester can identify the running build without guessing.
+That command takes an exclusive local release lock, refuses uncommitted input, records the Git commit, branch, version, build time, and clean-tree status, runs the complete tests and packaging flow, applies and verifies a fast ad-hoc seal for local macOS use, validates the packaged manifest, replaces `/Applications/Ambientic.app`, restarts it, and waits for the local health endpoint. Settings shows the installed version, short commit, branch, and build time so an agent or tester can identify the running build without guessing.
 
 This is the personal-development release lane. Public beta releases still require signing/notarization, update distribution, and a release branch policy.
 
@@ -178,7 +178,7 @@ Last updated: 2026-07-27
 
 ### Completed
 
-- [x] Canonical clean-tree `npm run release:local` workflow with a cross-process lock, tests, packaging, manifest verification, `/Applications` installation, restart, and health check.
+- [x] Canonical clean-tree `npm run release:local` workflow with a cross-process lock, tests, packaging, verified local ad-hoc sealing, manifest verification, `/Applications` installation, restart, and health check.
 - [x] Installed build identity (version, Git commit, and build time) exposed in Settings for reliable Claude/Codex handoff and testing.
 - [x] Floating Electron session grid and menu-bar state.
 - [x] Claude Code, Codex, and Kimi lifecycle hook bridge.

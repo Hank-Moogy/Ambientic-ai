@@ -129,10 +129,14 @@ async function main () {
     writeFileSync(manifestPath, `${JSON.stringify(buildInfo, null, 2)}\n`)
     console.log(`\nAmbientic ${buildInfo.version} · ${commit.slice(0, 8)} · ${branch}\n`)
     run('npm', ['test'])
-    run('npm', ['run', 'pack'])
+    run('npm', ['run', 'pack'], {
+      env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
+    })
 
     const packagedApp = findPackagedApp(join(root, 'release'))
     if (!packagedApp) throw new Error('Packaging completed, but release/Ambientic.app was not found.')
+    run('codesign', ['--force', '--deep', '--sign', '-', packagedApp])
+    run('codesign', ['--verify', '--deep', '--strict', packagedApp])
     const packagedManifest = join(packagedApp, 'Contents', 'Resources', 'build-info.json')
     const packagedInfo = JSON.parse(readFileSync(packagedManifest, 'utf8'))
     if (packagedInfo.commit !== commit) throw new Error('Packaged build metadata does not match the release commit.')
