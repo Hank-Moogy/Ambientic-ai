@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { readdir, readFile, stat } from 'node:fs/promises'
+import { canInspectProjectRoot } from './project-scope.mjs'
 
 const MAX_TRANSCRIPT_BYTES = 384 * 1024
 const MAX_CONTEXT_CHARS = 48_000
@@ -126,7 +127,7 @@ export async function terminalContext (session) {
   if (session.agent === 'claude') transcript = await claudeContext(session)
   else if (session.agent === 'codex') transcript = await codexContext(session)
   else if (session.agent === 'kimi') transcript = await kimiContext(session)
-  const changedFiles = cwd
+  const changedFiles = cwd && canInspectProjectRoot(cwd)
     ? await run('/usr/bin/git', ['-C', cwd, 'status', '--porcelain=v1'], 3500)
     : ''
   return {

@@ -30,6 +30,12 @@ import { readBuildInfo } from './build-info.mjs'
 // Homebrew/nvm node and breaks Claude Code plugin hooks.
 ensureEnhancedPath()
 
+// Only one Ambientic process may own CoreMIDI, the hook server, and provider
+// bridges. A second launch focuses the existing workspace instead of creating
+// another native MIDI client and racing for the same controller.
+const isPrimaryInstance = app.requestSingleInstanceLock()
+if (!isPrimaryInstance) app.quit()
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const buildInfo = readBuildInfo({
   resourcesPath: process.resourcesPath,
@@ -1114,6 +1120,7 @@ usage.on('change', (state) => {
 companions.on('change', () => pushCompanions())
 
 app.whenReady().then(() => {
+  if (!isPrimaryInstance) return
   const prefs = loadPrefs()
   ambientMode = new AmbientModeService({
     blocker: powerSaveBlocker,
@@ -1214,6 +1221,9 @@ app.whenReady().then(() => {
 })
 
 // Tray app — closing the window doesn't quit.
+app.on('second-instance', () => {
+  if (isPrimaryInstance) showWorkspace()
+})
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
 app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); claudeAuth?.stop(); companions.stop(); usage.stop() })

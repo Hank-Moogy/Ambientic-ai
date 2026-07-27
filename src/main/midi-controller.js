@@ -72,10 +72,12 @@ export function createMidiController (store, {
   selectedProfile: initialProfile = AUTO_PROFILE,
   mappings: legacyMappings,
   mappingsByProfile: initialMappingsByProfile,
-  onPreferencesChange
+  onPreferencesChange,
+  midiModule = midi
 } = {}) {
   let input = null
   let output = null
+  let inputListenerAttached = false
   let timer = null
   let selectedSessionId = null
   let selectedProfile = MIDI_PROFILE_OPTIONS.some((profile) => profile.id === initialProfile) ? initialProfile : AUTO_PROFILE
@@ -155,8 +157,6 @@ export function createMidiController (store, {
     vibeVariant = null
     try { input?.closePort() } catch {}
     try { output?.closePort() } catch {}
-    input = null
-    output = null
     activeProfile = null
   }
 
@@ -173,12 +173,17 @@ export function createMidiController (store, {
   }
 
   function connect () {
-    if (input || output) return
+    if (status.connected && activeProfile) return
     let candidateInput = null
     let candidateOutput = null
     try {
-      candidateInput = new midi.Input()
-      candidateOutput = new midi.Output()
+      // @julusian/midi owns a process-wide CoreMIDI singleton. Reconstructing
+      // these objects during polling can abort in native code before a JS catch
+      // block runs. Reuse one pair and only close/reopen their ports.
+      candidateInput = input || new midiModule.Input()
+      candidateOutput = output || new midiModule.Output()
+      input = candidateInput
+      output = candidateOutput
       const candidates = selectedProfile === AUTO_PROFILE
         ? PROFILES
         : PROFILES.filter((profile) => profile.id === selectedProfile)
@@ -200,7 +205,7 @@ export function createMidiController (store, {
       mappings = normalizeMappings(mappingsByProfile[activeProfile.id])
       const device = candidateInput.getPortName(match.inputIndex)
       candidateInput.ignoreTypes(false, false, false)
-      candidateInput.on('message', (_deltaTime, message) => {
+      if (!inputListenerAttached) candidateInput.on('message', (_deltaTime, message) => {
         const recordArm = activeProfile.recordForMessage(message)
         if (recordArm) {
           if (recordArm.pressed) {
@@ -248,6 +253,7 @@ export function createMidiController (store, {
           })
         }
       })
+      inputListenerAttached = true
       candidateInput.openPort(match.inputIndex)
       candidateOutput.openPort(match.outputIndex)
       input = candidateInput
@@ -258,8 +264,6 @@ export function createMidiController (store, {
     } catch (error) {
       try { candidateInput?.closePort() } catch {}
       try { candidateOutput?.closePort() } catch {}
-      input = null
-      output = null
       activeProfile = null
       setStatus({ connected: false, device: '', error: error.message })
     }
@@ -271,7 +275,7 @@ export function createMidiController (store, {
     // This corrects LED drift if the APC firmware or another MIDI client
     // clears a pad after Ambientic's initial state render.
     timer = setInterval(() => {
-      if (!input || !output) connect()
+      if (!status.connected || !activeProfile) connect()
       else render()
     }, RECONNECT_MS)
     if (timer.unref) timer.unref()
@@ -281,6 +285,9 @@ export function createMidiController (store, {
     if (timer) clearInterval(timer)
     timer = null
     close()
+    input = null
+    output = null
+    inputListenerAttached = false
   }
 
   function triggerVibe () {
@@ -327,7 +334,11 @@ export function createMidiController (store, {
   return {
     start,
     stop,
-    reconnect: () => { close(); connect() },
+    reconnect: () => {
+      close()
+      setStatus({ connected: false, device: '', error: '' })
+      connect()
+    },
     triggerVibe,
     setProfile: (profileId) => {
       if (!MIDI_PROFILE_OPTIONS.some((profile) => profile.id === profileId)) return false

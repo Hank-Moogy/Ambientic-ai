@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { access, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
+import { canInspectProjectRoot } from './project-scope.mjs'
 
 const execFileAsync = promisify(execFile)
 export const HANDOVER_THRESHOLD = 85
@@ -23,6 +24,7 @@ async function readable (path) {
 }
 
 async function gitContext (cwd) {
+  if (!canInspectProjectRoot(cwd)) return { branch: '', recent: '', status: '', diff: '' }
   const run = async (args) => clean((await execFileAsync('git', args, { cwd, timeout: 5000, maxBuffer: 512 * 1024 })).stdout, 2400)
   try {
     return {
@@ -121,7 +123,7 @@ export class HandoverService extends EventEmitter {
   async list () {
     const sessions = await this.workspace.list()
     for (const session of sessions) {
-      if (!session.cwd) continue
+      if (!session.cwd || !canInspectProjectRoot(session.cwd)) continue
       const path = join(session.cwd, 'HANDOVER.md')
       if (this.records.has(path)) continue
       if (await readable(path)) {
@@ -136,7 +138,9 @@ export class HandoverService extends EventEmitter {
 
   async generate (sessionId, reason = 'manual') {
     const session = this.workspace.sessionFor(sessionId)
-    if (!session?.cwd) throw new Error('This task does not have a project folder.')
+    if (!session?.cwd || !canInspectProjectRoot(session.cwd)) {
+      throw new Error('Choose a specific project folder before preparing a handover. Ambientic will not inspect or write into your entire home folder.')
+    }
     const snapshot = await this.workspace.read(sessionId)
     const readmePath = join(session.cwd, 'README.md')
     const readme = await readFile(readmePath, 'utf8').catch(() => '')
@@ -169,7 +173,7 @@ export class HandoverService extends EventEmitter {
 
   async evaluate (usageState) {
     const byProject = new Map()
-    for (const session of (await this.workspace.list()).filter((item) => !item.history && item.cwd)) {
+    for (const session of (await this.workspace.list()).filter((item) => !item.history && item.cwd && canInspectProjectRoot(item.cwd))) {
       if (!byProject.has(session.cwd)) byProject.set(session.cwd, session)
     }
     const sessions = [...byProject.values()]
