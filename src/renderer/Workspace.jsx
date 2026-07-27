@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react'
 import './spend.css'
 import './thread-filters.css'
 import Markdown from 'react-markdown'
@@ -10,6 +10,7 @@ import './improve.css'
 import './onboarding.css'
 import './composer-controls.css'
 import { organizeThreads } from './thread-order.mjs'
+import { isNearThreadBottom } from './thread-scroll.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
 
 const stateLabel = { running: 'Running', waiting: 'Your move', attention: 'Needs input', idle: 'Idle', history: 'History' }
@@ -82,6 +83,10 @@ const markdownComponents = {
   img: ({ src, alt }) => <a href={src} onClick={(event) => { event.preventDefault(); window.controller.openExternalUrl(src) }}>{alt || 'Open image'}<span aria-hidden="true">↗</span></a>
 }
 
+const MarkdownMessageBody = memo(function MarkdownMessageBody ({ text }) {
+  return <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
+})
+
 function Message ({ item, providerLabel }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
@@ -100,8 +105,60 @@ function Message ({ item, providerLabel }) {
   return (
     <article className="message" data-role={item.role}>
       <div className="message__role"><span>{item.role === 'user' ? 'You' : providerLabel || 'Agent'}</span><button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button></div>
-      <div className="message__text"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{item.text}</Markdown></div>
+      <div className="message__text"><MarkdownMessageBody text={item.text} /></div>
     </article>
+  )
+}
+
+function ComposerDraft ({
+  sessionId,
+  canManage,
+  canSteer,
+  running,
+  providerLabel,
+  mode,
+  hasAttachments,
+  onSend,
+  onInterrupt
+}) {
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    setDraft('')
+    setSending(false)
+  }, [sessionId])
+
+  const submit = async () => {
+    const value = draft.trim()
+    if (sending || (!value && !hasAttachments)) return
+    setDraft('')
+    setSending(true)
+    const sent = await onSend(value)
+    setSending(false)
+    if (!sent && value) setDraft((current) => current || value)
+  }
+
+  return (
+    <>
+      <textarea
+        value={draft}
+        disabled={!canManage || sending}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            void submit()
+          }
+        }}
+        placeholder={!canManage ? `${providerLabel || 'This provider'} cannot receive managed prompts` : `Message ${providerLabel || 'agent'}…`}
+      />
+      <div>
+        <span>{sending ? 'Starting agent…' : canSteer ? 'Codex is working · send to steer this turn' : running ? 'Agent is working…' : `${mode === 'plan' ? 'Plan mode · planning requested' : mode === 'ask' ? 'Ask mode · answer only' : 'Build mode · implementation allowed'} · Enter to send`}</span>
+        {canSteer && <button className="send" type="button" disabled={sending || (!draft.trim() && !hasAttachments)} title="Add guidance to the running Codex turn" onClick={() => void submit()}>↑</button>}
+        {running ? <button className="stop" type="button" title="Stop this turn" onClick={onInterrupt}>■</button> : !canSteer && <button className="send" type="button" disabled={sending || (!draft.trim() && !hasAttachments)} onClick={() => void submit()}>↑</button>}
+      </div>
+    </>
   )
 }
 
@@ -366,6 +423,8 @@ function OverviewUsageBalance ({ sessions, usage, onRefresh }) {
     const name = providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude' : 'Hermes'
     const detail = hasGauges
       ? (provider.plan || 'Subscription')
+      : provider?.quotaError
+        ? provider.quotaError
       : activity?.available
         ? `${activity.weekly.messages} messages · ${activity.weekly.sessions} sessions this week`
         : provider?.error || `${recent} active this week`
@@ -799,7 +858,6 @@ export default function Workspace () {
   const [selectedId, setSelectedId] = useState('')
   const [thread, setThread] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [composer, setComposer] = useState('')
   const [attachments, setAttachments] = useState([])
   const [chatMode, setChatMode] = useState('build')
   const [query, setQuery] = useState('')
@@ -814,7 +872,10 @@ export default function Workspace () {
   })
   const [newTask, setNewTask] = useState(false)
   const [newTaskProvider, setNewTaskProvider] = useState('')
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false)
   const transcriptRef = useRef(null)
+  const transcriptAtBottomRef = useRef(true)
+  const transcriptScrollFrameRef = useRef(null)
   const selectedIdRef = useRef('')
 
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
@@ -868,8 +929,15 @@ export default function Workspace () {
       return bounded
     })
     window.controller.selectSession(selectedId)
+    setThread(null)
+    setShowJumpToLatest(false)
+    transcriptAtBottomRef.current = true
     setLoading(true)
-    window.controller.getThread(selectedId).then(setThread).catch((error) => setThread({ id: selectedId, messages: [], error: error.message })).finally(() => setLoading(false))
+    const requestedId = selectedId
+    window.controller.getThread(requestedId)
+      .then((value) => { if (selectedIdRef.current === requestedId) setThread(value) })
+      .catch((error) => { if (selectedIdRef.current === requestedId) setThread({ id: requestedId, messages: [], error: error.message }) })
+      .finally(() => { if (selectedIdRef.current === requestedId) setLoading(false) })
   }, [selectedId, view])
 
   useEffect(() => {
@@ -881,8 +949,33 @@ export default function Workspace () {
     if (!selectedId && sessions[0]) setSelectedId(sessions[0].id)
   }, [sessions, selectedId])
 
+  const scrollToLatest = (behavior = 'smooth') => {
+    const element = transcriptRef.current
+    if (!element) return
+    element.scrollTo({ top: element.scrollHeight, behavior })
+    transcriptAtBottomRef.current = true
+    setShowJumpToLatest(false)
+  }
+
+  const updateTranscriptPosition = () => {
+    const nearBottom = isNearThreadBottom(transcriptRef.current)
+    transcriptAtBottomRef.current = nearBottom
+    setShowJumpToLatest(!nearBottom)
+  }
+
   useEffect(() => {
-    if (transcriptRef.current) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+    if (loading || !thread?.id || thread.id !== selectedId) return
+    const first = requestAnimationFrame(() => {
+      transcriptScrollFrameRef.current = requestAnimationFrame(() => scrollToLatest('auto'))
+    })
+    return () => {
+      cancelAnimationFrame(first)
+      if (transcriptScrollFrameRef.current) cancelAnimationFrame(transcriptScrollFrameRef.current)
+    }
+  }, [selectedId, thread?.id, loading])
+
+  useEffect(() => {
+    if (transcriptAtBottomRef.current) scrollToLatest('auto')
   }, [thread?.messages?.length, thread?.messages?.at(-1)?.text])
 
   const threadGroups = useMemo(() => organizeThreads(
@@ -899,17 +992,16 @@ export default function Workspace () {
     return next
   }
 
-  const send = async () => {
-    const value = composer.trim() || (attachments.length ? 'Please inspect the attached context.' : '')
-    if (!value || !selectedId || (thread?.running && !canSteer)) return
+  const send = async (draft = '') => {
+    const value = draft.trim() || (attachments.length ? 'Please inspect the attached context.' : '')
+    if (!value || !selectedId || (thread?.running && !canSteer)) return false
     const selectedAttachments = attachments
     const selectedMode = chatMode
-    setComposer('')
     setAttachments([])
     try {
       setThread(await window.controller.sendThreadPrompt(selectedId, value, { attachments: selectedAttachments, mode: selectedMode }))
+      return true
     } catch (error) {
-      setComposer((current) => current || value)
       setAttachments((current) => current.length ? current : selectedAttachments)
       try {
         const latest = await window.controller.getThread(selectedId)
@@ -917,6 +1009,7 @@ export default function Workspace () {
       } catch {
         setThread((current) => ({ ...current, error: error.message }))
       }
+      return false
     }
   }
   const chooseContext = async () => {
@@ -982,11 +1075,12 @@ export default function Workspace () {
       {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
           <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
-          <div className="thread-body" ref={transcriptRef}>
+          <div className="thread-body" ref={transcriptRef} onScroll={updateTranscriptPosition}>
             <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} />
             {loading && <div className="loading">Loading local conversation…</div>}
             {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. Ambientic will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
             {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
+            {showJumpToLatest && <button className="thread-jump-latest" type="button" onClick={() => scrollToLatest('smooth')} aria-label="Jump to the latest message">↓ Latest</button>}
           </div>
           <div className="composer-wrap">
             {(voice.recording || voice.transcribing || voice.error || voice.transcript) && <div className="voice-banner" data-tone={voice.error ? 'error' : voice.recording ? 'recording' : 'working'}>
@@ -1007,8 +1101,17 @@ export default function Workspace () {
                 </div>
               </div>
               {attachments.length > 0 && <div className="composer-attachments">{attachments.map((item) => <span key={item.path} title={item.path}><i>⌁</i><b>{item.path.split('/').filter(Boolean).at(-1) || item.path}</b><button type="button" aria-label={`Remove ${item.path}`} onClick={() => setAttachments((current) => current.filter((candidate) => candidate.path !== item.path))}>×</button></span>)}</div>}
-              <textarea value={composer} disabled={!canManage} onChange={(event) => setComposer(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } }} placeholder={!thread?.managed ? 'This provider session is read-only' : selectedConnector?.manageable === false ? `${thread.providerLabel} needs /login before it can resume` : `Message ${thread.providerLabel || 'agent'}…`} />
-              <div><span>{canSteer ? 'Codex is working · send to steer this turn' : thread?.running ? 'Agent is working…' : `${chatMode === 'plan' ? 'Plan mode · planning requested' : chatMode === 'ask' ? 'Ask mode · answer only' : 'Build mode · implementation allowed'} · Enter to send`}</span>{canSteer && <button className="send" type="button" disabled={!composer.trim() && !attachments.length} title="Add guidance to the running Codex turn" onClick={send}>↑</button>}{thread?.running ? <button className="stop" type="button" title="Stop this turn" onClick={() => window.controller.interruptThread(selectedId)}>■</button> : !canSteer && <button className="send" type="button" disabled={!composer.trim() && !attachments.length} onClick={send}>↑</button>}</div>
+              <ComposerDraft
+                sessionId={selectedId}
+                canManage={canManage}
+                canSteer={canSteer}
+                running={Boolean(thread?.running)}
+                providerLabel={thread?.managed && selectedConnector?.manageable === false ? `${thread.providerLabel} needs /login` : thread?.providerLabel}
+                mode={chatMode}
+                hasAttachments={attachments.length > 0}
+                onSend={send}
+                onInterrupt={() => window.controller.interruptThread(selectedId)}
+              />
             </div>
           </div>
         </>}

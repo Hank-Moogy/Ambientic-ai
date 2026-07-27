@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
+import { providerSpawnEnv } from './env-path.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -710,7 +711,7 @@ export class WorkspaceService extends EventEmitter {
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', permissionMode]
     args.push(started ? '--resume' : '--session-id', claudeId)
     this.claudeAttempts.set(session.id, { prompt, compacted, mode, resultError: '' })
-    const child = spawn(path, args, { cwd: session.cwd || homedir(), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(path, args, { cwd: session.cwd || homedir(), env: providerSpawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
     child.stdout.on('data', (chunk) => {

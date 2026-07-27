@@ -64,3 +64,40 @@ export function ensureEnhancedPath () {
   if (next) process.env.PATH = next
   return process.env.PATH
 }
+
+// When Ambientic itself runs inside a coding-agent session — e.g. launched from
+// a terminal that is already a Claude Code session, or via `npm run dev` under
+// one — the parent process leaks session/SDK markers into its environment
+// (CLAUDECODE, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_SESSION_ID,
+// CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH, CLAUDE_CODE_OAUTH_SCOPES, …). A
+// provider CLI we spawn would inherit them and believe it is a *managed* child
+// of that host rather than a standalone CLI, which can confuse session
+// identity, hook routing, and token-refresh expectations. Strip those markers
+// so every spawned agent runs standalone and authenticates from its native
+// local store, exactly as it would in a fresh terminal. (Hardening — not a
+// substitute for a valid local login; see claude_usage.py for that failure.)
+const AGENT_SESSION_ENV_KEYS = new Set([
+  'CLAUDECODE',
+  'CLAUDE_AGENT_SDK_VERSION',
+  'CLAUDE_PID',
+  'CLAUDE_EFFORT',
+  'AI_AGENT'
+])
+
+function isInheritedAgentSessionKey (key) {
+  if (AGENT_SESSION_ENV_KEYS.has(key)) return true
+  // Every host/SDK/session marker Claude Code exports is CLAUDE_CODE_*.
+  return key.startsWith('CLAUDE_CODE_')
+}
+
+// Build the environment for a spawned provider CLI: the current (PATH-widened)
+// environment minus any inherited parent-agent session markers, plus optional
+// overrides. Use this for every provider/agent process instead of process.env.
+export function providerSpawnEnv (overrides = {}) {
+  const env = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (isInheritedAgentSessionKey(key)) continue
+    env[key] = value
+  }
+  return { ...env, ...overrides }
+}

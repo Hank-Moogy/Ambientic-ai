@@ -1,11 +1,20 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { knownUsageCommandCandidates, parseClaudeStatusLineUsage, parseCodexRateLimits } from '../src/main/usage.js'
+import { knownUsageCommandCandidates, parseClaudeStatusLineUsage, parseCodexRateLimits, sortClaudeCodeVersions } from '../src/main/usage.js'
 
 test('finds the Codex binary bundled in ChatGPT when no shell command exists', () => {
   const candidates = knownUsageCommandCandidates('codex', '/Users/tester')
   assert.equal(candidates[0], '/Applications/ChatGPT.app/Contents/Resources/codex')
   assert.ok(candidates.includes('/Users/tester/.local/bin/codex'))
+})
+
+test('prefers the newest semantic Claude Desktop CLI version', () => {
+  assert.deepEqual(sortClaudeCodeVersions(['2.1.31', '2.1.217', '2.2.0', '2.1.9']), [
+    '2.2.0',
+    '2.1.217',
+    '2.1.31',
+    '2.1.9'
+  ])
 })
 
 test('preserves provider window duration and accepts a weekly-only Codex response', () => {

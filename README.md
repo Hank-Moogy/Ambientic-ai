@@ -155,7 +155,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-07-24
+Last updated: 2026-07-27
 
 ### Completed
 
@@ -253,8 +253,9 @@ Last updated: 2026-07-24
 - [x] Codex usage discovery now finds the binary bundled inside ChatGPT.app, matching connector discovery instead of depending on a shell `codex` command.
 - [x] Overview quota meters retain the provider's real window duration and clearly distinguish a missing short-term window from a failed collector.
 - [x] Overview provider balance has a manual refresh control again, with disabled/spinning feedback while all provider collectors update.
-- [x] Claude quota collection now uses Claude Code's local status-line `rate_limits` telemetry instead of submitting `/usage` through print mode; the hook stores only normalized five-hour/seven-day percentages and reset times under `~/.ambientic/`.
-- [x] Claude quota cache validation rejects observations older than 24 hours, and Overview surfaces the collector's actionable reason in the row tooltip instead of implying a fabricated balance.
+- [x] Claude quota collection now drives Claude Code's provider-owned interactive `/usage` panel through a hidden PTY, including the current slash-command confirmation and tabbed Settings UI; it prefers Claude Desktop's newest bundled CLI over a stale Homebrew installation.
+- [x] Claude account-mode detection distinguishes API Usage Billing from Pro/Max subscription limits in about two seconds. Overview surfaces a direct reconnect explanation alongside honest local activity instead of silently showing blanks or fabricating quota.
+- [x] Claude quota cache validation rejects observations older than 24 hours, while the interactive collector remains the reliable fallback for current Claude clients whose status-line payload omits `rate_limits`.
 - [x] Native four-screen first-run experience added: mysterious Welcome, local display-name capture, provider connection/first-task choice, and skippable MIDI controller discovery before Overview.
 - [x] Onboarding uses full-screen single decisions, oversized type, floating spatial objects, provider-specific connection cards, one dominant CTA, reduced-motion support, and the ambient game/instrument language recorded in `ART_DIRECTION.md`.
 - [x] Codex and Claude reuse their guided Ambientic authentication; Hermes opens its provider-owned local setup; Kimi Code is detected as an account-only connector and links to its official install path when absent.
@@ -268,6 +269,8 @@ Last updated: 2026-07-24
 - [x] Ambient mode’s active control and Settings status breathe through a reduced-motion-safe blue–violet–green hue. Settings offers bounded 30-minute, 1/2/4/8/12-hour safety check-ins (four hours by default); a due check-in offers Keep running or Turn off, while no response deliberately leaves agent work uninterrupted.
 - [x] Overview header simplified to All threads, Ambient mode, and Vibe; the redundant top-right New task action is removed, and the lighting action is labeled simply **Vibe** while its tooltip retains composition detail.
 - [x] Native approval cards now offer **Deny**, **Allow once**, and **Always allow** inside the active Ambientic thread for Codex and Claude Code. Codex replies through app-server; Claude’s official blocking `PermissionRequest` hook waits on Ambientic’s loopback bridge and returns Claude’s own structured decision/permission suggestion. If Ambientic is unavailable or times out, Claude falls back to its native approval dialog.
+- [x] Selecting any thread now clears the prior transcript and deterministically scrolls the newly loaded conversation to its latest message. Scrolling away from the bottom pauses auto-follow and reveals a floating **Latest** shortcut; returning to the bottom restores live auto-follow.
+- [x] The thread composer now owns its draft independently from the transcript, so typing no longer rerenders every Markdown message. Previously rendered Markdown is memoized, submission shows an explicit **Starting agent…** state, and a failed provider start restores the unsent draft.
 
 ### In progress
 
@@ -281,7 +284,7 @@ Last updated: 2026-07-24
 - [ ] Validate one real managed prompt and interrupt on each locally authenticated provider after the packaged app relaunch.
 - [ ] Explore a supported shared-host transport for live Codex desktop mirroring. Today Ambientic and Codex desktop share persisted task history, but their separate stdio app-server processes do not share the same in-memory active turn; reopen the task in Codex to refresh it after an Ambientic-owned turn.
 - [ ] Validate Codex and Hermes approval cards against a real tool permission request.
-- [ ] Restart Claude Code and send one real message so its newly installed Ambientic status-line bridge receives the first subscription `rate_limits` payload; confirm five-hour and seven-day balances appear after Overview refresh.
+- [ ] Reconnect Claude Code itself with the restored Pro/Max subscription (the currently active Claude Code account reports API Usage Billing), then confirm its five-hour and weekly `/usage` balances appear after Overview refresh.
 - [ ] Run one human-paced onboarding pass from a clean profile, including Codex browser login, Claude embedded login, first-task creation, controller skip, and replay from Settings.
 - [ ] Physically repeat the arrival-light test with the APC mini mk2; automated coverage confirms the same 64-pad Vibe path, while the connected visual smoke used an APC40 MKII.
 - [ ] Use a thread's **Hand off →** action (or the near-limit banner) as the first live cross-provider takeover test now that Claude is connected.
@@ -303,8 +306,9 @@ Last updated: 2026-07-24
 
 ### Verification
 
-- 2026-07-24 Ambientic integration checkpoint: the complete combined working tree passes all 79 tests before packaging; the release bundle is regenerated from this exact source state rather than relying on a pre-rename app artifact.
-- `npm test`: 79 tests passing, including Claude official-hook approval once/persisted-rule decisions and IPC-safe approval projection, Ambient mode single-assertion lifecycle, bounded check-in timing and non-interrupting reminders, immediate Claude approval/question → red-pad propagation, ordinary-tool false-positive protection, activity-first thread ordering/recent separation, Codex optimistic-message reconciliation, native attachment/mode payloads, Claude status-line quota parsing/staleness, Claude long-context compaction/error guidance, provider connection commands including Kimi, MIDI arrival-light transition, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
+- 2026-07-24 Claude usage audit: commits `a2d3dea`, `16f182a`, and `5efb10c` implement the interactive `/usage` collector, matching 5-hour/weekly Overview gauges, and live reset countdowns. The freshly installed `/Applications/Ambientic.app` contains the current 7.5 KB `claude_usage.py` helper and starts healthy. A direct packaged-helper smoke currently returns `CLAUDE_SUBSCRIPTION_REQUIRED` because Claude Code reports API Usage Billing; reconnecting Claude Code itself with the Pro/Max account is required before real quota windows can render.
+- 2026-07-27 combined-agent checkpoint: the shared working tree, including Claude's provider-environment and thread-scroll work plus the isolated composer render path, passes all 83 tests before packaging.
+- `npm test`: 83 tests passing, including inherited provider-session environment sanitization, semantic selection of the newest Claude Desktop CLI, transcript near-bottom/jump visibility, Claude official-hook approval once/persisted-rule decisions and IPC-safe approval projection, Ambient mode single-assertion lifecycle, bounded check-in timing and non-interrupting reminders, immediate Claude approval/question → red-pad propagation, ordinary-tool false-positive protection, activity-first thread ordering/recent separation, Codex optimistic-message reconciliation, native attachment/mode payloads, Claude status-line quota parsing/staleness, Claude long-context compaction/error guidance, provider connection commands including Kimi, MIDI arrival-light transition, cross-provider latest-message ordering, two smoothed native APC Vibe compositions, consumption-ledger reset/credit transitions, single-resolver thread-state precedence and approval-clearing, completed-turn idle vs approval-blocked state semantics, PATH resolution for spawned CLIs, persistent thread aliases across provider refreshes, bundled-Codex usage discovery, weekly-only rate-limit parsing, APC mini mk2 8×8 ordering, APC40 MKII regressions, Claude authentication, quota handovers, provider bridges, voice validation, Hermes reconciliation, and safe external links.
 - Installed-app verification target is `/Applications/Ambientic.app`; repository packages under `release/mac-arm64/` must be copied there and the existing Applications process restarted before UI acceptance checks.
 - Consumption-ledger regressions cover exact Codex reset-credit transitions, duplicate suppression, purchased-credit additions/consumption, and natural window renewal classification.
 - Vibe-sequence regressions verify both cold compositions, full 40/64-pad native layouts, temporal movement, minimum composition duration, and delta-frame smoothing.

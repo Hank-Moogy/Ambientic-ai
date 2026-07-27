@@ -37,7 +37,11 @@ export function scrapeClaudeUsage (claudePath) {
       } catch {
         return reject(new Error('Could not parse Claude /usage output'))
       }
-      if (parsed.error) return reject(new Error(parsed.error))
+      if (parsed.error) {
+        const reason = new Error(parsed.error)
+        if (parsed.code) reason.code = parsed.code
+        return reject(reason)
+      }
       if (!Array.isArray(parsed.windows) || !parsed.windows.length) return reject(new Error('Claude /usage returned no limit windows'))
       resolve(parsed)
     })

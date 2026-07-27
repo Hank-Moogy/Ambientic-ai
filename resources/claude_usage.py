@@ -113,7 +113,7 @@ def main():
 
     buf = bytearray()
     start = time.time()
-    opened = submitted = False
+    opened = submitted = confirmed = usage_tab_selected = False
 
     while time.time() - start < 12:
         try:
@@ -131,15 +131,60 @@ def main():
             if len(buf) > 400_000:  # keep only the recent screen state; bound regex cost
                 del buf[:-300_000]
         elapsed = time.time() - start
-        # The TUI needs a few seconds before it accepts input. Type /usage, then
-        # submit it a beat later, then let the panel render.
-        if not opened and elapsed > 5:
+        screen = clean(bytes(buf[-180_000:]))
+        lower = screen.lower()
+        # Claude first opens slash-command completion, so `/usage` needs one
+        # Enter to select the command and (on current builds) a second Enter to
+        # execute it. Once the settings panel appears it initially selects
+        # Status; two right arrows select the Usage tab on both old and new TUIs.
+        if elapsed > 2.0 and "api usage billing" in lower:
+            kill(pid)
+            try:
+                os.close(master)
+            except OSError:
+                pass
+            print(json.dumps({
+                "code": "CLAUDE_SUBSCRIPTION_REQUIRED",
+                "error": "Claude Code is not authenticated with your Claude subscription (it fell back to API billing), so it reports no plan limits. Run `claude /login` in a terminal, then refresh.",
+            }))
+            return
+        if not opened and elapsed > 2.0 and ("❯" in screen or "try \"" in lower):
             os.write(master, b"/usage")
             opened = True
-        elif opened and not submitted and elapsed > 6:
+        elif opened and not submitted and ("show plan usage limits" in lower or elapsed > 3.0):
             os.write(master, b"\r")
             submitted = True
-        elif submitted and elapsed > 8.5:
+        elif submitted and not confirmed and elapsed > 3.7:
+            os.write(master, b"\r")
+            confirmed = True
+        elif confirmed and not usage_tab_selected and "status" in lower and "config" in lower and "usage" in lower:
+            os.write(master, b"\x1b[C\x1b[C")
+            usage_tab_selected = True
+        elif confirmed and ("api usage billing" in lower or
+                            ("only" in lower and "subscription" in lower and "plans" in lower)):
+            kill(pid)
+            try:
+                os.close(master)
+            except OSError:
+                pass
+            print(json.dumps({
+                "code": "CLAUDE_SUBSCRIPTION_REQUIRED",
+                "error": "Claude Code is not authenticated with your Claude subscription (it fell back to API billing), so it reports no plan limits. Run `claude /login` in a terminal, then refresh.",
+            }))
+            return
+        elif usage_tab_selected and ("current session" in lower or "current week" in lower) and elapsed > 5.0:
+            # Give the final percentages/reset labels a moment to finish drawing.
+            time.sleep(0.7)
+            try:
+                while True:
+                    ready, _, _ = select.select([master], [], [], 0.05)
+                    if master not in ready:
+                        break
+                    buf.extend(os.read(master, 65536))
+            except OSError:
+                pass
+            break
+        elif confirmed and elapsed > 10.5:
             break
 
     kill(pid)
@@ -149,8 +194,10 @@ def main():
         pass
 
     windows = parse(clean(bytes(buf)))
-    print(json.dumps({"plan": "subscription", "windows": windows} if windows
-                     else {"error": "Claude /usage panel did not render any limits"}))
+    print(json.dumps({"plan": "subscription", "windows": windows} if windows else {
+        "code": "CLAUDE_USAGE_UNAVAILABLE",
+        "error": "Claude /usage opened, but its subscription limit windows did not render.",
+    }))
 
 
 if __name__ == "__main__":

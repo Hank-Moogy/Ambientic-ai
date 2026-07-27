@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { homedir, release as osRelease } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -82,8 +82,48 @@ export function knownUsageCommandCandidates (name, home = homedir()) {
   return candidates[name] || []
 }
 
+function compareClaudeVersions (left, right) {
+  const parts = (value) => String(value).split('.').map((part) => Number(part) || 0)
+  const a = parts(left)
+  const b = parts(right)
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    if ((a[index] || 0) !== (b[index] || 0)) return (b[index] || 0) - (a[index] || 0)
+  }
+  return 0
+}
+
+export function sortClaudeCodeVersions (versions) {
+  return [...versions].sort(compareClaudeVersions)
+}
+
+async function findClaudeDesktopCommand (home = homedir()) {
+  const root = join(home, 'Library', 'Application Support', 'Claude', 'claude-code')
+  let versions
+  try {
+    versions = await readdir(root, { withFileTypes: true })
+  } catch {
+    return null
+  }
+  for (const entry of sortClaudeCodeVersions(versions.filter((item) => item.isDirectory()).map((item) => item.name))) {
+    const command = join(root, entry, 'claude.app', 'Contents', 'MacOS', 'claude')
+    if (await pathExists(command)) return command
+  }
+  return null
+}
+
 async function resolveCommand (name) {
   if (commandPaths.has(name)) return commandPaths.get(name)
+
+  // Claude Desktop keeps a current, signed Claude Code binary outside the
+  // application bundle. Prefer its newest semantic-versioned installation over
+  // an older Homebrew CLI whose TUI or authentication state may have diverged.
+  if (name === 'claude') {
+    const desktopCommand = await findClaudeDesktopCommand()
+    if (desktopCommand) {
+      commandPaths.set(name, desktopCommand)
+      return desktopCommand
+    }
+  }
 
   // Finder-launched apps receive a minimal PATH. Check stable app/Homebrew
   // locations first so usage discovery matches provider connector discovery.
@@ -222,13 +262,23 @@ async function collectClaude () {
     })).filter((window) => window.usedPercent !== null)
     if (windows.length) return { plan: scraped.plan || 'subscription', source: 'claude-usage-scrape', windows }
     throw new Error('Claude /usage produced no usable windows')
-  } catch {
+  } catch (error) {
     // Fallback: Claude's interactive /usage was unavailable (not logged in, TUI
     // changed, timed out). Show real recorded activity from Claude's stats cache
     // (messages/sessions this week) so the app still shows honest Claude usage.
     const activity = await collectClaudeActivity()
-    if (!activity.available) throw new Error('Claude usage is unavailable until you use Claude Code at least once.')
-    return { plan: 'subscription', windows: [], activity, source: 'claude-stats-cache' }
+    const quotaError = error?.code === 'CLAUDE_SUBSCRIPTION_REQUIRED'
+      ? 'Claude Code is using API billing. Reconnect it with a Pro or Max subscription to show rate limits.'
+      : `Claude rate limits unavailable: ${safeError(error)}`
+    if (!activity.available) throw new Error(quotaError)
+    return {
+      plan: error?.code === 'CLAUDE_SUBSCRIPTION_REQUIRED' ? 'API billing' : 'Claude',
+      windows: [],
+      activity,
+      quotaError,
+      quotaStatus: error?.code || 'CLAUDE_USAGE_UNAVAILABLE',
+      source: 'claude-stats-cache'
+    }
   }
 }
 

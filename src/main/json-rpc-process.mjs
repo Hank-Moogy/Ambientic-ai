@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { providerSpawnEnv } from './env-path.mjs'
 
 export class JsonRpcProcess extends EventEmitter {
   constructor (command, args = [], options = {}) {
@@ -18,7 +19,7 @@ export class JsonRpcProcess extends EventEmitter {
     if (this.child) return
     this.child = spawn(this.command, this.args, {
       cwd: this.options.cwd,
-      env: { ...process.env, ...this.options.env },
+      env: providerSpawnEnv(this.options.env),
       stdio: ['pipe', 'pipe', 'pipe']
     })
     createInterface({ input: this.child.stdout }).on('line', (line) => this.receive(line))

@@ -46,7 +46,7 @@
 .overview-usage__row[data-provider="hermes"] { --balance-accent: #898cff; }
 .overview-usage__head { display: flex; align-items: center; gap: 10px; }
 .overview-usage__icon { width: 29px; height: 29px; flex: none; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--balance-accent) 35%, #343a43); border-radius: 8px; background: color-mix(in srgb, var(--balance-accent) 7%, #15191e); color: var(--balance-accent); }
-.overview-usage__icon svg { width: 15px; }
+.overview-usage__icon svg { width: 15px; height: auto; }
 .overview-usage__head > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .overview-usage__head > div b { font-size: 9px; }
 .overview-usage__head > div small { overflow: hidden; color: #69727d; font-size: 7px; white-space: nowrap; text-overflow: ellipsis; }

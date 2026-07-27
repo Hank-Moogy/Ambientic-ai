@@ -1,7 +1,7 @@
 <!-- ambientic-handover -->
 # vibe-controller handover
 
-Generated: 2026-07-24T13:31:20.641Z  
+Generated: 2026-07-24T14:35:16.749Z
 Source provider: claude  
 Source task: vibe-controller  
 Reason: 100% used · Current session
@@ -33,18 +33,46 @@ vibe-controller
 Recent commits:
 
 ```text
+5efb10c Overview: live countdown to each rate-limit reset
 16f182a Overview: show both 5-hour and weekly limits as matching gauges per provider
 a2d3dea Claude usage gauge: scrape the interactive /usage panel for real limit windows
 83a8cb8 Stop tracking Python bytecode cache (__pycache__/*.pyc)
 e88f58f usage: publish each provider incrementally so one slow collector can't stall the panel
-eac0386 Combined checkpoint: Claude usage activity display + concurrent workspace work
 ```
 
-The working tree is clean or unavailable.
+Current working tree (preserve these changes):
 
+```text
+M HANDOVER.md
+ M README.md
+ M resources/claude_usage.py
+ M src/main/claude-usage-scrape.mjs
+ M src/main/usage.js
+ M src/renderer/Workspace.jsx
+ M src/renderer/workspace.css
+ M test/usage.test.mjs
+?? src/renderer/thread-scroll.mjs
+?? test/thread-scroll.test.mjs
+```
 
+Change footprint:
+
+```text
+HANDOVER.md                      | 22 +++++++--------
+ README.md                        |  5 ++--
+ resources/claude_usage.py        | 51 +++++++++++++++++++++++++++++------
+ src/main/claude-usage-scrape.mjs |  6 ++++-
+ src/main/usage.js                | 58 +++++++++++++++++++++++++++++++++++++---
+ src/renderer/Workspace.jsx       | 45 ++++++++++++++++++++++++++++---
+ src/renderer/workspace.css       |  1 +
+ test/usage.test.mjs              | 11 +++++++-
+ 8 files changed, 169 insertions(+), 30 deletions(-)
+```
 
 ## Remaining direction
+
+- Claude's Codex-style usage gauges are implemented and packaged. The installed app was refreshed on 2026-07-24 and its bundled collector reports `CLAUDE_SUBSCRIPTION_REQUIRED`: Claude Code's active credential is API Usage Billing, so the user must reconnect Claude Code with the restored Pro/Max subscription before five-hour and weekly limits become available.
+- The 2026-07-27 audit found `out/` newer than both packaged copies: repository `Ambientic.app` was dated July 25 and `/Applications/Ambientic.app` July 24. The combined shared tree now includes Claude's provider-environment/thread-scroll changes plus a Codex composer responsiveness fix that isolates draft rendering, memoizes Markdown, shows **Starting agent…**, and restores failed drafts. It passes 83 tests and a production build; package/install verification follows from this exact tree.
 
 - Ambientic accounts or a cloud backend.
 - Universal monetary spend totals from consumer subscriptions. Exact currency reporting requires an optional provider billing connection (for example an OpenAI organization Admin API key); Claude subscription spend is not exposed by the local CLI, and Hermes costs belong to its configured upstream provider.
@@ -82,27 +110,11 @@ The Electron main process owns local system access, session state, connectors, p
 
 ## Recent decision context
 
-- **User direction:** ✓ built in 321ms ✓ built in 17ms ✓ built in 687ms ℹ tests 79 ℹ pass 79 ℹ fail 0 [ambientic] workspace smoke screenshot: /tmp/dual.png -rw-r--r--@ 1 samori  wheel  1013946 Jul 24 15:24 /tmp/dual.png
-- **User direction:** [object Object]
-- **User direction:** [Image: original 2778x1684, displayed at 2000x1212. Multiply coordinates by 1.39 to map to original image.]
-- **Agent result:** The dual-gauge layout works cleanly. The **Provider Balance** panel now shows both windows side by side for each provider: - **Codex** (plus): `5H —` · `WEEK 41%` (green) - **Claude** (subscription): `5H 100%` (red — session maxed) · `WEEK 21%` (amber) - **Hermes**: activity fallback (no rate-limit API) Each provider keeps its accent color, with amber/red tinting when a window gets hot — identical treatment for both. (Codex's `5H` shows `—` because Codex didn't report its short window that refresh; the layout handles a missing window gracefully.) Let me commit, repackage, and reinstall:
-- **User direction:** 16f182a Overview: show both 5-hour and weekly limits as matching gauges per provider === repackage + reinstall ===   • skipped macOS notarization  reason=`notarize` options were unable to be generated installed + launched
-- **User direction:** 1 file delivered to user.
+- No canonical recent messages were available. Use the task title, README, and working tree as the source of truth.
 
 ## Material artifacts
 
-- `/Users/samori/vibe-controller/src/renderer/Workspace.jsx`
-- `/Users/samori/vibe-controller/NEXT_STEPS.md`
-- `/tmp/overview.png`
-- `/Users/samori/vibe-controller/src/main/index.js`
-- `/tmp/overview2.png`
-- `/tmp/ov3.png`
-- `/Users/samori/vibe-controller/resources/claude_usage.py`
-- `/Users/samori/vibe-controller/src/main/claude-usage-scrape.mjs`
-- `/Users/samori/vibe-controller/package.json`
-- `/tmp/gauge.png`
-- `/Users/samori/vibe-controller/src/renderer/spend.css`
-- `/tmp/dual.png`
+- No task artifacts were recorded. Inspect the working tree.
 
 ## First action
 
