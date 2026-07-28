@@ -350,11 +350,14 @@ function ConsumptionBoard ({ sessions, usage, onRefresh }) {
           const week = provider?.windows?.find((window) => window.period === 'week' && /all models|weekly/i.test(window.label)) || provider?.windows?.find((window) => window.period === 'week')
           const noQuotaData = provider?.status === 'error' && !provider?.windows?.length
           const localActivity = activityFor(providerId)
-          // Claude exposes no subscription quota to local tools, so show its own
-          // recorded weekly activity (messages/sessions) instead of a quota meter.
+          // Preserve real local activity whenever current quota windows have not
+          // synced, while keeping sign-in and collector failures explicit.
           const usageActivity = provider?.activity
-          if (usageActivity?.available && !short && !week) return <div className="consumption-row" key={providerId} data-provider={providerId} title="Claude does not expose subscription quota to local tools; showing your recorded Claude activity this week."><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude'}</b><small>Local activity · no quota API</small></div><div className="consumption-activity"><b>{usageActivity.weekly.messages}</b><span>messages this week</span></div><div className="consumption-activity"><b>{usageActivity.weekly.sessions}</b><span>sessions this week</span></div></div>
-          if (noQuotaData) return <div className="consumption-row" key={providerId} data-provider={providerId} title={provider?.error || ''}><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude'}</b><small>Quota unavailable · local activity</small></div><div className="consumption-activity"><b>{localActivity.weekly}</b><span>sessions this week</span></div><div className="consumption-activity"><b>{localActivity.total}</b><span>tracked locally</span></div></div>
+          if (usageActivity?.available && !short && !week) {
+            const signedOut = provider?.quotaStatus === 'CLAUDE_LOGIN_REQUIRED'
+            return <div className="consumption-row" key={providerId} data-provider={providerId} title={provider?.quotaError || 'Showing recorded local activity until provider limits sync.'}><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude Code'}</b><small>{signedOut ? 'Sign in to sync plan limits' : 'Limits not synced · activity fallback'}</small></div><div className="consumption-activity"><b>{usageActivity.weekly.messages}</b><span>messages this week</span></div><div className="consumption-activity"><b>{usageActivity.weekly.sessions}</b><span>sessions this week</span></div></div>
+          }
+          if (noQuotaData) return <div className="consumption-row" key={providerId} data-provider={providerId} title={provider?.error || ''}><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude Code'}</b><small>Limits unavailable · local activity</small></div><div className="consumption-activity"><b>{localActivity.weekly}</b><span>sessions this week</span></div><div className="consumption-activity"><b>{localActivity.total}</b><span>tracked locally</span></div></div>
           const providerDetail = provider?.status === 'error'
             ? 'Unavailable'
             : provider?.status === 'stale'
@@ -363,7 +366,7 @@ function ConsumptionBoard ({ sessions, usage, onRefresh }) {
                     ? `${provider.plan || 'Subscription'}${!short && week ? ' · no short window provided' : ''}`
                     : 'Fetching limits…'
           const resetCount = providerId === 'codex' && Number.isFinite(provider?.resetCredits?.availableCount) ? ` · ${provider.resetCredits.availableCount} reset${provider.resetCredits.availableCount === 1 ? '' : 's'} available` : ''
-          return <div className="consumption-row" key={providerId} data-provider={providerId}><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude'}</b><small>{providerDetail}{resetCount}</small></div><ConsumptionMeter label={quotaWindowLabel(short, 'Short')} window={short} /><ConsumptionMeter label={quotaWindowLabel(week, 'Week')} window={week} /></div>
+          return <div className="consumption-row" key={providerId} data-provider={providerId}><span className="consumption-row__agent"><AgentIcon agent={providerId} /></span><div className="consumption-row__identity"><b>{providerId === 'codex' ? 'Codex' : 'Claude Code'}</b><small>{providerDetail}{resetCount}</small></div><ConsumptionMeter label={quotaWindowLabel(short, 'Short')} window={short} /><ConsumptionMeter label={quotaWindowLabel(week, 'Week')} window={week} /></div>
         })}
         <div className="consumption-row" data-provider="hermes"><span className="consumption-row__agent"><AgentIcon agent="hermes" /></span><div className="consumption-row__identity"><b>Hermes</b><small>No quota API · local activity</small></div><div className="consumption-activity"><b>{hermesActivity.weekly}</b><span>sessions this week</span></div><div className="consumption-activity"><b>{hermesActivity.total}</b><span>tracked locally</span></div></div>
       </div>
@@ -403,7 +406,7 @@ function SpendActivity ({ ledger }) {
   )
 }
 
-function OverviewUsageBalance ({ sessions, usage, onRefresh }) {
+function OverviewUsageBalance ({ sessions, connectors, usage, onRefresh }) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15000)
@@ -419,10 +422,13 @@ function OverviewUsageBalance ({ sessions, usage, onRefresh }) {
     const week = windows.find((window) => window.period === 'week') || windows.find((window) => window.period && window.period !== 'short')
     const hasGauges = Boolean(short || week)
     const activity = provider?.activity
+    const connector = connectors.find((item) => item.id === providerId)
     const recent = sessions.filter((session) => session.agent === providerId && Number(session.updatedAt || session.lastSeen || 0) >= weekCutoff).length
-    const name = providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude' : 'Hermes'
+    const name = providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude Code' : 'Hermes'
     const detail = hasGauges
-      ? (provider.plan || 'Subscription')
+      ? `${provider.plan || 'Subscription'} · live limits`
+      : providerId === 'claude' && connector?.manageable === false
+        ? 'Sign in to sync Pro or Max plan limits'
       : provider?.quotaError
         ? provider.quotaError
       : activity?.available
@@ -493,7 +499,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, 
       <div className="dashboard-scroll">
         <section className="dashboard-hero">
           <div className="dashboard-hero__copy"><span className="eyebrow"><i /> Local intelligence, online</span><h1>Your agents,<br /><em>in one field.</em></h1><p>See who is working, who needs you, and where to send the next idea—without starting from a chat list.</p><div className="dashboard-statline"><span><b>{active}</b> active</span><span><b>{needsInput}</b> need input</span><span><b>{sessions.length}</b> threads</span><span><b>{midi.connected ? 'On' : 'Off'}</b> {midi.shortModel || 'APC'}</span></div></div>
-          <OverviewUsageBalance sessions={sessions} usage={usage} onRefresh={onRefreshUsage} />
+          <OverviewUsageBalance sessions={sessions} connectors={connectors} usage={usage} onRefresh={onRefreshUsage} />
         </section>
 
         <section className="provider-field" aria-label="Agent providers">

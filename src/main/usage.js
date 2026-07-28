@@ -7,6 +7,7 @@ import { homedir, release as osRelease } from 'node:os'
 import { dirname, join } from 'node:path'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectClaudeUsageWindows } from './claude-usage-scrape.mjs'
+import { claudeAccountStatus } from './claude-auth-service.mjs'
 
 const execFileAsync = promisify(execFile)
 const REFRESH_MS = 2 * 60 * 1000
@@ -27,6 +28,7 @@ const CONTROLLER_VERSION = '0.5.5'
 
 const PROVIDERS = ['claude', 'codex', 'kimi']
 const commandPaths = new Map()
+const CLAUDE_USAGE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
 function blankProvider () {
   return { status: 'loading', windows: [], error: null }
@@ -223,7 +225,7 @@ export function parseClaudeStatusLineUsage (payload, now = Date.now()) {
   }
   const observedAt = Number(document.observedAt)
   if (!Number.isFinite(observedAt)) throw new Error('Claude usage cache has no observation time')
-  if (now - observedAt > 24 * 60 * 60 * 1000) {
+  if (now - observedAt > CLAUDE_USAGE_CACHE_MAX_AGE_MS) {
     throw new Error('Claude limits are stale. Send one Claude Code message to update them.')
   }
   const windows = document.windows.map((window) => ({
@@ -244,13 +246,34 @@ export function parseClaudeStatusLineUsage (payload, now = Date.now()) {
   }
 }
 
-async function collectClaude () {
-  // Primary: scrape Claude's interactive /usage panel for the real 5-hour and
-  // weekly limit windows — the only local source of Claude's "% used", so the
-  // app can show the same gauge Codex gets. Cached, so this is cheap most calls.
+export function claudeUsageCachePath (home = homedir()) {
+  return join(home, '.ambientic', 'claude-usage.json')
+}
+
+async function readClaudeUsageCache () {
+  return parseClaudeStatusLineUsage(await readFile(claudeUsageCachePath(), 'utf8'))
+}
+
+async function collectClaude (force = false) {
+  // Prefer the structured, privacy-preserving status-line observation whenever
+  // Claude supplies rate_limits. It contains only normalized percentages and
+  // reset timestamps and is more stable than interpreting a terminal screen.
+  try {
+    return await readClaudeUsageCache()
+  } catch {}
+
+  // Fallback: scrape Claude's interactive /usage panel for the real 5-hour and
+  // weekly limit windows. This is the only source in Claude builds whose status
+  // payload omits rate_limits. Cached automatically; manual refresh bypasses it.
   try {
     const command = await resolveCommand('claude')
-    const scraped = await collectClaudeUsageWindows(command)
+    const account = await claudeAccountStatus(undefined, command)
+    if (!account.connected) {
+      const reason = new Error('Claude Code is signed out. Connect its Pro or Max account to sync plan limits.')
+      reason.code = 'CLAUDE_LOGIN_REQUIRED'
+      throw reason
+    }
+    const scraped = await collectClaudeUsageWindows(command, { force })
     const windows = scraped.windows.map((window) => ({
       id: String(window.id || ''),
       label: String(window.label || 'All models'),
@@ -268,8 +291,10 @@ async function collectClaude () {
     // (messages/sessions this week) so the app still shows honest Claude usage.
     const activity = await collectClaudeActivity()
     const quotaError = error?.code === 'CLAUDE_SUBSCRIPTION_REQUIRED'
-      ? 'Claude Code is using API billing. Reconnect it with a Pro or Max subscription to show rate limits.'
-      : `Claude rate limits unavailable: ${safeError(error)}`
+      ? 'Claude Code did not expose subscription limits. Reconnect its Pro or Max account, then refresh.'
+      : error?.code === 'CLAUDE_LOGIN_REQUIRED'
+          ? error.message
+          : `Claude rate limits unavailable: ${safeError(error)}`
     if (!activity.available) throw new Error(quotaError)
     return {
       plan: error?.code === 'CLAUDE_SUBSCRIPTION_REQUIRED' ? 'API billing' : 'Claude',
@@ -599,9 +624,9 @@ export class UsageService extends EventEmitter {
     this.timer = null
   }
 
-  refresh () {
+  refresh (force = false) {
     if (this.inFlight) return this.inFlight
-    this.inFlight = this.doRefresh().finally(() => { this.inFlight = null })
+    this.inFlight = this.doRefresh(force).finally(() => { this.inFlight = null })
     return this.inFlight
   }
 
@@ -613,11 +638,11 @@ export class UsageService extends EventEmitter {
     this.emitState()
   }
 
-  async doRefresh () {
+  async doRefresh (force = false) {
     this.state = { ...this.state, refreshing: true }
     this.emitState()
 
-    const collectors = { claude: collectClaude, codex: collectCodex, kimi: collectKimi }
+    const collectors = { claude: () => collectClaude(force), codex: collectCodex, kimi: collectKimi }
     // Publish each provider the moment its collector settles, and time each one
     // out. A single slow/hung collector (e.g. a stalled codex app-server) must
     // never freeze the whole panel — fast providers like Claude activity should

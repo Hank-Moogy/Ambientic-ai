@@ -638,7 +638,7 @@ ipcMain.handle('set-ambient-mode-check-in', (_event, minutes) => {
   if (state) savePrefs({ ...loadPrefs(), ambientModeCheckInMinutes: state.checkInMinutes })
   return state
 })
-ipcMain.handle('refresh-usage', () => usage.refresh())
+ipcMain.handle('refresh-usage', () => usage.refresh(true))
 ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
 ipcMain.handle('refresh-connectors', () => refreshConnectors())
 ipcMain.handle('get-provider-auth', () => Object.fromEntries(providerAuthState))

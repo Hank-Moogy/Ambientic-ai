@@ -87,6 +87,16 @@ def parse(text):
     return windows
 
 
+def tab_navigation_count(text):
+    """Return legacy tab moves, or zero when /usage already opens Usage."""
+    lower = text.lower()
+    if not all(label in lower for label in ("status", "config", "usage")):
+        return None
+    # Claude 2.1.220 added Stats and opens /usage directly on Usage. The older
+    # three-tab Settings screen opened on Status and required two right arrows.
+    return 0 if "stats" in lower else 2
+
+
 def kill(pid):
     for target in (lambda: os.killpg(os.getpgid(pid), signal.SIGKILL),
                    lambda: os.kill(pid, signal.SIGKILL)):
@@ -114,6 +124,8 @@ def main():
     buf = bytearray()
     start = time.time()
     opened = submitted = confirmed = usage_tab_selected = False
+    usage_tab_steps = 0
+    last_tab_step_at = 0.0
 
     while time.time() - start < 12:
         try:
@@ -135,19 +147,8 @@ def main():
         lower = screen.lower()
         # Claude first opens slash-command completion, so `/usage` needs one
         # Enter to select the command and (on current builds) a second Enter to
-        # execute it. Once the settings panel appears it initially selects
-        # Status; two right arrows select the Usage tab on both old and new TUIs.
-        if elapsed > 2.0 and "api usage billing" in lower:
-            kill(pid)
-            try:
-                os.close(master)
-            except OSError:
-                pass
-            print(json.dumps({
-                "code": "CLAUDE_SUBSCRIPTION_REQUIRED",
-                "error": "Claude Code is not authenticated with your Claude subscription (it fell back to API billing), so it reports no plan limits. Run `claude /login` in a terminal, then refresh.",
-            }))
-            return
+        # execute it. Legacy Settings opens on Status and needs two right arrows;
+        # current four-tab Settings opens /usage directly on Usage.
         if not opened and elapsed > 2.0 and ("❯" in screen or "try \"" in lower):
             os.write(master, b"/usage")
             opened = True
@@ -157,22 +158,7 @@ def main():
         elif submitted and not confirmed and elapsed > 3.7:
             os.write(master, b"\r")
             confirmed = True
-        elif confirmed and not usage_tab_selected and "status" in lower and "config" in lower and "usage" in lower:
-            os.write(master, b"\x1b[C\x1b[C")
-            usage_tab_selected = True
-        elif confirmed and ("api usage billing" in lower or
-                            ("only" in lower and "subscription" in lower and "plans" in lower)):
-            kill(pid)
-            try:
-                os.close(master)
-            except OSError:
-                pass
-            print(json.dumps({
-                "code": "CLAUDE_SUBSCRIPTION_REQUIRED",
-                "error": "Claude Code is not authenticated with your Claude subscription (it fell back to API billing), so it reports no plan limits. Run `claude /login` in a terminal, then refresh.",
-            }))
-            return
-        elif usage_tab_selected and ("current session" in lower or "current week" in lower) and elapsed > 5.0:
+        elif confirmed and ("current session" in lower or "current week" in lower) and elapsed > 4.5:
             # Give the final percentages/reset labels a moment to finish drawing.
             time.sleep(0.7)
             try:
@@ -184,6 +170,22 @@ def main():
             except OSError:
                 pass
             break
+        elif confirmed and not usage_tab_selected and tab_navigation_count(screen) == 0:
+            # Claude Code 2.1.220+ opens /usage on the Usage tab directly. Its
+            # fourth Stats tab makes the older two-arrow workaround wrap through
+            # Stats and back to Status, hiding the limits we came to read.
+            usage_tab_selected = True
+        elif (confirmed and not usage_tab_selected and elapsed > 5.5 and
+              tab_navigation_count(screen) == 2):
+            # Some Claude builds open Settings on Status even when /usage was
+            # requested. Move to Usage one tab at a time: sending both arrows in
+            # one write is occasionally coalesced or dropped while the panel is
+            # still mounting.
+            if usage_tab_steps == 0 or elapsed - last_tab_step_at >= 0.35:
+                os.write(master, b"\x1b[C")
+                usage_tab_steps += 1
+                last_tab_step_at = elapsed
+                usage_tab_selected = usage_tab_steps >= 2
         elif confirmed and elapsed > 10.5:
             break
 
@@ -194,10 +196,33 @@ def main():
         pass
 
     windows = parse(clean(bytes(buf)))
-    print(json.dumps({"plan": "subscription", "windows": windows} if windows else {
+    # Do not infer the account type from the words "API usage billing". Current
+    # Claude Code versions show that label for optional extra usage on valid Pro
+    # accounts too. Only the presence of actual quota windows is authoritative.
+    failure = {
         "code": "CLAUDE_USAGE_UNAVAILABLE",
         "error": "Claude /usage opened, but its subscription limit windows did not render.",
-    }))
+        "diagnostic": {
+            "commandOpened": opened,
+            "commandSubmitted": submitted,
+            "commandConfirmed": confirmed,
+            "usageTabSelected": usage_tab_selected,
+            "usageTabSteps": usage_tab_steps,
+            "sawStatus": "status" in lower,
+            "sawConfig": "config" in lower,
+            "sawUsage": "usage" in lower,
+            "sawCurrentSession": "current session" in lower,
+            "sawCurrentWeek": "current week" in lower,
+            "sawFiveHour": "five hour" in lower or "5-hour" in lower or "5 hour" in lower,
+            "sawWeekly": "weekly" in lower or "week" in lower,
+            "sawAllModels": "all models" in lower,
+            "sawLimit": "limit" in lower,
+            "sawResets": "reset" in lower,
+            "sawExtraUsage": "extra usage" in lower,
+            "sawIncludedUsage": "included usage" in lower,
+        },
+    }
+    print(json.dumps({"plan": "subscription", "windows": windows} if windows else failure))
 
 
 if __name__ == "__main__":

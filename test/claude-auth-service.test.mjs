@@ -8,6 +8,7 @@ import {
   claudeAuthPhase,
   cleanClaudeAuthOutput,
   parseClaudeAccountState,
+  parseClaudeCliAuthStatus,
   prepareClaudeAuthorizationCode,
   validClaudeAuthUrl
 } from '../src/main/claude-auth-service.mjs'
@@ -67,4 +68,18 @@ test('reads only non-secret Claude account metadata for login verification', () 
     { connected: true, email: 'person@example.com', detail: 'Claude subscription account is present in Claude Code.' }
   )
   assert.equal(parseClaudeAccountState({ oauthAccount: { emailAddress: 'person@example.com' } }).connected, false)
+})
+
+test('treats the Claude CLI live auth result as authoritative', () => {
+  assert.deepEqual(parseClaudeCliAuthStatus('{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}'), {
+    connected: false,
+    authMethod: '',
+    detail: 'Claude Code reports that it is signed out.'
+  })
+  assert.deepEqual(parseClaudeCliAuthStatus({ loggedIn: true, authMethod: 'claude.ai' }), {
+    connected: true,
+    authMethod: 'claude.ai',
+    detail: 'Claude Code confirmed claude.ai authentication.'
+  })
+  assert.equal(parseClaudeCliAuthStatus('error: unknown option --json'), null)
 })

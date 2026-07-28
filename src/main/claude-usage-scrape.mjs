@@ -49,7 +49,8 @@ export function scrapeClaudeUsage (claudePath) {
 }
 
 // Cached wrapper. Throws on failure (the caller falls back to activity).
-export async function collectClaudeUsageWindows (claudePath) {
+export async function collectClaudeUsageWindows (claudePath, { force = false } = {}) {
+  if (force) cache = { at: 0, value: null, error: null }
   const now = Date.now()
   const ttl = cache.error ? FAILURE_TTL_MS : SUCCESS_TTL_MS
   if (cache.at && now - cache.at < ttl) {

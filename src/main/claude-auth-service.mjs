@@ -56,11 +56,58 @@ export function parseClaudeAccountState (value) {
   }
 }
 
-export async function claudeAccountStatus (configPath = join(homedir(), '.claude.json')) {
+export function parseClaudeCliAuthStatus (value) {
   try {
-    return parseClaudeAccountState(await readFile(configPath, 'utf8'))
+    const state = typeof value === 'string' ? JSON.parse(value) : value
+    if (typeof state?.loggedIn !== 'boolean') return null
+    return {
+      connected: state.loggedIn,
+      authMethod: state.loggedIn ? String(state.authMethod || '') : '',
+      detail: state.loggedIn
+        ? `Claude Code confirmed ${state.authMethod || 'account'} authentication.`
+        : 'Claude Code reports that it is signed out.'
+    }
   } catch {
-    return { connected: false, email: '', detail: '' }
+    return null
+  }
+}
+
+function cliAuthStatus (commandPath) {
+  return new Promise((resolve) => {
+    if (!commandPath) return resolve(null)
+    const child = spawn(commandPath, ['auth', 'status', '--json'], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let output = ''
+    const timer = setTimeout(() => child.kill('SIGKILL'), 5000)
+    const append = (chunk) => {
+      output += chunk.toString()
+      if (output.length > 64 * 1024) child.kill('SIGKILL')
+    }
+    child.stdout.on('data', append)
+    child.stderr.on('data', append)
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      resolve(parseClaudeCliAuthStatus(output.trim()))
+    })
+  })
+}
+
+export async function claudeAccountStatus (configPath = join(homedir(), '.claude.json'), commandPath = '') {
+  const live = await cliAuthStatus(commandPath)
+  let metadata = { connected: false, email: '', detail: '' }
+  try {
+    metadata = parseClaudeAccountState(await readFile(configPath, 'utf8'))
+  } catch {}
+  if (!live) return metadata
+  return {
+    connected: live.connected,
+    email: live.connected ? metadata.email : '',
+    detail: live.detail
   }
 }
 
@@ -198,7 +245,7 @@ export class ClaudeAuthService extends EventEmitter {
   }
 
   async verify (processExited = false) {
-    const result = await claudeAccountStatus()
+    const result = await claudeAccountStatus(undefined, this.path)
     if (result.connected) {
       this.finish(true, '', result.email)
       return true

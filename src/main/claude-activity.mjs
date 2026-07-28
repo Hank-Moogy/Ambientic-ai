@@ -2,15 +2,10 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-// Claude Code does NOT expose subscription rate-limit windows (the 5-hour /
-// weekly "% used" that /usage shows) to any local, non-interactive surface:
-// `claude -p` results carry no rate limits, and the status-line payload has no
-// `rate_limits` field (its keys are context_window, cost, cwd,
-// exceeds_200k_tokens, model, output_style, session_id, transcript_path,
-// version, workspace). The only place local usage is available is Claude's own
-// stats cache, which records real message/session/token activity per day. This
-// module reads that cache so Ambientic can show honest Claude *activity* instead
-// of a quota meter it cannot obtain.
+// Claude's local stats cache records real message/session/token activity per
+// day. Ambientic uses it as an honest fallback when the current Claude build
+// has not supplied rate_limits to the configured status line and its
+// interactive /usage panel cannot be read.
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 

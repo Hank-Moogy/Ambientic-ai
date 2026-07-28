@@ -100,10 +100,10 @@ function authStatus (agent, path) {
     })
   }
   if (agent.id === 'claude') {
-    return claudeAccountStatus().then((status) => ({
+    return claudeAccountStatus(undefined, path).then((status) => ({
       authenticated: status.connected,
       accountLabel: status.email,
-      authMessage: status.connected ? '' : 'Run claude /login'
+      authMessage: status.connected ? '' : 'Claude Code is signed out. Connect its Pro or Max account.'
     }))
   }
   const args = agent.id === 'codex' ? ['login', 'status'] : ['status']

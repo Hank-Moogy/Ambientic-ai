@@ -42,46 +42,18 @@ committing them.
 2. **Better compaction.** `compactClaudeContext` keeps the recent tail verbatim
    within a char budget and drops older messages. Optionally LLM-summarize the
    dropped head (bounded) and prepend it, so long-range context survives.
-3. **Claude usage display — RESOLVED as far as data goes; needs UI wiring.**
+3. **Claude usage display — wired; live reconnection remains.**
 
-   Finding (verified empirically): Claude subscription quota % (the 5h/weekly
-   meters, like Codex) is NOT obtainable from any clean local source.
-   - `claude -p --output-format json` result carries no rate limits (only token
-     counts under `usage`).
-   - The status-line stdin payload has NO `rate_limits` field. Real top-level
-     keys: context_window, cost, cwd, exceeds_200k_tokens, model, output_style,
-     session_id, transcript_path, version, workspace.
-   - Nothing on disk caches the quota windows.
-   => The `hook/claude-statusline.py` + `collectClaude` (reads
-      `~/.ambientic/claude-usage.json`) approach cannot populate and should be
-      retired or repurposed. Quota % for Claude is only available via the
-      interactive `/usage` TUI (fragile scrape) or the credentialed API
-      (off-limits). Do not fake a percentage.
+   Ambientic now uses a three-level local strategy: a fresh structured
+   `~/.ambientic/claude-usage.json` status-line observation, Claude's interactive
+   `/usage` panel, then honest seven-day activity from
+   `~/.claude/stats-cache.json`. Current Claude documentation and newer clients
+   can supply `rate_limits` to a custom status line, so that bridge must remain.
 
-   Clean, working alternative (implemented): `src/main/claude-activity.mjs`
-   reads `~/.claude/stats-cache.json` and returns real weekly Claude *activity*
-   (messages, sessions, tool calls, tokens by model). Always available, zero
-   setup, updates whenever Claude is used. Tested in
-   `test/claude-activity.test.mjs`.
-
-   WIRED IN (uncommitted, in the concurrent session's shared files — review
-   before committing, do not drop):
-   - `src/main/usage.js`: `collectClaude` now falls back to
-     `collectClaudeActivity()` (import added) when the status-line cache is
-     absent, returning `{ plan:'subscription', windows: [], activity,
-     source:'claude-stats-cache' }`.
-   - `src/renderer/Workspace.jsx`: THREE spots now surface `activity` when a
-     provider has no quota windows:
-     - `ConsumptionBoard` (Settings -> Usage & Billing): activity card.
-     - `OverviewUsageBalance` (Overview "Provider balance" panel): shows
-       "N messages · N sessions this week" and N as the headline number.
-     - `compactUsage` (Overview provider pads): "N msgs this week" footer.
-   Verified end-to-end via smoke screenshot: the Overview shows Claude
-   "39 messages · 6 sessions this week". NOTE the Overview usage panel is blank
-   for ~20s on startup because the usage refresh is atomic and waits for the
-   slowest collector (Codex app-server); consider updating providers as each
-   collector resolves. These edits were intentionally NOT committed — commit
-   them with the concurrent session's usage work.
-
-   Optional cleanup once confirmed: retire `hook/claude-statusline.py` and the
-   `rate_limits` path in `collectClaude`, since Claude never sends that field.
+   A 2026-07-28 audit found that the profile metadata still describes Claude
+   Pro while the current CLI authoritatively returns `loggedIn: false`.
+   Ambientic now trusts `claude auth status --json`, never treats the words
+   “API usage billing” alone as an account-mode signal, and handles both the
+   legacy three-tab and Claude Code 2.1.220 four-tab `/usage` screens. The user
+   must reconnect the Pro/Max account before accepting the five-hour/weekly
+   gauges as live.
