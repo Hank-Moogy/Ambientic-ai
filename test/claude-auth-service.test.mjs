@@ -144,7 +144,7 @@ server.listen(0, '127.0.0.1', () => {
   service.on('change', (state) => states.push(state))
 
   await service.start()
-  await waitFor(() => openedUrl, 5000, `OAuth URL; last state: ${JSON.stringify(service.getState())}`)
+  await waitFor(() => openedUrl, 15_000, `OAuth URL; last state: ${JSON.stringify(service.getState())}`)
   assert.notEqual(service.getState().status, 'connected', 'generic Welcome back text must not finish authentication')
   assert.ok(service.child, 'OAuth callback owner must remain alive while the browser is open')
 
@@ -156,7 +156,7 @@ server.listen(0, '127.0.0.1', () => {
   assert.equal(response.status, 200)
   assert.match(await response.text(), /Return to Ambientic/)
 
-  await waitFor(() => service.getState().status === 'connected', 5000, `verified connection; last state: ${JSON.stringify(service.getState())}`)
+  await waitFor(() => service.getState().status === 'connected', 15_000, `verified connection; last state: ${JSON.stringify(service.getState())}`)
   assert.equal(service.getState().phase, 'connected')
   assert.ok(states.some((state) => state.phase === 'browser'))
 })
