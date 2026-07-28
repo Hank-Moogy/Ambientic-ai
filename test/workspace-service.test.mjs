@@ -1,6 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { homedir } from 'node:os'
 import { WorkspaceService } from '../src/main/workspace-service.mjs'
+
+test('managed tasks require a specific project folder instead of using the home directory', async () => {
+  const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
+  await assert.rejects(service.create({ provider: 'codex', cwd: '' }), /specific project folder/)
+  await assert.rejects(service.create({ provider: 'codex', cwd: homedir() }), /not your whole home/)
+  await assert.rejects(service.create({ provider: 'codex', cwd: '/path/that/does/not/exist' }), /not available/)
+})
 
 test('reconciles a partial Hermes ACP stream with the completed database transcript', async () => {
   const session = { id: 'hermes-session', agent: 'hermes', cwd: '/tmp/project', state: 'running' }

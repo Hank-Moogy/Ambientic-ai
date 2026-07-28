@@ -746,6 +746,14 @@ ipcMain.handle('choose-thread-context', async () => {
   if (result.canceled) return []
   return result.filePaths.slice(0, 12).map((path) => ({ path }))
 })
+ipcMain.handle('choose-project-folder', async () => {
+  const result = await dialog.showOpenDialog(workspaceWin || win, {
+    title: 'Choose a project folder',
+    buttonLabel: 'Use this folder',
+    properties: ['openDirectory', 'createDirectory']
+  })
+  return result.canceled ? '' : (result.filePaths[0] || '')
+})
 ipcMain.handle('send-thread-prompt', (_event, id, text, options = {}) => workspace.send(id, text, options))
 ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))

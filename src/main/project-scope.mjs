@@ -29,5 +29,5 @@ export function protectedHomeChild (path, home = homedir()) {
 }
 
 export function canInspectProjectRoot (cwd, home = homedir()) {
-  return !isBroadProjectRoot(cwd, home)
+  return !isBroadProjectRoot(cwd, home) && !protectedHomeChild(cwd, home)
 }

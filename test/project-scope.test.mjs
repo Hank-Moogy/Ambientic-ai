@@ -20,4 +20,7 @@ test('identifies macOS protected home collections', () => {
   assert.equal(protectedHomeChild('/Users/person/Music/library.musiclibrary', home), 'Music')
   assert.equal(protectedHomeChild('/Users/person/Pictures/Photos Library.photoslibrary', home), 'Pictures')
   assert.equal(protectedHomeChild('/Users/person/Documents/project', home), 'Documents')
+  assert.equal(canInspectProjectRoot('/Users/person/Music/project', home), false)
+  assert.equal(canInspectProjectRoot('/Users/person/Pictures/project', home), false)
+  assert.equal(canInspectProjectRoot('/Users/person/Documents/project', home), false)
 })

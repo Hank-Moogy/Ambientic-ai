@@ -22,6 +22,7 @@ The experience should suggest:
 4. **Depth without fog.** Translucency, bloom, and gradients create atmosphere, but text and controls retain strong contrast.
 5. **Rhythm over spectacle.** Animation should have phrasing, rests, and variation. Avoid uniform loading-spinner motion.
 6. **One instrument.** MIDI light, on-screen motion, preview transitions, and future sound should share timing and color language.
+7. **Permission under the hand.** Protected folders, microphone capture, screen preview, and external surfaces are touched only after an explicit user action. Background ambience must never create a macOS permission surprise.
 
 Provider filters should remain compact, icon-led, and softly illuminated in each provider’s accent. They organize attention without turning the sidebar into a toolbar.
 

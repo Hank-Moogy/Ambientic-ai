@@ -314,9 +314,13 @@ function Approval ({ approval, onResolve }) {
 function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
   const taskConnectors = connectors.filter((item) => item.taskCapable !== false && providerCatalog.some((provider) => provider.id === item.id))
   const [provider, setProvider] = useState(initialProvider || taskConnectors.find((item) => item.manageable !== false)?.id || 'codex')
-  const [cwd, setCwd] = useState('/Users/samori')
+  const [cwd, setCwd] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const chooseFolder = async () => {
+    const selected = await window.controller.chooseProjectFolder()
+    if (selected) setCwd(selected)
+  }
   const submit = async (event) => {
     event.preventDefault(); setBusy(true)
     try { await onCreate({ provider, cwd, prompt }) } finally { setBusy(false) }
@@ -328,7 +332,7 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
         <label>Provider<div className="provider-choices">
           {taskConnectors.map((connector) => <button key={connector.id} type="button" data-selected={provider === connector.id} disabled={!connector.installed || connector.manageable === false} title={connector.authMessage || ''} onClick={() => setProvider(connector.id)}><AgentIcon agent={connector.id} /><span>{connector.label}<small>{!connector.installed ? 'Not installed' : connector.manageable === false ? 'Run /login first' : 'Uses local login'}</small></span></button>)}
         </div></label>
-        <label>Working folder<input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/path/to/project" /></label>
+        <label>Working folder<div className="new-task-folder"><input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="Choose a specific project folder" /><button type="button" onClick={chooseFolder}>Choose…</button></div><small>Ambientic does not scan your home or protected folders automatically.</small></label>
         <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should this agent do? (optional)" autoFocus /></label>
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !cwd} type="submit">{busy ? 'Starting…' : 'Start task'}</button></footer>
       </form>

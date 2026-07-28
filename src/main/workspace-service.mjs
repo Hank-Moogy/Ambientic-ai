@@ -6,6 +6,7 @@ import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
+import { isBroadProjectRoot } from './project-scope.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -692,7 +693,18 @@ export class WorkspaceService extends EventEmitter {
   }
 
   async create ({ provider, cwd, prompt }) {
-    const workingDirectory = cwd || homedir()
+    const workingDirectory = String(cwd || '').trim()
+    if (!workingDirectory || !isAbsolute(workingDirectory)) {
+      throw new Error('Choose a specific project folder before starting an agent.')
+    }
+    if (isBroadProjectRoot(workingDirectory)) {
+      throw new Error('Choose a project folder inside your home directory, not your whole home or filesystem.')
+    }
+    try {
+      if (!statSync(workingDirectory).isDirectory()) throw new Error('not a directory')
+    } catch {
+      throw new Error('The selected project folder is not available.')
+    }
     if (provider === 'codex') {
       const rpc = await this.codexClient()
       const result = await rpc.request('thread/start', { cwd: workingDirectory })

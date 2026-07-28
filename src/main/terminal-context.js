@@ -123,13 +123,17 @@ async function kimiContext (session) {
 export async function terminalContext (session) {
   const base = [session.contextText, session.task, session.summary].filter(Boolean).join(' ')
   const cwd = String(session.terminalCwd || session.cwd || '')
+  // Chat/state discovery is safe for every session, but background context
+  // enrichment must not make macOS ask for protected-folder access. Users can
+  // still attach or choose those folders explicitly.
+  if (!canInspectProjectRoot(cwd)) {
+    return { direct: base.slice(-8_000), transcript: '', changedFiles: '' }
+  }
   let transcript = ''
   if (session.agent === 'claude') transcript = await claudeContext(session)
   else if (session.agent === 'codex') transcript = await codexContext(session)
   else if (session.agent === 'kimi') transcript = await kimiContext(session)
-  const changedFiles = cwd && canInspectProjectRoot(cwd)
-    ? await run('/usr/bin/git', ['-C', cwd, 'status', '--porcelain=v1'], 3500)
-    : ''
+  const changedFiles = await run('/usr/bin/git', ['-C', cwd, 'status', '--porcelain=v1'], 3500)
   return {
     // Keep these signals separate. A route word in the current prompt or in a
     // changed filename is much stronger than an old mention buried in a long
