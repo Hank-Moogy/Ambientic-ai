@@ -30,8 +30,8 @@ This increment is deliberately personal and local. It adds the first full Ambien
 2. See whether Claude Code, Codex, and Hermes are installed and connected.
 3. Land on an **Overview** command center instead of a conventional chat-history list.
 4. See animated Codex, Claude Code, Hermes, and create-task pads alongside active, needs-input, total-thread, and APC hardware signals.
-5. Browse a cross-provider thread mosaic; select any card to open its full transcript, composer, approvals, and artifacts in the preserved **Threads** tab.
-6. Start a managed local task from a provider pad or create-task pad by choosing a provider, working folder, and first prompt; Ambientic uses the provider's existing local login.
+5. Select a centered provider card to refresh its conversations and enter **Threads** on that provider's latest work with its filter already active.
+6. Browse the cross-provider thread mosaic, or start a managed local task from the dedicated create-task pad by choosing a provider, working folder, and first prompt; Ambientic uses the provider's existing local login.
 7. Press an APC40 MKII pad to open that exact live task in **Threads** and present its linked localhost, iOS, or Android preview; then hold that physical column's **Record Arm** button to speak and release it to transcribe and send.
 8. Use green running, red input-required, and blue idle pad feedback, or open the compact controller for previews, usage, connectors, and MIDI Learn mappings.
 
@@ -39,7 +39,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 
 - Local macOS Electron application and menu-bar utility.
 - Full desktop workspace with project-grouped task navigation, transcript, shared composer, approval cards, task state, and artifact list.
-- Experimental Overview landing surface with slowly floating provider pads, live metrics, provider-aware task creation, and a dense cross-provider thread mosaic.
+- Experimental Overview landing surface with slowly floating provider portals, live metrics, dedicated provider-aware task creation, and a dense cross-provider thread mosaic.
 - Settings → Usage & Billing with comparable Codex and Claude short/weekly quota meters, reset windows, stale/error states, manual refresh, and local weekly-session activity whenever a provider does not expose usable quota data.
 - Persistent local capacity ledger and Settings activity panel for provider limit hits, Codex reset-credit use, natural quota renewals, purchased-credit balance changes, and current observed balances. Codex reset allowance is shown beside its live plan without treating subscription capacity as currency spend.
 - Explicit Overview and Threads navigation, preserving the conventional conversation interface as a secondary tab rather than the product's default mental model.
@@ -58,7 +58,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Read-only import of the eight most recently active Codex desktop tasks from Codex's local index.
 - Direct `codex://threads/<id>` navigation back to imported Codex desktop tasks.
 - Session cards named from the active task, provider surface, or meaningful project instead of the macOS account folder.
-- Lifecycle events normalized into running, waiting, attention, idle, and ended states. A completed managed turn is idle/done, not red. The provider-neutral resolver is shared by workspace cards, transcript headers, compact controller, and APC LEDs: explicit approval/user-input signals override a still-live provider process; known managed turns override stale hooks; passive Claude/Hermes transcript reads preserve live terminal hook state; lifecycle changes synchronize before rendering and resolving an approval immediately clears the signal.
+- Lifecycle events normalized into running, waiting, attention, idle, and ended states. A completed managed turn is idle/done, not red. The provider-neutral resolver is shared by workspace cards, transcript headers, compact controller, and APC LEDs: explicit approval/user-input signals override a still-live provider process; real Codex Desktop and terminal-hook lifecycles cannot be demoted by a passive transcript reader running in another provider process; managed notifications can still promote work immediately; lifecycle changes synchronize before rendering and resolving an approval immediately clears the signal.
 - Exact Ghostty pane focus when its TTY AppleScript API is available.
 - Localhost and simulator companion previews.
 - APC40 task activation is a complete context switch: exact thread selection, immediate preview rescan, automatic presentation on the configured preview display, and a right-side single-display fallback.
@@ -174,7 +174,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
 ### Completed
 
@@ -284,6 +284,7 @@ Last updated: 2026-07-27
 - [x] Successful Claude authentication now leaves the blocking wizard immediately and becomes one dismissible confirmation toast; dismissal clears both renderer and main-process feedback so a completed login cannot reopen the modal.
 - [x] Overview provider-card identity marks and labels are centered on a shared visual axis, with the operational state dot retained independently in the corner.
 - [x] Overview provider cards now open existing work instead of the new-task dialog: selecting Codex, Claude Code, or Hermes refreshes the workspace index, opens Threads with that provider filter active, clears stale search text, and selects that provider’s latest thread. The dedicated create-task card remains the only creation shortcut in the provider field.
+- [x] Codex Desktop running state remains authoritative after a conversation is opened in Ambientic: the passive transcript app-server can enrich messages and promote activity, but its separate idle result can no longer demote a real in-progress Desktop turn or turn the corresponding screen/APC signal blue.
 - [x] Native four-screen first-run experience added: mysterious Welcome, local display-name capture, provider connection/first-task choice, and skippable MIDI controller discovery before Overview.
 - [x] Onboarding uses full-screen single decisions, oversized type, floating spatial objects, provider-specific connection cards, one dominant CTA, reduced-motion support, and the ambient game/instrument language recorded in `ART_DIRECTION.md`.
 - [x] Codex and Claude reuse their guided Ambientic authentication; Hermes opens its provider-owned local setup; Kimi Code is detected as an account-only connector and links to its official install path when absent.
@@ -339,7 +340,8 @@ Last updated: 2026-07-27
 ### Verification
 
 - 2026-07-27 crash investigation: both macOS reports (`15:08:37` and `15:15:07`) terminate with `SIGABRT` on the main thread inside `MidiInCore::getCoreMidiClientSingleton` during `new midi.Input()`. The controller-lifetime regression confirms repeated disconnected reconnects construct exactly one native input and output pair.
-- `npm test`: 97 tests passing, including a simulated browser-to-localhost Claude OAuth callback, post-login forced usage refresh, non-repeating Claude success feedback, provider-filtered latest-thread entry, CoreMIDI client reuse, protected project-scope boundaries, build identity, inherited provider-session environment sanitization, transcript navigation, provider approvals, current/legacy Claude usage navigation, live Claude authentication truth, MIDI layouts, voice validation, and cross-provider workspace behavior.
+- `npm test`: 97 tests passing, including a simulated browser-to-localhost Claude OAuth callback, post-login forced usage refresh, non-repeating Claude success feedback, provider-filtered latest-thread entry, passive-reader versus live-Codex state precedence, CoreMIDI client reuse, protected project-scope boundaries, build identity, inherited provider-session environment sanitization, transcript navigation, provider approvals, current/legacy Claude usage navigation, live Claude authentication truth, MIDI layouts, voice validation, and cross-provider workspace behavior.
+- 2026-07-28 live Codex state audit: this exact Codex Desktop thread was `running` in both its local index and Ambientic's discovery store while the opened Ambientic conversation appeared idle. A regression now proves a separate passive app-server read cannot write a false idle lifecycle or override the authoritative Desktop state.
 - 2026-07-28 Overview provider-card verification: focused regressions confirm connected Claude auth uses non-modal success feedback and provider-filtered ordering selects the newest matching conversation. The production renderer build succeeds with centered provider identities and the refreshed provider-to-Threads transition.
 - 2026-07-28 Claude OAuth root-cause regression: a fake official CLI prints the misleading “Welcome back” text, owns an ephemeral localhost callback, receives a simulated browser authorization redirect, persists its credential marker, and only then returns `loggedIn: true`. Ambientic remains in `waiting` before the callback and reaches `connected` only after the authoritative check.
 - 2026-07-28 Claude usage audit: the local profile metadata identifies a valid Claude Pro Apple subscription, but every installed current Claude CLI returns `{"loggedIn":false,"authMethod":"none"}`. Ambientic now treats that live result as authoritative, reports `CLAUDE_LOGIN_REQUIRED`, preserves the real seven-day fallback (1,597 messages across 15 sessions at audit time), and never infers API billing from optional-extra-usage copy. Targeted tests, the full 92-test suite, and the production build pass.
