@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   ClaudeAuthService,
   claudeAuthPhase,
@@ -82,4 +85,78 @@ test('treats the Claude CLI live auth result as authoritative', () => {
     detail: 'Claude Code confirmed claude.ai authentication.'
   })
   assert.equal(parseClaudeCliAuthStatus('error: unknown option --json'), null)
+})
+
+function waitFor (predicate, timeout = 5000, label = 'Claude auth test state') {
+  return new Promise((resolve, reject) => {
+    const started = Date.now()
+    const check = () => {
+      const value = predicate()
+      if (value) return resolve(value)
+      if (Date.now() - started >= timeout) return reject(new Error(`Timed out waiting for ${label}`))
+      setTimeout(check, 20)
+    }
+    check()
+  })
+}
+
+test('keeps Claude OAuth callback alive until live auth verification succeeds', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'ambientic-claude-auth-'))
+  const marker = join(directory, 'authenticated')
+  const fakeClaude = join(directory, 'claude.mjs')
+  const source = `#!/usr/bin/env node
+import { existsSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+const marker = process.env.FAKE_CLAUDE_AUTH_MARKER
+const args = process.argv.slice(2)
+if (args.join(' ') === 'auth status --json') {
+  const loggedIn = existsSync(marker)
+  process.stdout.write(JSON.stringify({ loggedIn, authMethod: loggedIn ? 'claude.ai' : 'none', apiProvider: 'firstParty' }))
+  process.exit(loggedIn ? 0 : 1)
+}
+if (args.join(' ') !== 'auth login --claudeai') process.exit(2)
+const server = createServer((request, response) => {
+  const url = new URL(request.url, 'http://127.0.0.1')
+  if (url.pathname !== '/callback' || url.searchParams.get('state') !== 'ambientic-state') {
+    response.writeHead(400); response.end('invalid callback'); return
+  }
+  writeFileSync(marker, 'connected')
+  response.writeHead(200, { 'content-type': 'text/plain' })
+  response.end('Connected. Return to Ambientic.', () => server.close())
+})
+server.listen(0, '127.0.0.1', () => {
+  const redirect = encodeURIComponent('http://127.0.0.1:' + server.address().port + '/callback')
+  process.stdout.write('Welcome back\\nOpening browser to sign in…\\nhttps://claude.ai/oauth/authorize?client_id=test&response_type=code&redirect_uri=' + redirect + '&state=ambientic-state\\n')
+})
+`
+  await writeFile(fakeClaude, source)
+  await chmod(fakeClaude, 0o755)
+
+  let openedUrl = ''
+  const states = []
+  const service = new ClaudeAuthService({
+    path: fakeClaude,
+    helperPath,
+    env: { ...process.env, FAKE_CLAUDE_AUTH_MARKER: marker },
+    onUrl: async (url) => { openedUrl = url }
+  })
+  context.after(() => service.stop())
+  service.on('change', (state) => states.push(state))
+
+  await service.start()
+  await waitFor(() => openedUrl, 5000, `OAuth URL; last state: ${JSON.stringify(service.getState())}`)
+  assert.notEqual(service.getState().status, 'connected', 'generic Welcome back text must not finish authentication')
+  assert.ok(service.child, 'OAuth callback owner must remain alive while the browser is open')
+
+  const authorization = new URL(openedUrl)
+  const callback = new URL(authorization.searchParams.get('redirect_uri'))
+  callback.searchParams.set('code', 'one-time-code')
+  callback.searchParams.set('state', authorization.searchParams.get('state'))
+  const response = await fetch(callback)
+  assert.equal(response.status, 200)
+  assert.match(await response.text(), /Return to Ambientic/)
+
+  await waitFor(() => service.getState().status === 'connected', 5000, `verified connection; last state: ${JSON.stringify(service.getState())}`)
+  assert.equal(service.getState().phase, 'connected')
+  assert.ok(states.some((state) => state.phase === 'browser'))
 })

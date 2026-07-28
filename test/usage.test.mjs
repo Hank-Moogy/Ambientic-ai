@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { knownUsageCommandCandidates, parseClaudeStatusLineUsage, parseCodexRateLimits, sortClaudeCodeVersions } from '../src/main/usage.js'
+import { knownUsageCommandCandidates, parseClaudeStatusLineUsage, parseCodexRateLimits, sortClaudeCodeVersions, UsageService } from '../src/main/usage.js'
 
 test('finds the Codex binary bundled in ChatGPT when no shell command exists', () => {
   const candidates = knownUsageCommandCandidates('codex', '/Users/tester')
@@ -77,4 +77,28 @@ test('rejects stale Claude status-line limits instead of presenting them as curr
     observedAt: 1,
     windows: [{ id: 'seven-day', period: 'week', usedPercent: 20 }]
   }, 24 * 60 * 60 * 1000 + 2), /stale/i)
+})
+
+test('queues a genuinely fresh provider pass when login completes during a refresh', async () => {
+  let releaseFirst
+  let claudeCalls = 0
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve })
+  const usage = (provider) => ({ plan: 'test', windows: [{ id: `${provider}-week`, period: 'week', usedPercent: 1 }] })
+  const service = new UsageService({
+    collectors: {
+      claude: async () => {
+        claudeCalls += 1
+        if (claudeCalls === 1) await firstGate
+        return usage('claude')
+      },
+      codex: async () => usage('codex'),
+      kimi: async () => usage('kimi')
+    }
+  })
+
+  const initial = service.refresh()
+  const afterLogin = service.refresh(true)
+  releaseFirst()
+  await Promise.all([initial, afterLogin])
+  assert.equal(claudeCalls, 2)
 })

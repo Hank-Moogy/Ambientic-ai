@@ -703,7 +703,16 @@ ipcMain.handle('connect-provider', async (_event, agentId, options = {}) => {
       })
       claudeAuth.on('change', async (state) => {
         pushProviderAuth(state)
-        if (state.status === 'connected') await refreshConnectors()
+        if (state.status === 'connected') {
+          showWorkspace()
+          await refreshConnectors()
+          await usage.refresh(true)
+          pushUsage()
+          pushProviderAuth({
+            ...state,
+            usageReady: Boolean(usage.getState()?.providers?.claude?.windows?.length)
+          })
+        }
       })
     }
     await claudeAuth.start({ method: options.method === 'console' ? 'console' : 'subscription' })

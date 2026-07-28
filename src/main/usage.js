@@ -598,11 +598,12 @@ async function collectKimi () {
 }
 
 export class UsageService extends EventEmitter {
-  constructor () {
+  constructor ({ collectors } = {}) {
     super()
     this.state = initialState()
     this.timer = null
     this.inFlight = null
+    this.collectors = collectors || { claude: collectClaude, codex: collectCodex, kimi: collectKimi }
   }
 
   getState () {
@@ -625,7 +626,9 @@ export class UsageService extends EventEmitter {
   }
 
   refresh (force = false) {
-    if (this.inFlight) return this.inFlight
+    // A verified login must not reuse a pre-login refresh that is still
+    // finishing. Queue one genuinely fresh pass behind it.
+    if (this.inFlight) return force ? this.inFlight.then(() => this.refresh(true)) : this.inFlight
     this.inFlight = this.doRefresh(force).finally(() => { this.inFlight = null })
     return this.inFlight
   }
@@ -642,7 +645,10 @@ export class UsageService extends EventEmitter {
     this.state = { ...this.state, refreshing: true }
     this.emitState()
 
-    const collectors = { claude: () => collectClaude(force), codex: collectCodex, kimi: collectKimi }
+    const collectors = {
+      ...this.collectors,
+      claude: () => this.collectors.claude(force)
+    }
     // Publish each provider the moment its collector settles, and time each one
     // out. A single slow/hung collector (e.g. a stalled codex app-server) must
     // never freeze the whole panel — fast providers like Claude activity should

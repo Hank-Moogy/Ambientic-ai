@@ -598,12 +598,13 @@ function ClaudeAuthWizard ({ auth, onInput, onCancel, onRetry, onClose }) {
         <header><span className="provider-account__icon"><AgentIcon agent="claude" /></span><div><small>Official Claude Code connection</small><h2>{auth.status === 'connected' ? 'Claude is connected' : auth.status === 'failed' ? 'Connection needs attention' : 'Connect your Claude account'}</h2></div>{finished && <button type="button" onClick={onClose}>×</button>}</header>
         <div className="claude-auth-progress"><i data-active={auth.status !== 'failed' && auth.status !== 'cancelled'} /><span>{progress}</span></div>
         {auth.error && <div className="claude-auth-error"><b>What happened</b><span>{auth.error}</span></div>}
+        {auth.status === 'connected' && <div className="claude-auth-step"><span className="claude-auth-step__mark">✓</span><div><h3>Account verified by Claude Code</h3><p>{auth.usageReady ? 'Your plan limits are synced. Continue to the Overview to see current capacity.' : 'Your account is connected. Ambientic is syncing your plan limits for the Overview.'}</p></div></div>}
         {!finished && phase === 'browser' && <div className="claude-auth-step"><span className="claude-auth-step__mark">↗</span><div><h3>Finish signing in with Claude</h3><p>The secure Claude page is open in your browser. Approve the connection there, then return to Ambientic. If Claude gives you a one-time code, paste it here when the field appears.</p></div></div>}
         {!finished && phase === 'code' && <div className="claude-auth-code"><div><span>Authorization code</span><h3>Paste the code from Claude</h3><p>Pasting submits it immediately. Ambientic forwards it directly to Claude Code and never stores it.</p></div><div className="claude-auth-code__field"><input value={answer} autoFocus autoComplete="off" spellCheck="false" aria-label="Claude authorization code" onChange={(event) => setAnswer(event.target.value)} onPaste={(event) => { const pasted = event.clipboardData.getData('text'); if (pasted) { event.preventDefault(); send(pasted) } }} onKeyDown={(event) => { if (event.key === 'Enter') send() }} placeholder="Paste one-time code" /><button className="primary" type="button" disabled={!answer.trim()} onClick={() => send()}>Submit code</button></div></div>}
         {!finished && phase === 'verifying' && <div className="claude-auth-step claude-auth-step--verifying"><span className="claude-auth-spinner" /><div><h3>Verifying with Claude…</h3><p>Your one-time code was submitted. This usually takes only a few seconds.</p></div></div>}
         {!finished && !['browser', 'code', 'verifying'].includes(phase) && <><p>Ambientic is preparing Claude Code’s official subscription login. If Claude presents a choice, use the controls below.</p><div className="claude-auth-controls"><button type="button" title="Previous option" onClick={() => onInput({ action: 'up' })}>↑</button><button type="button" title="Next option" onClick={() => onInput({ action: 'down' })}>↓</button><button className="primary" type="button" onClick={() => onInput({ action: 'enter' })}>Continue</button></div></>}
         <details className="claude-auth-details"><summary>Claude Code details</summary><pre ref={outputRef}>{auth.output || 'Waiting for Claude Code…'}</pre></details>
-        <footer><span>Credentials remain in Claude Code’s macOS Keychain storage.</span>{!finished ? <button type="button" onClick={onCancel}>Cancel</button> : auth.status === 'failed' ? <><button type="button" onClick={onClose}>Close</button><button className="primary" type="button" onClick={onRetry}>Retry connection</button></> : <button className="primary" type="button" onClick={onClose}>Done</button>}</footer>
+        <footer><span>Credentials remain in Claude Code’s macOS Keychain storage.</span>{!finished ? <button type="button" onClick={onCancel}>Cancel</button> : auth.status === 'failed' ? <><button type="button" onClick={onClose}>Close</button><button className="primary" type="button" onClick={onRetry}>Retry connection</button></> : <button className="primary" type="button" onClick={onClose}>Continue to Overview</button>}</footer>
       </section>
     </div>
   )
@@ -886,6 +887,10 @@ export default function Workspace () {
   const selectedIdRef = useRef('')
 
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+
+  useEffect(() => {
+    if (providerAuth?.claude?.status === 'connected') setView('overview')
+  }, [providerAuth?.claude?.updatedAt])
 
   useEffect(() => {
     const triggerVibe = (event) => {

@@ -72,10 +72,11 @@ export function parseClaudeCliAuthStatus (value) {
   }
 }
 
-function cliAuthStatus (commandPath) {
+function cliAuthStatus (commandPath, env = process.env) {
   return new Promise((resolve) => {
     if (!commandPath) return resolve(null)
     const child = spawn(commandPath, ['auth', 'status', '--json'], {
+      env,
       stdio: ['ignore', 'pipe', 'pipe']
     })
     let output = ''
@@ -97,8 +98,8 @@ function cliAuthStatus (commandPath) {
   })
 }
 
-export async function claudeAccountStatus (configPath = join(homedir(), '.claude.json'), commandPath = '') {
-  const live = await cliAuthStatus(commandPath)
+export async function claudeAccountStatus (configPath = join(homedir(), '.claude.json'), commandPath = '', env = process.env) {
+  const live = await cliAuthStatus(commandPath, env)
   let metadata = { connected: false, email: '', detail: '' }
   try {
     metadata = parseClaudeAccountState(await readFile(configPath, 'utf8'))
@@ -112,11 +113,12 @@ export async function claudeAccountStatus (configPath = join(homedir(), '.claude
 }
 
 export class ClaudeAuthService extends EventEmitter {
-  constructor ({ path, helperPath, onUrl }) {
+  constructor ({ path, helperPath, onUrl, env = process.env }) {
     super()
     this.path = path
     this.helperPath = helperPath
     this.onUrl = onUrl
+    this.env = env
     this.child = null
     this.timer = null
     this.verificationTimer = null
@@ -137,11 +139,6 @@ export class ClaudeAuthService extends EventEmitter {
   append (chunk) {
     if (!this.child && ['connected', 'failed', 'cancelled'].includes(this.state.status)) return
     const output = cleanClaudeAuthOutput(`${this.state.output}${chunk}`)
-    if (/Welcome\s*back|Authentication\s+(?:successful|succeeded)|Successfully\s+(?:logged|signed)\s+in/i.test(output)) {
-      this.update({ output })
-      this.finish(true)
-      return
-    }
     const urls = output.match(/https:\/\/[^\s<>"']+/g) || []
     for (const raw of urls) {
       const url = validClaudeAuthUrl(raw)
@@ -162,12 +159,16 @@ export class ClaudeAuthService extends EventEmitter {
           ? 'code'
           : detectedPhase
     const waiting = /browser|authenticate|log in|login|sign in|authorize|select|choose|press enter|continue/i.test(output)
+    const providerReportedSuccess = /Authentication\s+(?:successful|succeeded)|Successfully\s+(?:logged|signed)\s+in/i.test(chunk)
     this.update({
       output,
-      phase,
-      status: ['browser', 'code', 'verifying'].includes(phase) || waiting ? 'waiting' : 'interactive',
+      phase: providerReportedSuccess ? 'verifying' : phase,
+      status: providerReportedSuccess || ['browser', 'code', 'verifying'].includes(phase) || waiting ? 'waiting' : 'interactive',
       error: detectedPhase === 'code-error' ? 'Claude could not accept that authorization code. Paste a fresh code from the browser and try again.' : this.state.error
     })
+    // Provider text is useful progress, never proof. The only success condition
+    // is Claude's separate `auth status --json` result after credentials land.
+    if (providerReportedSuccess) void this.verify(false)
     if (!this.selectionSent && /Claude account with subscription/i.test(output) && /Console|API/i.test(output)) {
       this.selectionSent = true
       setTimeout(() => {
@@ -195,9 +196,12 @@ export class ClaudeAuthService extends EventEmitter {
       error: '',
       startedAt: Date.now()
     })
-    const child = spawn('/usr/bin/python3', [this.helperPath, this.path, '/login'], {
-      cwd: process.env.HOME,
-      env: { ...process.env, TERM: 'xterm-256color', NO_COLOR: '1' },
+    const loginArgs = method === 'console'
+      ? ['auth', 'login', '--console']
+      : ['auth', 'login', '--claudeai']
+    const child = spawn('/usr/bin/python3', [this.helperPath, this.path, ...loginArgs], {
+      cwd: this.env.HOME || process.env.HOME,
+      env: { ...this.env, TERM: 'xterm-256color', NO_COLOR: '1' },
       stdio: ['pipe', 'pipe', 'pipe']
     })
     this.child = child
@@ -245,7 +249,7 @@ export class ClaudeAuthService extends EventEmitter {
   }
 
   async verify (processExited = false) {
-    const result = await claudeAccountStatus(undefined, this.path)
+    const result = await claudeAccountStatus(undefined, this.path, this.env)
     if (result.connected) {
       this.finish(true, '', result.email)
       return true
