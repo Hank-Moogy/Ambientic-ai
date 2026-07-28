@@ -78,8 +78,42 @@ test('effectiveState is the single source of truth with clear precedence', () =>
   // live terminal hooks remain authoritative even after a passive transcript read
   assert.equal(service.effectiveState({ id: 'live', state: 'running', tty: '/dev/ttys1' }, { id: 'live', running: false }), 'running')
   assert.equal(service.effectiveState({ id: 'live', state: 'waiting', tty: '/dev/ttys1' }, { id: 'live', running: true }), 'waiting')
+  // a separate passive Codex app-server cannot demote a real Desktop turn
+  assert.equal(service.effectiveState(
+    { id: 'desktop', state: 'running', externalSource: 'codex-desktop' },
+    { id: 'desktop', running: false, turnStateKnown: true }
+  ), 'running')
   // with no managed snapshot, the store's hook-driven lifecycle state is honored
   assert.equal(service.effectiveState({ id: 'x', state: 'waiting' }, null), 'waiting')
+})
+
+test('reading a Codex Desktop thread never writes a false idle lifecycle', async () => {
+  const session = {
+    id: 'codex-desktop:thread-live',
+    threadId: 'thread-live',
+    agent: 'codex',
+    cwd: '/tmp/project',
+    state: 'running',
+    externalSource: 'codex-desktop'
+  }
+  const ingested = []
+  const service = new WorkspaceService({
+    list: () => [session],
+    ingest: (event) => ingested.push(event)
+  }, () => [{ id: 'codex', label: 'Codex', path: '/tmp/codex' }])
+  service.historyRefreshedAt = Date.now()
+  service.codexClient = async () => ({
+    request: async () => ({
+      thread: { id: 'thread-live', status: { type: 'idle' }, turns: [] }
+    })
+  })
+
+  const snapshot = await service.read(session.id)
+
+  assert.equal(snapshot.running, false)
+  assert.equal(snapshot.turnStateKnown, true)
+  assert.equal(snapshot.state, 'running')
+  assert.deepEqual(ingested, [])
 })
 
 test('resolving an approval clears the "attention" state instead of sticking', async () => {

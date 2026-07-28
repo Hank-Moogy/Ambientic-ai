@@ -642,6 +642,7 @@ ipcMain.handle('refresh-usage', () => usage.refresh(true))
 ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
 ipcMain.handle('refresh-connectors', () => refreshConnectors())
 ipcMain.handle('get-provider-auth', () => Object.fromEntries(providerAuthState))
+ipcMain.handle('dismiss-provider-auth', (_event, provider) => providerAuthState.delete(String(provider || '')))
 ipcMain.handle('get-onboarding', () => {
   const value = loadPrefs().onboarding
   return value && typeof value === 'object'

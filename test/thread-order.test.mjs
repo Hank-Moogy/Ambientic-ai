@@ -26,3 +26,12 @@ test('retains provider and search filtering across both activity lanes', () => {
   assert.deepEqual(result.recent.map((session) => session.id), ['a'])
   assert.deepEqual(result.earlier, [])
 })
+
+test('opens a provider on its most recently active thread', () => {
+  const result = organizeThreads([
+    { id: 'claude-old', agent: 'claude', task: 'Old Claude work', updatedAt: 10, state: 'history' },
+    { id: 'codex-new', agent: 'codex', task: 'New Codex work', updatedAt: 300, state: 'idle' },
+    { id: 'claude-new', agent: 'claude', task: 'New Claude work', updatedAt: 200, state: 'idle' }
+  ], { now: 400, provider: 'claude' })
+  assert.deepEqual([...result.recent, ...result.earlier].map((session) => session.id), ['claude-new', 'claude-old'])
+})

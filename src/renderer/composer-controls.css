@@ -2,8 +2,23 @@
 .composer-tools button { border: 1px solid #333b46; background: #171c23; color: #8e98a4; cursor: pointer; transition: border-color .2s, color .2s, background .2s, box-shadow .2s; }
 .composer-tools button:hover:not(:disabled) { border-color: #526171; color: #d3dbe2; }
 .composer-tools button:disabled { cursor: default; opacity: .35; }
-.composer .composer-attach { width: auto; height: 26px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border-radius: 8px; font-size: 8px; font-weight: 750; }
+
+/* Attach and the model/effort selectors live on the composer's bottom row, to
+   the left of the status text and the send button. The row grows and wraps
+   instead of clipping, since selector labels vary in width by provider. */
+.composer > .composer-footer { height: auto; min-height: 38px; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
+.composer .composer-attach { width: auto; height: 26px; padding: 0 10px; display: flex; align-items: center; gap: 6px; flex: none; border: 1px solid #333b46; border-radius: 8px; background: #171c23; color: #8e98a4; font-size: 8px; font-weight: 750; cursor: pointer; transition: border-color .2s, color .2s, background .2s; }
+.composer .composer-attach:hover:not(:disabled) { border-color: #526171; color: #d3dbe2; }
+.composer .composer-attach:disabled { cursor: default; opacity: .35; }
 .composer-attach span { color: #83b8dd; font-size: 13px; }
+
+.composer-tuning { display: flex; align-items: center; gap: 6px; flex: none; }
+.composer-tuning__field { display: flex; align-items: center; gap: 5px; height: 26px; padding: 0 4px 0 8px; border: 1px solid #333b46; border-radius: 8px; background: #171c23; }
+.composer-tuning__field > span { color: #69727d; font-size: 7px; font-weight: 750; text-transform: uppercase; letter-spacing: .09em; }
+.composer-tuning select { max-width: 108px; border: 0; outline: 0; background: transparent; color: #b9c3cd; font-size: 9px; font-weight: 700; cursor: pointer; }
+.composer-tuning select:disabled { cursor: default; opacity: .45; }
+.composer-tuning__field:focus-within { border-color: #526171; }
+.composer-tuning option { background: #171c23; color: #d3dbe2; }
 .composer-modes { margin-left: auto; padding: 2px; display: flex; gap: 2px; border: 1px solid #2d343d; border-radius: 9px; background: #0e1217; }
 .composer .composer-modes button { width: auto; height: 22px; min-width: 47px; padding: 0 8px; border-color: transparent; border-radius: 6px; background: transparent; font-size: 7px; font-weight: 750; }
 .composer-modes button[data-selected="true"] { border-color: #40505f; background: linear-gradient(135deg, #26333f, #1a232c); color: #dbe8f1; box-shadow: 0 0 16px #6ebcff15; }

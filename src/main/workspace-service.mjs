@@ -16,6 +16,11 @@ const COMPACTION_HEADER = 'You are resuming a conversation that exceeded the mod
 const COMPACTION_BUDGET = 24000
 const AMBIENTIC_CONTEXT = /<(?:ambientic|agentbase)-context\b[^>]*>[\s\S]*?<\/(?:ambientic|agentbase)-context>\s*/i
 const CHAT_MODES = new Set(['build', 'plan', 'ask'])
+// Aliases Claude Code's `--model` accepts, and the levels its `--effort` accepts.
+// Codex reuses the effort names for the ACP collaboration mode's reasoning_effort
+// (it tops out at 'high'), so the extra levels are simply never offered for it.
+const CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku'])
+const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 
 function textContent (value) {
@@ -57,6 +62,11 @@ export function reconcileProviderMessage (messages, incoming) {
 
 function normalizePromptOptions (options = {}) {
   const mode = CHAT_MODES.has(options.mode) ? options.mode : 'build'
+  // Model and effort come from the renderer's composer. Validate against the
+  // values the provider CLIs actually accept — an unknown one is dropped rather
+  // than forwarded, so a stale UI can never make a turn fail to launch.
+  const model = CLAUDE_MODELS.has(options.model) ? options.model : ''
+  const effort = EFFORT_LEVELS.has(options.effort) ? options.effort : ''
   const attachments = []
   for (const item of Array.isArray(options.attachments) ? options.attachments.slice(0, 12) : []) {
     const path = String(item?.path || '')
@@ -70,7 +80,7 @@ function normalizePromptOptions (options = {}) {
       })
     } catch {}
   }
-  return { mode, attachments }
+  return { mode, attachments, model, effort }
 }
 
 function providerPrompt (text, { mode, attachments }) {
@@ -378,6 +388,15 @@ export class WorkspaceService extends EventEmitter {
     if (snapshot?.error) return 'attention'
     if (this.hasPendingApproval(id)) return 'attention'
     if (session?.state === 'attention' || session?.state === 'waiting') return session.state
+    // Codex Desktop and hook-backed terminals own their provider process in a
+    // different runtime from Ambientic's passive transcript reader. A
+    // thread/read response from Ambientic's app-server can therefore be idle
+    // while the real Codex Desktop turn is working. Treat both live signals as
+    // a union: either one may promote to running, but a passive read may not
+    // demote an authoritative provider lifecycle.
+    const hasAuthoritativeExternalLifecycle = Boolean(session?.tty) || session?.externalSource === 'codex-desktop'
+    if (hasAuthoritativeExternalLifecycle && (this.isRunning(id, snapshot) || session?.state === 'running')) return 'running'
+    if (hasAuthoritativeExternalLifecycle && snapshot?.turnStateKnown) return session?.history ? 'history' : (session?.state || 'idle')
     if (snapshot?.turnStateKnown) return this.isRunning(id, snapshot) ? 'running' : (session?.history ? 'history' : 'idle')
     if (this.isRunning(id, snapshot) || session?.state === 'running') return 'running'
     if (snapshot) return session?.history ? 'history' : 'idle'
@@ -431,7 +450,8 @@ export class WorkspaceService extends EventEmitter {
         // Reading dormant history must not promote it onto the live hardware
         // surface. A genuinely active provider turn is promoted immediately;
         // existing live sessions are also corrected back to idle.
-        if (snapshot.running || !session.history) this.ingestLifecycle(id, snapshot.running ? 'tool' : 'stop_idle')
+        if (snapshot.running) this.ingestLifecycle(id, 'tool')
+        else if (!session.history && !session.tty && session.externalSource !== 'codex-desktop') this.ingestLifecycle(id, 'stop_idle')
       } else if (session.agent === 'claude') {
         snapshot.transcriptPath = this.claudeTranscriptFor(session)
         const disk = claudeMessages(snapshot.transcriptPath).filter((entry) => !isCompactionSeed(entry))
@@ -489,7 +509,7 @@ export class WorkspaceService extends EventEmitter {
     }
   }
 
-  async codexCollaborationMode (rpc, requestedMode) {
+  async codexCollaborationMode (rpc, requestedMode, requestedEffort = '') {
     if (this.codexCollaborationModes === undefined) {
       try {
         const result = await rpc.request('collaborationMode/list', {})
@@ -505,7 +525,8 @@ export class WorkspaceService extends EventEmitter {
       mode: desired,
       settings: {
         model: preset.model,
-        reasoning_effort: preset.reasoning_effort ?? null,
+        // The composer's effort choice overrides the preset's own reasoning_effort.
+        reasoning_effort: requestedEffort || preset.reasoning_effort || null,
         developer_instructions: null
       }
     }
@@ -639,7 +660,7 @@ export class WorkspaceService extends EventEmitter {
       const threadId = this.codexThreadId(session)
       await rpc.request('thread/resume', { threadId })
       const activeTurnId = this.activeTurns.get(id)
-      const collaborationMode = activeTurnId ? null : await this.codexCollaborationMode(rpc, promptOptions.mode)
+      const collaborationMode = activeTurnId ? null : await this.codexCollaborationMode(rpc, promptOptions.mode, promptOptions.effort)
       const providerText = collaborationMode && promptOptions.mode !== 'ask'
         ? text
         : providerPrompt(text, promptOptions)
@@ -665,7 +686,7 @@ export class WorkspaceService extends EventEmitter {
       this.activeTurns.set(id, id)
       void rpc.request('session/prompt', { sessionId: id, prompt: [{ type: 'text', text: providerPrompt(text, promptOptions) }] }, 60 * 60 * 1000).then(() => this.finish(id)).catch((error) => this.fail(id, error))
     } else if (session.agent === 'claude') {
-      this.runClaude(session, providerPrompt(text, promptOptions), { mode: promptOptions.mode })
+      this.runClaude(session, providerPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort })
     } else throw new Error(`Managed prompts are not supported for ${session.agent}.`)
     return this.emitSnapshot(snapshot)
   }
@@ -698,7 +719,7 @@ export class WorkspaceService extends EventEmitter {
     throw new Error('Choose Codex, Claude Code, or Hermes.')
   }
 
-  runClaude (session, prompt, { compacted = false, mode = 'build' } = {}) {
+  runClaude (session, prompt, { compacted = false, mode = 'build', model = '', effort = '' } = {}) {
     const path = this.connector('claude')?.path || 'claude'
     // Resume only once Claude has actually persisted this session's transcript.
     // A brand-new managed task carries a fresh UUID that Claude has never seen,
@@ -709,8 +730,12 @@ export class WorkspaceService extends EventEmitter {
     const started = Boolean(this.claudeTranscriptFor(session))
     const permissionMode = mode === 'build' ? 'acceptEdits' : 'plan'
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', permissionMode]
+    // Only forward these when the user picked something; omitting them lets
+    // Claude Code apply its own configured defaults.
+    if (model) args.push('--model', model)
+    if (effort) args.push('--effort', effort)
     args.push(started ? '--resume' : '--session-id', claudeId)
-    this.claudeAttempts.set(session.id, { prompt, compacted, mode, resultError: '' })
+    this.claudeAttempts.set(session.id, { prompt, compacted, mode, model, effort, resultError: '' })
     const child = spawn(path, args, { cwd: session.cwd || homedir(), env: providerSpawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
@@ -728,7 +753,7 @@ export class WorkspaceService extends EventEmitter {
       // First time a resume overflows the context window, compact and retry once
       // so the user keeps going in the same thread instead of hitting a wall.
       if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(errorText) && !attempt.compacted) {
-        return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode })
+        return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode, model: attempt.model, effort: attempt.effort })
       }
       this.claudeAttempts.delete(session.id)
       this.fail(session.id, new Error(this.claudeResultError(session.id, errorText)))
@@ -777,7 +802,7 @@ export class WorkspaceService extends EventEmitter {
 
   // Start a fresh Claude session seeded with the compacted history, remap the UI
   // thread to it, and re-run the user's prompt so the thread continues in place.
-  compactClaudeAndRetry (id, prompt, { mode = 'build' } = {}) {
+  compactClaudeAndRetry (id, prompt, { mode = 'build', model = '', effort = '' } = {}) {
     const session = this.sessionFor(id)
     if (!session) { this.claudeAttempts.delete(id); return this.fail(id, new Error('This conversation is no longer available to compact.')) }
     const summary = this.compactClaudeContext(session)
@@ -787,7 +812,7 @@ export class WorkspaceService extends EventEmitter {
       snapshot.messages.push(message('activity', 'This conversation grew past the model context window. Ambientic compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
       this.emitSnapshot({ ...snapshot, running: true })
     }
-    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode })
+    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode, model, effort })
   }
 
   // Turn known Claude -p failures into guidance the user can act on. A resumed

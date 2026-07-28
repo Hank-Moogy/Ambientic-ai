@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('controller', {
   getConnectors: () => ipcRenderer.invoke('get-connectors'),
   refreshConnectors: () => ipcRenderer.invoke('refresh-connectors'),
   getProviderAuth: () => ipcRenderer.invoke('get-provider-auth'),
+  dismissProviderAuth: (provider) => ipcRenderer.invoke('dismiss-provider-auth', provider),
   getOnboarding: () => ipcRenderer.invoke('get-onboarding'),
   saveOnboarding: (patch) => ipcRenderer.invoke('save-onboarding', patch),
   resetOnboarding: () => ipcRenderer.invoke('reset-onboarding'),

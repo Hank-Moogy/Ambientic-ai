@@ -11,6 +11,7 @@ import './onboarding.css'
 import './composer-controls.css'
 import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
+import { claudeAuthPresentation } from './provider-auth-ui.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
 
 const stateLabel = { running: 'Running', waiting: 'Your move', attention: 'Needs input', idle: 'Idle', history: 'History' }
@@ -23,6 +24,63 @@ const onboardingProviderCatalog = [
   ...providerCatalog,
   { id: 'kimi', label: 'Kimi Code' }
 ]
+// Per-provider model and reasoning-intensity options, surfaced in the composer so
+// a thread can be retuned without leaving the chat. Claude's entries are the
+// aliases and effort levels its CLI accepts (`--model` / `--effort`); Codex's
+// effort maps to the ACP collaboration mode's reasoning_effort. A provider absent
+// from this map exposes no tuning, and the composer hides its controls entirely.
+const providerTuning = {
+  claude: {
+    models: [
+      { id: '', label: 'Default model' },
+      { id: 'opus', label: 'Opus' },
+      { id: 'sonnet', label: 'Sonnet' },
+      { id: 'haiku', label: 'Haiku' }
+    ],
+    efforts: [
+      { id: '', label: 'Default effort' },
+      { id: 'low', label: 'Low' },
+      { id: 'medium', label: 'Medium' },
+      { id: 'high', label: 'High' },
+      { id: 'xhigh', label: 'X-high' },
+      { id: 'max', label: 'Max' }
+    ]
+  },
+  codex: {
+    models: [],
+    efforts: [
+      { id: '', label: 'Default effort' },
+      { id: 'low', label: 'Low' },
+      { id: 'medium', label: 'Medium' },
+      { id: 'high', label: 'High' }
+    ]
+  }
+}
+
+function ComposerTuning ({ provider, model, effort, disabled, onModel, onEffort }) {
+  const tuning = providerTuning[provider]
+  if (!tuning) return null
+  return (
+    <div className="composer-tuning">
+      {tuning.models.length > 0 && (
+        <label className="composer-tuning__field" title={`Model used for new ${provider} turns`}>
+          <span>Model</span>
+          <select value={model} disabled={disabled} onChange={(event) => onModel(event.target.value)}>
+            {tuning.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+      )}
+      {tuning.efforts.length > 0 && (
+        <label className="composer-tuning__field" title="Reasoning intensity for new turns">
+          <span>Effort</span>
+          <select value={effort} disabled={disabled} onChange={(event) => onEffort(event.target.value)}>
+            {tuning.efforts.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+      )}
+    </div>
+  )
+}
 const providerInstallUrls = {
   codex: 'https://developers.openai.com/codex/cli/',
   claude: 'https://docs.anthropic.com/en/docs/claude-code/setup',
@@ -118,6 +176,7 @@ function ComposerDraft ({
   providerLabel,
   mode,
   hasAttachments,
+  controls,
   onSend,
   onInterrupt
 }) {
@@ -153,7 +212,8 @@ function ComposerDraft ({
         }}
         placeholder={!canManage ? `${providerLabel || 'This provider'} cannot receive managed prompts` : `Message ${providerLabel || 'agent'}…`}
       />
-      <div>
+      <div className="composer-footer">
+        {controls}
         <span>{sending ? 'Starting agent…' : canSteer ? 'Codex is working · send to steer this turn' : running ? 'Agent is working…' : `${mode === 'plan' ? 'Plan mode · planning requested' : mode === 'ask' ? 'Ask mode · answer only' : 'Build mode · implementation allowed'} · Enter to send`}</span>
         {canSteer && <button className="send" type="button" disabled={sending || (!draft.trim() && !hasAttachments)} title="Add guidance to the running Codex turn" onClick={() => void submit()}>↑</button>}
         {running ? <button className="stop" type="button" title="Stop this turn" onClick={onInterrupt}>■</button> : !canSteer && <button className="send" type="button" disabled={sending || (!draft.trim() && !hasAttachments)} onClick={() => void submit()}>↑</button>}
@@ -460,14 +520,14 @@ function OverviewUsageBalance ({ sessions, connectors, usage, onRefresh }) {
   )
 }
 
-function ProviderPad ({ connector, sessions, usage, index, onCreate }) {
+function ProviderPad ({ connector, sessions, usage, index, onOpenProvider }) {
   const providerSessions = sessions.filter((session) => session.agent === connector.id)
   const active = providerSessions.filter((session) => session.state === 'running').length
   const needsInput = providerSessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length
   const unavailable = !connector.checking && (!connector.installed || connector.manageable === false)
   const status = connector.checking ? 'Checking local connection' : !connector.installed ? 'Not installed' : connector.manageable === false ? 'Login required' : active ? `${active} active` : needsInput ? `${needsInput} need you` : 'Ready'
   return (
-    <button className="provider-pad" data-provider={connector.id} data-unavailable={unavailable} style={{ '--float-delay': `${index * -2.3}s` }} type="button" onClick={() => onCreate(connector.id)}>
+    <button className="provider-pad" data-provider={connector.id} data-unavailable={unavailable} style={{ '--float-delay': `${index * -2.3}s` }} type="button" aria-label={`Open latest ${connector.label} threads`} onClick={() => onOpenProvider(connector.id)}>
       <span className="provider-pad__glow" />
       <header><span className="provider-pad__icon"><AgentIcon agent={connector.id} /></span><i data-state={active ? 'running' : needsInput ? 'attention' : unavailable ? 'history' : 'idle'} /></header>
       <div className="provider-pad__name"><b>{connector.label}</b><small>{status}</small></div>
@@ -487,7 +547,7 @@ function ThreadMosaicCard ({ session, index, onOpen }) {
   )
 }
 
-function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, onOpenThreads, onOpenThread, onVibe, onRefreshUsage, onToggleAmbientMode }) {
+function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, onOpenThreads, onOpenProvider, onOpenThread, onVibe, onRefreshUsage, onToggleAmbientMode }) {
   const live = sessions.filter((session) => !session.history)
   const active = live.filter((session) => session.state === 'running').length
   const needsInput = live.filter((session) => ['waiting', 'attention'].includes(session.state)).length
@@ -503,7 +563,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, 
         </section>
 
         <section className="provider-field" aria-label="Agent providers">
-          {providerCards.map((connector, index) => <ProviderPad key={connector.id} connector={connector} sessions={sessions} usage={usage} index={index} onCreate={onCreate} />)}
+          {providerCards.map((connector, index) => <ProviderPad key={connector.id} connector={connector} sessions={sessions} usage={usage} index={index} onOpenProvider={onOpenProvider} />)}
           <button className="provider-pad provider-pad--new" type="button" onClick={() => onCreate('')}><span className="provider-pad--new__plus">＋</span><b>Create an agent task</b><small>Choose a provider and working folder</small></button>
         </section>
 
@@ -868,6 +928,9 @@ export default function Workspace () {
   const [loading, setLoading] = useState(false)
   const [attachments, setAttachments] = useState([])
   const [chatMode, setChatMode] = useState('build')
+  // Model and effort are kept per provider, not per thread: the choice is about
+  // how you want that provider to work, so it carries across its conversations.
+  const [tuningByProvider, setTuningByProvider] = useState({})
   const [query, setQuery] = useState('')
   const [providerFilter, setProviderFilter] = useState('all')
   const [threadInteractions, setThreadInteractions] = useState(() => {
@@ -997,6 +1060,12 @@ export default function Workspace () {
   const selectedConnector = connectors.find((connector) => connector.id === thread?.provider)
   const canManage = Boolean(thread?.managed && selectedConnector?.manageable !== false)
   const canSteer = Boolean(canManage && thread?.provider === 'codex' && thread?.running)
+  const activeProvider = thread?.provider || ''
+  const activeTuning = tuningByProvider[activeProvider] || { model: '', effort: '' }
+  const setThreadTuning = (provider, patch) => {
+    if (!provider) return
+    setTuningByProvider((current) => ({ ...current, [provider]: { ...(current[provider] || { model: '', effort: '' }), ...patch } }))
+  }
   const selectedPreview = companions?.bySession?.[selectedId]
   const saveOnboarding = async (patch) => {
     const next = await window.controller.saveOnboarding(patch)
@@ -1009,9 +1078,10 @@ export default function Workspace () {
     if (!value || !selectedId || (thread?.running && !canSteer)) return false
     const selectedAttachments = attachments
     const selectedMode = chatMode
+    const selectedTuning = activeTuning
     setAttachments([])
     try {
-      setThread(await window.controller.sendThreadPrompt(selectedId, value, { attachments: selectedAttachments, mode: selectedMode }))
+      setThread(await window.controller.sendThreadPrompt(selectedId, value, { attachments: selectedAttachments, mode: selectedMode, model: selectedTuning.model, effort: selectedTuning.effort }))
       return true
     } catch (error) {
       setAttachments((current) => current.length ? current : selectedAttachments)
@@ -1042,6 +1112,32 @@ export default function Workspace () {
 
   const openCreate = (provider = '') => { setNewTaskProvider(provider); setNewTask(true) }
   const openThread = (id) => { setSelectedId(id); setView('threads') }
+  const openAllThreads = () => {
+    setProviderFilter('all')
+    setQuery('')
+    setView('threads')
+  }
+  const openProviderThreads = async (providerId) => {
+    setProviderFilter(providerId)
+    setQuery('')
+    setView('threads')
+    let latest = sessions
+    try {
+      latest = await window.controller.getWorkspaceThreads()
+      setSessions(latest)
+    } catch {}
+    const groups = organizeThreads(
+      latest.map((session) => ({ ...session, task: sessionTitle(session) })),
+      { interactions: threadInteractions, provider: providerId }
+    )
+    const first = groups.recent[0] || groups.earlier[0]
+    setSelectedId(first?.id || '')
+  }
+  const dismissProviderAuth = (provider) => {
+    void window.controller.dismissProviderAuth(provider)
+    setProviderAuth((current) => ({ ...current, [provider]: null }))
+  }
+  const claudeAuthMode = claudeAuthPresentation(providerAuth.claude)
   // Generate a fresh handover brief for this thread and start the target
   // provider on it, then jump to the new thread.
   const handoff = async (targetProvider) => {
@@ -1061,7 +1157,7 @@ export default function Workspace () {
     return (
       <>
         <Onboarding state={onboarding} connectors={connectors} providerAuth={providerAuth} midi={midi} onSave={saveOnboarding} onConnect={(id) => window.controller.connectProvider(id)} onRefresh={() => window.controller.refreshConnectors()} onInstallHooks={() => window.controller.installHooks()} onCreate={() => setNewTask(true)} onFinish={finishOnboarding} />
-        {providerAuth.claude && providerAuth.claude.status !== 'idle' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => setProviderAuth((current) => ({ ...current, claude: null }))} />}
+        {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
         {newTask && <NewTask connectors={connectors} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} />}
       </>
     )
@@ -1082,9 +1178,10 @@ export default function Workspace () {
         <footer className="hardware"><i data-connected={midi.connected} /><div><b>{midi.shortModel || 'APC controller'}</b><span>{midi.connected ? `Connected · ${midi.device || 'ready'}` : 'Waiting for hardware'}</span></div><button type="button" onClick={() => { setSettingsSection('midi'); setView('settings') }}>Choose</button></footer>
       </aside>
 
-      {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in Ambientic.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. Ambientic is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => setProviderAuth((current) => ({ ...current, codex: null }))}>×</button></div>}
-      {providerAuth.claude && providerAuth.claude.status !== 'idle' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => setProviderAuth((current) => ({ ...current, claude: null }))} />}
-      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={() => setView('threads')} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
+      {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in Ambientic.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. Ambientic is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => dismissProviderAuth('codex')}>×</button></div>}
+      {claudeAuthMode === 'success' && <div className="provider-auth-toast" data-status="connected" data-provider="claude"><span>✓</span><div><b>Claude Code connected</b><small>{providerAuth.claude.email || 'Your Claude account is ready. Plan limits are syncing in Overview.'}</small></div><button type="button" aria-label="Dismiss Claude connection message" onClick={() => dismissProviderAuth('claude')}>×</button></div>}
+      {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
+      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
           <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef} onScroll={updateTranscriptPosition}>
@@ -1103,7 +1200,6 @@ export default function Workspace () {
             {thread?.approvals?.map((approval) => <Approval key={approval.id} approval={approval} onResolve={(...args) => window.controller.resolveApproval(...args)} />)}
             <div className="composer" data-running={thread?.running}>
               <div className="composer-tools">
-                <button type="button" className="composer-attach" disabled={!canManage} onClick={chooseContext} title="Attach files or folders"><span>＋</span> Attach</button>
                 <div className="composer-modes" role="group" aria-label="Agent mode">
                   {[
                     { id: 'build', label: 'Build', title: 'Implement and edit' },
@@ -1121,6 +1217,17 @@ export default function Workspace () {
                 providerLabel={thread?.managed && selectedConnector?.manageable === false ? `${thread.providerLabel} needs /login` : thread?.providerLabel}
                 mode={chatMode}
                 hasAttachments={attachments.length > 0}
+                controls={<>
+                  <button type="button" className="composer-attach" disabled={!canManage} onClick={chooseContext} title="Attach files or folders"><span>＋</span> Attach</button>
+                  <ComposerTuning
+                    provider={activeProvider}
+                    model={activeTuning.model}
+                    effort={activeTuning.effort}
+                    disabled={!canManage}
+                    onModel={(value) => setThreadTuning(activeProvider, { model: value })}
+                    onEffort={(value) => setThreadTuning(activeProvider, { effort: value })}
+                  />
+                </>}
                 onSend={send}
                 onInterrupt={() => window.controller.interruptThread(selectedId)}
               />

@@ -25,6 +25,8 @@ The experience should suggest:
 
 Provider filters should remain compact, icon-led, and softly illuminated in each provider’s accent. They organize attention without turning the sidebar into a toolbar.
 
+Overview provider cards are portals into existing work, not shortcuts for silently creating new tasks. Their identity marks sit on the visual centerline, with the provider name and state centered beneath; selecting one transitions directly into that provider’s freshest thread field with the matching filter already illuminated.
+
 ## Identity mark
 
 Ambientic’s primary mark is the supplied orbital-circle artwork: nested paths around a central core with one satellite point. It expresses the product as a calm field connecting multiple agents, tools, and physical controls.
