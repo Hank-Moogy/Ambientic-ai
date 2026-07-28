@@ -25,7 +25,7 @@ The experience should suggest:
 
 Provider filters should remain compact, icon-led, and softly illuminated in each provider’s accent. They organize attention without turning the sidebar into a toolbar.
 
-Overview provider cards are portals into existing work, not shortcuts for silently creating new tasks. Their identity marks sit on the visual centerline, with the provider name and state centered beneath; selecting one transitions directly into that provider’s freshest thread field with the matching filter already illuminated.
+Overview provider cards are portals into existing work, not shortcuts for silently creating new tasks. Each card reserves a calm upper identity row: the provider artwork sits to the left while its name and state form a separate text block, and usage metrics remain isolated below. Marks must never overlap a provider label or status. Provider-supplied artwork may replace a generic glyph on this surface when it remains legible in the provider accent; selecting the card transitions directly into that provider’s freshest thread field with the matching filter already illuminated.
 
 ## Identity mark
 

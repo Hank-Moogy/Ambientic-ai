@@ -13,6 +13,7 @@ import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
+import hermesAgentLogo from './assets/hermes-agent.png'
 
 const stateLabel = { running: 'Running', waiting: 'Your move', attention: 'Needs input', idle: 'Idle', history: 'History' }
 const providerCatalog = [
@@ -520,6 +521,20 @@ function OverviewUsageBalance ({ sessions, connectors, usage, onRefresh }) {
   )
 }
 
+function OverviewProviderMark ({ provider }) {
+  if (provider === 'hermes') {
+    return (
+      <span
+        className="provider-pad__hermes-art"
+        style={{ '--hermes-art': `url(${hermesAgentLogo})` }}
+        role="img"
+        aria-label="Hermes"
+      />
+    )
+  }
+  return <AgentIcon agent={provider} />
+}
+
 function ProviderPad ({ connector, sessions, usage, index, onOpenProvider }) {
   const providerSessions = sessions.filter((session) => session.agent === connector.id)
   const active = providerSessions.filter((session) => session.state === 'running').length
@@ -529,8 +544,11 @@ function ProviderPad ({ connector, sessions, usage, index, onOpenProvider }) {
   return (
     <button className="provider-pad" data-provider={connector.id} data-unavailable={unavailable} style={{ '--float-delay': `${index * -2.3}s` }} type="button" aria-label={`Open latest ${connector.label} threads`} onClick={() => onOpenProvider(connector.id)}>
       <span className="provider-pad__glow" />
-      <header><span className="provider-pad__icon"><AgentIcon agent={connector.id} /></span><i data-state={active ? 'running' : needsInput ? 'attention' : unavailable ? 'history' : 'idle'} /></header>
-      <div className="provider-pad__name"><b>{connector.label}</b><small>{status}</small></div>
+      <header>
+        <span className="provider-pad__icon"><OverviewProviderMark provider={connector.id} /></span>
+        <div className="provider-pad__name"><b>{connector.label}</b><small>{status}</small></div>
+        <i data-state={active ? 'running' : needsInput ? 'attention' : unavailable ? 'history' : 'idle'} />
+      </header>
       <footer><span>{providerSessions.length} task{providerSessions.length === 1 ? '' : 's'}</span><span>{compactUsage(usage, connector.id)}</span></footer>
     </button>
   )
@@ -1200,6 +1218,7 @@ export default function Workspace () {
             {thread?.approvals?.map((approval) => <Approval key={approval.id} approval={approval} onResolve={(...args) => window.controller.resolveApproval(...args)} />)}
             <div className="composer" data-running={thread?.running}>
               <div className="composer-tools">
+                <button type="button" className="composer-attach" disabled={!canManage} onClick={chooseContext} title="Attach files or folders"><span>＋</span> Attach</button>
                 <div className="composer-modes" role="group" aria-label="Agent mode">
                   {[
                     { id: 'build', label: 'Build', title: 'Implement and edit' },
@@ -1217,8 +1236,7 @@ export default function Workspace () {
                 providerLabel={thread?.managed && selectedConnector?.manageable === false ? `${thread.providerLabel} needs /login` : thread?.providerLabel}
                 mode={chatMode}
                 hasAttachments={attachments.length > 0}
-                controls={<>
-                  <button type="button" className="composer-attach" disabled={!canManage} onClick={chooseContext} title="Attach files or folders"><span>＋</span> Attach</button>
+                controls={
                   <ComposerTuning
                     provider={activeProvider}
                     model={activeTuning.model}
@@ -1227,7 +1245,7 @@ export default function Workspace () {
                     onModel={(value) => setThreadTuning(activeProvider, { model: value })}
                     onEffort={(value) => setThreadTuning(activeProvider, { effort: value })}
                   />
-                </>}
+                }
                 onSend={send}
                 onInterrupt={() => window.controller.interruptThread(selectedId)}
               />

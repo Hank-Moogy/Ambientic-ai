@@ -3,9 +3,8 @@
 .composer-tools button:hover:not(:disabled) { border-color: #526171; color: #d3dbe2; }
 .composer-tools button:disabled { cursor: default; opacity: .35; }
 
-/* Attach and the model/effort selectors live on the composer's bottom row, to
-   the left of the status text and the send button. The row grows and wraps
-   instead of clipping, since selector labels vary in width by provider. */
+/* Model/effort selectors share the composer's bottom status row. Attach stays
+   in the top toolbar so local context is visible before the user starts typing. */
 .composer > .composer-footer { height: auto; min-height: 38px; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 4px; }
 .composer .composer-attach { width: auto; height: 26px; padding: 0 10px; display: flex; align-items: center; gap: 6px; flex: none; border: 1px solid #333b46; border-radius: 8px; background: #171c23; color: #8e98a4; font-size: 8px; font-weight: 750; cursor: pointer; transition: border-color .2s, color .2s, background .2s; }
 .composer .composer-attach:hover:not(:disabled) { border-color: #526171; color: #d3dbe2; }
