@@ -1,59 +1,97 @@
-# Ambientic — next-commit notes
+# Ambientic next steps
 
-Working notes for whoever makes the next commit. This repo has had two sessions
-editing it concurrently; commits so far have been deliberately scoped.
+Last updated: 2026-07-29
 
-## Committed so far
+This is the execution order for the next core product phase. The same work is represented as tasks under the local **Build Ambientic** goal.
 
-- `bdf31cf` — managed-Claude first-turn fix, PATH widening, single thread-state
-  resolver, in-thread handover UX (retire Improve page), honest Claude-usage
-  failure message.
-- This commit — Claude auto-compaction + actionable "prompt too long" handling
-  (main process only; see below).
+## Current objective
 
-## Still UNCOMMITTED in the working tree (the other session's in-flight work)
+Build the smallest safe Workflow Builder vertical slice on top of a shared semantic action layer. Do not start with the community marketplace or a large free-form canvas.
 
-Do not assume these are mine. Review before committing:
+The first usable slice is:
 
-- `src/main/usage.js`, `test/usage.test.mjs` — Claude usage via a status-line
-  bridge hook.
-- `hook/claude-statusline.py` (new), `hook/install.sh` — installs the status
-  line that writes `~/.ambientic/claude-usage.json`.
-- `src/renderer/Workspace.jsx`, `src/renderer/onboarding.css` (new),
-  `src/renderer/spend.css` — onboarding + Usage/Billing UI.
-- `src/main/{connectors,index,midi-controller,vibe-sequence}.js/.mjs`,
-  `test/{discovery,vibe-sequence}.test.mjs`, `ART_DIRECTION.md`, `HANDOVER.md`,
-  `README.md`, `src/preload/index.js` — mixed: APC "vibe" lighting, art
-  direction, consumption ledger wiring, onboarding.
+1. Define and validate a portable workflow manifest.
+2. Register a small provider-neutral action catalog.
+3. Run a linear workflow locally with inputs, approvals, cancellation, history, and safe resume.
+4. Build a simple ordered-step editor and run inspector.
+5. Ship three real templates and validate them across connected providers.
 
-Full `electron-vite build` passes and `node --test test/*.mjs` is green as of
-this commit, so the tree is in a working state — but the items above are the
-other session's and may not be finished. Confirm with that session before
-committing them.
+## Phase 0 — shared foundation
 
-## Follow-ups on my work (not yet done)
+- Define the versioned semantic action registry used by UI controls, workflows, hardware mappings, and Coach suggestions.
+- Define portable schemas for workflows, hardware profiles, recommendation drafts, triggers, permissions, capability requirements, and compatibility.
+- Define the local execution/audit envelope: actor, trigger, goal/task/thread references, timestamps, inputs, results, errors, idempotency key, and permission decisions.
+- Define import/export privacy linting and secret placeholders.
+- Preserve the APC40 MKII native profile as a first-class capability test.
 
-1. **Persist the Claude compaction remap.** `WorkspaceService.claudeRemap` is
-   in-memory. After an app restart, the first prompt to a previously-compacted
-   thread will re-resume the original oversized transcript and compact again
-   (self-healing, but wasteful). Persist `threadId -> compactedSessionId` next
-   to the thread aliases (`onAliasesChange` path in `index.js`) and rehydrate it
-   in the `WorkspaceService` constructor.
-2. **Better compaction.** `compactClaudeContext` keeps the recent tail verbatim
-   within a char budget and drops older messages. Optionally LLM-summarize the
-   dropped head (bounded) and prepend it, so long-range context survives.
-3. **Claude usage display — wired; live reconnection remains.**
+Exit condition: one semantic action can be invoked from the UI, a workflow step, and a learned hardware control and produces the same validated result.
 
-   Ambientic now uses a three-level local strategy: a fresh structured
-   `~/.ambientic/claude-usage.json` status-line observation, Claude's interactive
-   `/usage` panel, then honest seven-day activity from
-   `~/.claude/stats-cache.json`. Current Claude documentation and newer clients
-   can supply `rate_limits` to a custom status line, so that bridge must remain.
+## Phase 1 — Workflow Engine MVP
 
-   A 2026-07-28 audit found that the profile metadata still describes Claude
-   Pro while the current CLI authoritatively returns `loggedIn: false`.
-   Ambientic now trusts `claude auth status --json`, never treats the words
-   “API usage billing” alone as an account-mode signal, and handles both the
-   legacy three-tab and Claude Code 2.1.220 four-tab `/usage` screens. The user
-   must reconnect the Pro/Max account before accepting the five-hour/weekly
-   gauges as live.
+- Implement a deterministic local runner for ordered steps, conditions, waits, retries, timeouts, and bounded branching.
+- Implement initial actions: start/resume agent, send prompt, wait for provider state, ask for human approval/input, update a goal task, collect/link an artifact, notify, and play a hardware cue.
+- Add dry run, cancel, resume, idempotency, permission gates, and a durable execution journal.
+- Add manual, schedule, session-state, rate-limit, goal-state, and hardware trigger definitions; expose manual trigger first.
+- Add a compact ordered-step editor before evaluating a node canvas.
+- Add run detail with inputs, current step, timeline, logs, approvals, outputs, retry, and recovery.
+- Validate three templates:
+  - Rate-limit handover to another provider.
+  - Build → test → review with human approval.
+  - Repetitive request → goal task → agent execution → artifact review.
+
+Exit condition: all three templates can complete, fail safely, and resume after Ambientic restarts without duplicating a consequential step.
+
+## Phase 2 — portable workflow library
+
+- Add local template gallery, search, duplicate/fork, version history, and import/export.
+- Add manifest compatibility checks, required provider/capability display, configurable inputs, permission preview, and test mode.
+- Add privacy linting that blocks secrets, transcript content, and personal absolute paths from exports.
+- Test sharing a bundle between two clean Ambientic profiles before adding accounts or public discovery.
+
+Exit condition: another user can import, configure, preview, and run a workflow without seeing the author's private data.
+
+## Phase 3 — universal hardware mapping
+
+- Inventory generic MIDI and keyboard input/output capabilities.
+- Generalize the current mapping model to device profiles, banks, layers, modifiers, press/hold/release, values, conditions, and semantic actions.
+- Build device discovery, input monitor, MIDI/keyboard learn, conflict resolution, test mode, and recovery.
+- Add output-feedback profiles with input-only fallbacks.
+- Add profile import/export, privacy linting, compatibility checks, and local gallery.
+- Maintain dedicated APC40 MKII and APC mini mk2 regressions throughout.
+
+Exit condition: a new MIDI controller and a keyboard shortcut can each be configured without code, exported, imported into a clean profile, and restored with correct feedback semantics.
+
+## Phase 4 — Ambientic Coach
+
+- Define explicit transcript/source permissions, retention, redaction, and local-only mode.
+- Build a local signal index for recurring intents, repeated manual sequences, provider/rate-limit friction, goal stagnation, hardware gaps, and cost opportunities.
+- Add opt-in RSS/newsletter/bookmark ingestion with provenance and source-level controls.
+- Generate evidence-backed recommendation cards with confidence, estimated benefit, and one-click creation of a draft workflow, mapping, goal task, skill, or provider policy.
+- Add accept/edit/dismiss/snooze feedback and measure whether recommendations improve outcomes.
+- Add cost recommendations using known usage/billing data without pretending consumer subscription telemetry is exact.
+
+Exit condition: the Coach finds one real repeated behavior, explains it with bounded evidence, generates a useful draft automation, and learns when the user rejects it.
+
+## Phase 5 — community
+
+- Define accounts/sync only after local bundle exchange is validated.
+- Add publishing, discovery, attribution, versioning, updates, forks, reporting, and moderation.
+- Separate workflow templates from hardware profiles while allowing a setup bundle to reference both.
+- Never upload private source material or derived conversation evidence as part of a shared bundle.
+
+## Immediate next tickets
+
+1. Write `workflow.schema.json` and three example manifests.
+2. Implement the semantic action registry with capability and permission metadata.
+3. Implement an atomic local workflow/template/run store.
+4. Implement a headless linear runner with cancellation, idempotency, and restart recovery tests.
+5. Wire the first action through all three surfaces: UI, workflow, and existing MIDI Learn.
+
+## Validation required before each phase advances
+
+- Unit tests for schema migrations, validation, permission boundaries, idempotency, and recovery.
+- Installed-app restart smoke with real local data.
+- At least one live provider run on Codex, Claude Code, and Hermes where supported.
+- Physical APC40 MKII regression for state LEDs and existing learned controls.
+- Privacy review of every new file scan, source connector, export, and model call.
+- README, handover, goal tickets, and GitHub PR kept synchronized.

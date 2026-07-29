@@ -22,6 +22,18 @@ Ambientic should become the interface above agent providers:
 
 The product should own the user experience and normalized session model, not provider credentials or private authentication formats. Provider-specific hooks, ACP implementations, SDKs, and CLIs are adapters behind a stable Ambientic interface.
 
+## Core roadmap
+
+The next product phase has three major user-facing systems built on one shared, versioned semantic action layer:
+
+1. **Workflow Builder** — turn repetitive requests into inspectable, resumable sequences across agents, humans, Goals, artifacts, rate limits, and hardware. The first increment is a deterministic local runner and compact ordered-step editor with approvals, cancellation, idempotency, history, and restart recovery.
+2. **Universal Hardware Mapping** — configure arbitrary MIDI and keyboard devices through discovery, learn, layers, banks, modifiers, conditions, and output feedback while preserving native APC40 MKII behavior.
+3. **Ambientic Coach** — opt-in local analysis of conversations and explicitly selected newsletters, RSS feeds, and sources that finds recurring work, friction, and cost opportunities, then proposes evidence-backed draft workflows, mappings, skills, goal tasks, or provider policies.
+
+Workflow templates and hardware profiles become versioned privacy-safe bundles that can be exported and imported locally before Ambientic adds accounts or a public community library. Community publishing must never include credentials, personal paths, raw transcripts, or private artifacts.
+
+`PRODUCT.md` defines the product contracts, shared action architecture, privacy model, context strategy, and success measures. `NEXT_STEPS.md` defines the implementation phases and exit criteria. The live **Build Ambientic** goal mirrors this roadmap as executable tickets.
+
 ## Current product increment
 
 This increment is deliberately personal and local. It adds the first full Ambientic workspace above the providers while keeping each provider responsible for its own account and credentials.
@@ -335,6 +347,9 @@ Last updated: 2026-07-29
 
 ### In progress
 
+- [ ] Specify and build the first Workflow Builder vertical slice: portable manifest, semantic action registry, atomic workflow/run store, headless ordered-step runner, and compact editor.
+- [ ] Prove one semantic action can be invoked consistently from the regular UI, a workflow step, and an existing MIDI Learn mapping.
+- [ ] Validate three workflows end to end: rate-limit handover, build → test → review, and repetitive request → goal task → agent execution → artifact review.
 - [ ] Visually validate the new Goals field at common workspace sizes with real goal/task content, including the two-column floating layout, reduced motion, horizontal board navigation, drag/drop, and compact-window fallbacks.
 - [ ] Validate the private `goals.json` store through an installed-app restart and confirm a goal, task ownership, board move, and lifecycle change all survive relaunch.
 - [ ] Evaluate whether the Overview's provider-pad scale, floating motion, metric hierarchy, and mosaic density feel better than a chat-list-first product.
@@ -355,6 +370,9 @@ Last updated: 2026-07-29
 
 ### Next
 
+- [ ] Add the universal mapping foundation for arbitrary MIDI and keyboard devices: capability discovery, semantic actions, layers/banks/modifiers, input monitoring, feedback profiles, conflict detection, and portable setup bundles.
+- [ ] Build Ambientic Coach as an opt-in local signal and recommendation system with bounded evidence, source provenance, user feedback, and one-click draft workflows/mappings/goal tasks.
+- [ ] Add privacy-safe local template/profile import and export, then validate clean-profile sharing before designing community accounts, public discovery, ratings, or moderation.
 - [ ] Add provider-neutral AgentBase Goals tools through a small local MCP surface: compact goal listing, on-demand goal/task context, draft mutations, and explicit approval for consequential changes.
 - [ ] Link threads, runs, and artifacts to goal tasks without copying whole transcripts; add bounded task context capsules, execution evidence, provider/model metadata, and handover continuity.
 - [ ] Add agent task claims with expiring leases, idempotency keys, optimistic concurrency, and review-before-done defaults so multiple providers cannot silently duplicate or overwrite work.
@@ -373,6 +391,8 @@ Last updated: 2026-07-29
 
 ### Verification
 
+- 2026-07-29 live roadmap update: the local **Build Ambientic** goal is high priority and contains 31 audited tickets across shared foundations, Workflow Builder, universal hardware mapping, Ambientic Coach, and community phases. Three immediate tickets are active, the goals file has a recoverable pre-roadmap backup, and Ambientic relaunched healthy after loading the new store.
+- 2026-07-29 roadmap synchronization: `PRODUCT.md` now specifies the shared semantic action layer, Workflow Builder, universal hardware mapping, Ambientic Coach, community bundle, privacy, and model-agnostic context contracts. `NEXT_STEPS.md`, `HANDOVER.md`, README status, and the live **Build Ambientic** goal use the same phased execution order.
 - 2026-07-29 protected-folder prompt root cause: macOS TCC logs identified Claude Code processes spawned by Ambientic as the accessing process and Ambientic as the responsible application for Media Library, Documents, Downloads, and All Files requests. Background provider probes no longer inherit the home directory, and automatic Claude refresh no longer starts the interactive TUI. Regression coverage requires the private provider runtime and passive refresh branch.
 - 2026-07-29 local-release exception: the user approved ignoring the single simulated Claude OAuth callback lifecycle timeout for this installation. `npm run test:local-release` excludes only that named case; the remaining suite and every packaging, signing, manifest, restart, and health gate remain mandatory.
 - 2026-07-29 Goals foundation: the dedicated three-test Goals service suite passes persistence, progress/blocker derivation, board moves, ownership updates, audit recording, and empty-name validation. `git diff --check` is clean and `npm run build` succeeds for main, preload, and renderer bundles. The broader suite currently has one unrelated intermittent Claude OAuth callback timeout that predates this increment.

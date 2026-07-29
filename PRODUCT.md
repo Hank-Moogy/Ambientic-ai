@@ -1,33 +1,154 @@
-# Ambientic product
+# Ambientic product specification
 
-## Register
+Last updated: 2026-07-29
 
-product
+## Product purpose
 
-## Users
+Ambientic is the local-first operating layer above AI agent providers. It helps a person see what every agent is doing, direct work toward real goals, automate repeated multi-agent work, and turn useful actions into physical muscle memory.
 
-Developers and operators running several Claude Code, Codex, and Hermes sessions at once across managed threads, terminal windows, displays, and macOS Spaces. They glance at Ambientic while actively coding and need to identify the right agent without rereading terminal output.
+The product is not another provider-specific chat client. It is the durable user-owned layer for goals, workflows, hardware control, artifacts, usage, and improvement across Claude Code, Codex, Hermes, and future provider adapters.
 
-## Product Purpose
+## Primary user
 
-Ambientic is an always-visible hardware-controller-inspired status surface for coding agents. It makes every live terminal legible at a glance, communicates whether an agent is working or waiting, summarizes its current task, and turns one pad press into exact window and pane focus. Success means the user can notice, identify, and reach the right agent in under a second.
+The first user is a technically curious builder running several agent conversations and coding tasks across providers. They need to:
 
-## Brand Personality
+- Know what is active, blocked, idle, expensive, or close to a limit.
+- Resume the correct thread and inspect what it built without reconstructing context.
+- Convert repeated requests into reliable reusable workflows.
+- Control semantic actions from MIDI or keyboard hardware.
+- Learn how to work with agents more effectively without sending every conversation to another cloud service.
 
-Tactile, focused, dependable. The interface should feel like compact professional control hardware: immediate, information-dense, and calm enough to live on-screen all day.
+## Product pillars
 
-## Anti-references
+### 1. Unified agent cockpit
 
-Avoid generic dashboard cards, decorative glass effects, oversized glow strips, ambiguous two-letter badges, clipped project names, noisy gradients, and status systems that rely on color alone. Avoid anything that makes the user pause to decode which agent or terminal a pad represents.
+Normalize provider conversations, turns, approvals, artifacts, usage, and lifecycle state while keeping credentials in provider-owned stores.
 
-## Design Principles
+### 2. Goals
 
-1. Glanceability beats decoration: state, task, agent, and project must resolve in that order.
-2. One pad maps to one live terminal surface, and its visual identity must remain stable.
-3. Behave like hardware: full-perimeter state lighting, firm press feedback, and no layout movement during interaction.
-4. Preserve attention: emphasize only the selected or actionable terminal and let everything else recede.
-5. Automate context economically: derive short task labels only when prompts change, never on noisy tool events.
+Maintain a compact, provider-neutral source of truth for outcomes, milestones, tasks, ownership, evidence, and next actions. Agents receive only the goal or task context they need.
 
-## Accessibility & Inclusion
+### 3. Workflow builder
 
-State is communicated with color plus text, and agent identity uses recognizable logos with accessible names. Project and task labels truncate predictably with full content available in the tooltip. Respect reduced-motion preferences and maintain readable contrast in the always-on-top dark utility surface.
+Let users turn repetitive work into inspectable, resumable sequences that can coordinate humans, agents, goals, artifacts, and hardware.
+
+The workflow MVP must support:
+
+- Versioned workflow definitions with typed inputs and outputs.
+- Sequential steps, conditions, branching, waits, retries, timeouts, and bounded loops.
+- Provider-neutral actions such as create/resume agent, send prompt, wait for state, request approval, update a goal task, collect an artifact, notify the user, and invoke a hardware cue.
+- Manual, scheduled, agent-state, rate-limit, goal-state, and hardware triggers.
+- Dry run, explicit approval boundaries, cancellation, safe resume, idempotency, and execution history.
+- A visual builder plus a readable portable manifest.
+- Local import/export before any community backend.
+
+### 4. Universal hardware mapping
+
+Let any supported MIDI or keyboard control invoke the same semantic actions used by workflows and the UI.
+
+The hardware system must support:
+
+- Device discovery and capability inspection.
+- MIDI Note/CC and keyboard input learning.
+- Semantic actions rather than hard-coded screen coordinates or provider commands.
+- Layers, banks, modifiers, press/hold/release, value ranges, conditions, and conflict detection.
+- Output feedback where hardware supports it, with graceful input-only fallback.
+- Test mode, live event monitor, reset/recovery, and per-device profiles.
+- Versioned setup bundles that users can export, import, fork, and eventually share.
+- First-class APC40 MKII behavior and regressions even as generic hardware support expands.
+
+### 5. Ambientic Coach
+
+Offer evidence-backed improvements derived from the user's work and explicitly chosen external sources.
+
+The Coach should:
+
+- Detect recurring requests, manual repetition, avoidable handoffs, stalled goals, weak prompts, unused hardware, and costly provider choices.
+- Suggest a draft workflow, mapping, prompt pattern, skill, provider switch, or goal next step rather than only giving generic advice.
+- Explain the supporting evidence, estimated benefit, confidence, permissions, and affected data.
+- Learn from accept, edit, dismiss, snooze, and outcome feedback.
+- Ingest newsletters, RSS feeds, bookmarks, or curated sources only after explicit opt-in and retain source provenance.
+- Keep raw transcripts local by default; use compact derived signals and on-demand retrieval.
+- Never mutate workflows, mappings, goals, provider settings, or billing behavior without review.
+
+### 6. Community library
+
+Allow users to share portable workflow templates and hardware setups without exposing credentials, private paths, prompts, or conversation content.
+
+Community bundles need:
+
+- A versioned manifest, declared capabilities, compatible app/schema versions, required providers/devices, permissions, and configurable inputs.
+- Secret placeholders rather than embedded secrets.
+- Preview, validation, trust warnings, test mode, and fork/update flows.
+- Attribution, version history, reporting, and moderation before public discovery is opened broadly.
+
+## Shared semantic action layer
+
+Workflows, mappings, Coach suggestions, Goals, and the regular UI must use one action registry:
+
+```text
+User / MIDI / Keyboard / Schedule / Coach suggestion
+                         │
+                         ▼
+              Trigger + context envelope
+                         │
+                         ▼
+          Versioned semantic action registry
+             │           │           │
+             ▼           ▼           ▼
+       Provider      Ambientic     Hardware
+       adapters       services      feedback
+             │           │           │
+             └──── execution result ─┘
+                         │
+                         ▼
+           Local audit + workflow history
+```
+
+An action definition declares its identifier, schema, required capabilities, permission level, idempotency behavior, result shape, and compatibility version. Provider adapters translate that stable contract into the provider's supported local protocol. Unsupported capabilities are explicit and never silently emulated with brittle UI automation.
+
+## Model-agnostic context strategy
+
+- Store canonical goals, tasks, workflow definitions, mappings, execution results, and recommendations outside model transcripts.
+- Give an agent a compact context capsule containing the objective, current task, acceptance criteria, relevant decisions, artifact references, and requested action.
+- Retrieve full conversation or artifact context only when the action requires it.
+- Record stable references and short derived facts instead of copying entire chats into every model.
+- Treat provider/model choice as runtime policy; a workflow step requests capabilities and constraints, then Ambientic resolves an eligible connected provider.
+- Preserve deterministic execution state locally so a different provider can resume without replaying unrelated conversation history.
+
+## Trust and privacy
+
+- Local-first by default; no Ambientic account is required for personal use.
+- Provider credentials remain in provider-owned stores.
+- Reading conversations, ingesting external sources, publishing templates, and using remote models for analysis are distinct opt-in permissions.
+- Community exports pass a privacy linter and exclude secrets, absolute personal paths, transcript excerpts, and private artifact content by default.
+- Every consequential Coach or workflow action is previewable, attributable, reversible where possible, and recorded locally.
+
+## Success measures
+
+- A user converts a repeated task into a successful workflow in under ten minutes.
+- A user maps an arbitrary hardware control to a semantic action in under two minutes.
+- Imported workflows and mappings declare compatibility before installation and never carry private data.
+- Coach suggestions are accepted or edited because their evidence and value are clear; dismissal reduces repeated noise.
+- Workflow runs can resume after app/provider interruption without duplicating consequential steps.
+- APC40 MKII native selection, state colors, voice capture, and lighting remain stable.
+
+## Experience principles
+
+1. Glanceability before density.
+2. Direct manipulation before configuration jargon.
+3. Semantic actions before provider-specific commands.
+4. Visible state and safe recovery before magical automation.
+5. Suggestions before silent mutation.
+6. Local evidence before context-heavy model calls.
+7. Portable manifests before a centralized marketplace.
+8. Ambient motion and hardware expression must remain calm, legible, reduced-motion-safe, and consistent with `ART_DIRECTION.md`.
+
+## Out of scope for the first workflow increment
+
+- Public marketplace accounts, payments, ratings, or social feeds.
+- Arbitrary shell execution without a declared permission boundary.
+- A general-purpose Zapier replacement.
+- Cloud execution while Ambientic is closed.
+- Automatic publishing of private prompts, chats, files, or hardware identifiers.
+- Replacing the provider's model, authentication, or billing system.

@@ -1,100 +1,95 @@
 <!-- ambientic-handover -->
 # AgentBase handover
 
-Generated: 2026-07-24T14:35:16.749Z
-Source provider: claude  
-Source task: AgentBase
-Reason: 100% used · Current session
+Updated: 2026-07-29
+Product: Ambientic
+Repository: `/Users/samori/AgentBase`
+Branch: `samori/apc40-midi-connector`
 
 ## Continue from here
 
-Work in `/Users/samori/AgentBase`. Read this file, inspect the working tree, and continue the current objective. Preserve existing uncommitted work. Do not ask for the prior chat, and do not spend a turn re-summarizing this handover unless the repository contradicts it.
-
-## Product direction
-
-Ambientic should become the interface above agent providers:
-
-- See every active agent, project, task, state, context, and usage signal in one place.
-- Start, resume, interrupt, and supervise agents without navigating between terminal windows.
-- Inspect agent-created files, diffs, localhost websites, simulators, screenshots, and other artifacts visually.
-- Use the best provider for each task without changing the control surface or learned workflow.
-- Map semantic actions to physical controls so repeated operations become muscle memory.
-- Keep a local-first trust model while allowing optional remote access and synchronization later.
-- Help users improve their agentic engineering through continuity coaching, prompt and workflow insights, skill suggestions, and provider-neutral best practices derived from their own work.
-
-The product should own the user experience and normalized session model, not provider credentials or private authentication formats. Provider-specific hooks, ACP implementations, SDKs, and CLIs are adapters behind a stable Ambientic interface.
+Read `AGENTS.md`, `README.md`, `PRODUCT.md`, and `NEXT_STEPS.md`. Inspect the working tree before editing and preserve unrelated changes. Keep the shipped product name **Ambientic**; AgentBase is the checkout and GitHub repository name.
 
 ## Current objective
 
-AgentBase
+Build the first Workflow Builder vertical slice on top of one provider-neutral semantic action registry. The initial increment is a local, deterministic, resumable linear workflow engine with a compact editor—not a marketplace and not an unconstrained node canvas.
 
-## Completed and material state
+Start with:
 
-Recent commits:
+1. A versioned portable workflow schema and three example manifests.
+2. A semantic action registry with typed input/output, capability, permission, compatibility, and idempotency metadata.
+3. Atomic local stores for workflow definitions, templates, and run journals.
+4. A headless ordered-step runner with dry run, approval, cancel, resume, retry, timeout, and restart recovery.
+5. One action proven through the UI, a workflow step, and existing MIDI Learn.
 
-```text
-4c871e4 Checkpoint usage tracking and responsive agent threads
-5efb10c Overview: live countdown to each rate-limit reset
-16f182a Overview: show both 5-hour and weekly limits as matching gauges per provider
-a2d3dea Claude usage gauge: scrape the interactive /usage panel for real limit windows
-83a8cb8 Stop tracking Python bytecode cache (__pycache__/*.pyc)
-e88f58f usage: publish each provider incrementally so one slow collector can't stall the panel
-```
+## Core roadmap
 
-The integration tree should remain clean between features. Use separate worktrees for simultaneous Claude and Codex implementation, then merge reviewed commits here.
+Ambientic's next three major initiatives share the same action and capability layer:
 
-## Remaining direction
+- **Workflow Builder:** reusable sequences across agents, humans, goals, artifacts, usage signals, and hardware.
+- **Universal Hardware Mapping:** customizable MIDI and keyboard profiles with layers, banks, modifiers, feedback, diagnostics, and portable community bundles.
+- **Ambientic Coach:** opt-in local analysis of conversations and selected external sources that produces evidence-backed draft workflows, mappings, goal tasks, skills, provider choices, and cost improvements.
 
-- Claude's Codex-style usage gauges are implemented. A 2026-07-28 audit found stale Claude Pro profile metadata but an authoritative live CLI state of `loggedIn: false`. The collector now trusts `claude auth status --json`, avoids falsely inferring API billing from optional-extra-usage copy, supports Claude Code 2.1.220's four-tab `/usage` screen, and falls back to real weekly local activity until the user reconnects Pro/Max and current quota windows are observed.
-- The embedded Claude login now uses `claude auth login --claudeai`. It never treats “Welcome back” as success, keeps the provider-owned localhost callback alive through the browser redirect, and requires a separate live `auth status --json` confirmation before showing Connected. On success it foregrounds Overview and forces a new usage collection.
-- Overview provider cards now center their provider identity and open refreshed, provider-filtered Threads on the latest matching conversation; task creation remains on the dedicated create card.
-- Codex Desktop lifecycle is authoritative over Ambientic's passive transcript app-server. Opening a live conversation can no longer make its running state appear idle in the thread UI, Overview, compact controller, or APC LEDs.
-- The combined provider-environment, thread-scroll, usage/billing, and responsive-composer work is preserved in commit `4c871e4`.
-- The single-agent integration lane is implemented: separate Claude/Codex worktrees feed reviewed commits into one clean integration worktree, and only that worktree may run `npm run release:local`. The release command locks packaging, embeds clean/dirty status plus commit/build identity, skips distribution-certificate discovery, applies a verified ad-hoc seal for local use, installs the app, restarts it, and verifies health. Settings displays the installed identity.
-- The 2026-07-27 crash reports both identify a native CoreMIDI abort during `new midi.Input()`. The current fix enforces a single Ambientic process and one controller-lifetime MIDI client pair, while project-scope guards prevent automatic Git/handover inspection at `/`, `/Users`, or the user's home directory. Authentication, provider navigation, and live-state regressions now bring the suite to 97 tests.
+Community sharing begins with privacy-safe local import/export. Accounts, public discovery, ratings, and moderation come only after clean-profile bundle exchange works reliably.
 
-- Ambientic accounts or a cloud backend.
-- Universal monetary spend totals from consumer subscriptions. Exact currency reporting requires an optional provider billing connection (for example an OpenAI organization Admin API key); Claude subscription spend is not exposed by the local CLI, and Hermes costs belong to its configured upstream provider.
-- Archived/deleted-provider sessions and Claude internal subagent transcripts; the workspace intentionally indexes top-level user conversations only.
-- Rich diff rendering, image galleries, or embedded localhost web previews inside the full workspace; this increment lists touched files and retains the existing companion-preview system.
-- Fully interactive Claude tool approvals inside Ambientic. Claude managed turns currently use the CLI's `acceptEdits` permission mode; unsupported permission prompts are reported and can be continued in the native surface.
-- Windows or Linux support.
-- Generic MIDI-controller output profiles.
-- Public auto-update infrastructure.
-- OpenClaw integration.
+The complete phase order and exit criteria are in `NEXT_STEPS.md`. Product contracts, trust boundaries, context strategy, and success measures are in `PRODUCT.md`. The same work is captured as tickets in the live **Build Ambientic** goal.
 
-## Architecture
+## Architecture direction
 
 ```text
-Claude hooks ─┐
-Codex hooks  ─┼──> local event server ──> normalized session store ──> React UI
-Hermes plugin ┘                                  │                       │
-                                                 ├──> terminal focus     │
-Process discovery ───────────────────────────────┤                       │
-Codex local task index ──> Codex deep links ────┤                       │
-                                                 ├──> previews           │
-APC40 MKII MIDI input ──> action mappings ──────┴───────────────────────┘
-APC40 MKII MIDI output <── session state and selection LEDs
+Triggers: UI / MIDI / Keyboard / Schedule / Agent state / Coach
+                              │
+                              ▼
+              Versioned semantic action registry
+                 │              │              │
+                 ▼              ▼              ▼
+          Workflow runner   Ambientic core  Hardware feedback
+                 │              │              │
+                 └──── local result + audit ───┘
+                              │
+                              ▼
+             Goals / artifacts / run history
 
-Codex app-server ─┐
-Claude local CLI ─┼──> normalized workspace bridge ──> transcript / composer / artifacts
-Hermes ACP ───────┘                                      │
-                                                        └──> approvals / interrupt / state
-
-Provider quota adapters ──> current capacity ──> local consumption ledger ──> Overview history
-Provider billing APIs (future, optional) ────────────────────────────────────> currency spend
+Provider capability resolver
+    ├── Codex adapter
+    ├── Claude Code adapter
+    ├── Hermes adapter
+    └── future adapters
 ```
 
-The Electron main process owns local system access, session state, connectors, previews, and MIDI. The renderer receives a narrow IPC surface through the preload script. Provider credentials remain in provider-owned local stores.
+Canonical goals, workflow state, mappings, execution evidence, and recommendations live outside provider transcripts. Agents receive bounded context capsules and retrieve deeper context only when required.
 
-## Recent decision context
+## Material current state
 
-- No canonical recent messages were available. Use the task title, README, and working tree as the source of truth.
+- Goals is a first-class local workspace with atomic `goals.json` persistence, audit events, milestones, task ownership, and a six-state board.
+- The local **Build Ambientic** goal contains the upcoming Workflow, Hardware Mapping, Coach, Community, and shared-foundation tickets.
+- Claude Code, Codex, and Hermes are normalized behind the workspace bridge while credentials remain provider-owned.
+- APC40 MKII and APC mini mk2 have native layouts, truthful green/red/blue state feedback, push-to-talk, MIDI Learn, and Vibe lighting.
+- Provider usage, rate-limit handover, goals, artifacts, approvals, onboarding, and the full-screen Overview/Threads workspace are present.
+- Background provider probes run from `~/.ambientic/provider-runtime`; automatic Claude usage refresh is passive, preventing unrelated Music, Photos, Documents, Desktop, and Downloads prompts.
+- Latest installed privacy-fixed build before this roadmap update: commit `77e6c49`, healthy on local port `47600`.
 
-## Material artifacts
+## Non-negotiable constraints
 
-- No task artifacts were recorded. Inspect the working tree.
+- Local-first personal use remains functional without an Ambientic account.
+- Provider credentials stay in provider-owned stores.
+- APC40 MKII native behavior must not regress while generic hardware support expands.
+- Unsupported provider capabilities are explicit; do not silently fall back to brittle UI automation.
+- Consequential workflow and Coach actions require visible permission boundaries and local audit history.
+- Community exports exclude secrets, private paths, raw transcripts, and private artifact data by default.
+- Revisit `ART_DIRECTION.md` for material UI, motion, lighting, sound, or hardware-expression changes.
+- Update `README.md` status and verification before completing every coding task.
 
-## First action
+## Recent commits
 
-Run `git status --short`, read the directly relevant files, and continue the current objective with the smallest verifiable increment.
+```text
+77e6c49 Prevent protected-folder prompts from provider probes
+02ae711 Allow scoped local release test override
+c28ec6f Add local goals workspace foundation
+d71ff41 Remove background automation and legacy terminal integration
+63749c6 Fix Overview managed task creation
+```
+
+## First implementation action
+
+Create the workflow manifest/schema tests before UI work. Validate three examples: rate-limit handover, build/test/review, and repetitive request → goal task → agent execution → artifact review. Keep schema and engine provider-neutral; provider selection is a capability-resolution concern.
