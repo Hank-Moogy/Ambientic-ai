@@ -54,7 +54,6 @@ def event_for_hook(hook):
 
 # Terminal GUI apps we walk the process tree looking for (comm -> app label).
 TERMINALS = {
-    "ghostty": "ghostty",
     "iterm2": "iTerm.app",
     "iterm": "iTerm.app",
     "terminal": "Apple_Terminal",

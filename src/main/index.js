@@ -1218,12 +1218,7 @@ app.whenReady().then(() => {
       summarizer.enqueue(id, text)
     }
   })
-  discovery = startDiscovery(store, {
-    onTaskText: (id, text) => {
-      store.updateContext(id, text)
-      summarizer.enqueue(id, text)
-    }
-  })
+  discovery = startDiscovery(store)
   companions.start()
   usage.start()
   console.log(`[ambientic] accessibility granted: ${accessibilityGranted(false)}`)

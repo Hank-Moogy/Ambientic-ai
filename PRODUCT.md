@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Developers and operators running several Claude Code, Codex, and Hermes sessions at once across Ghostty windows, panes, displays, and macOS Spaces. They glance at Ambientic while actively coding and need to identify the right agent without rereading terminal output.
+Developers and operators running several Claude Code, Codex, and Hermes sessions at once across managed threads, terminal windows, displays, and macOS Spaces. They glance at Ambientic while actively coding and need to identify the right agent without rereading terminal output.
 
 ## Product Purpose
 

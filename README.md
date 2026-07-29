@@ -61,7 +61,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Direct `codex://threads/<id>` navigation back to imported Codex desktop tasks.
 - Session cards named from the active task, provider surface, or meaningful project instead of the macOS account folder.
 - Lifecycle events normalized into running, waiting, attention, idle, and ended states. A completed managed turn is idle/done, not red. The provider-neutral resolver is shared by workspace cards, transcript headers, compact controller, and APC LEDs: explicit approval/user-input signals override a still-live provider process; real Codex Desktop and terminal-hook lifecycles cannot be demoted by a passive transcript reader running in another provider process; managed notifications can still promote work immediately; lifecycle changes synchronize before rendering and resolving an approval immediately clears the signal.
-- Exact Ghostty pane focus when its TTY AppleScript API is available.
+- Explicit terminal focus for supported terminal applications; Ambientic performs no background window automation.
 - Localhost and simulator companion previews.
 - APC40 task activation is a complete context switch: exact thread selection, immediate preview rescan, automatic presentation on the configured preview display, and a right-side single-display fallback.
 - The thread header and Context panel show linked preview availability and can present it again on demand.
@@ -185,7 +185,7 @@ Last updated: 2026-07-29
 - [x] Floating Electron session grid and menu-bar state.
 - [x] Claude Code, Codex, and Kimi lifecycle hook bridge.
 - [x] Live terminal-process discovery.
-- [x] Exact Ghostty TTY focus and multi-display companion routing.
+- [x] Explicit terminal focus and multi-display companion routing without background terminal-window automation.
 - [x] Localhost, Chrome-route, simulator, and screenshot companion support.
 - [x] Claude, Codex, and Kimi usage collectors.
 - [x] APC40 MKII CoreMIDI detection.
@@ -310,6 +310,8 @@ Last updated: 2026-07-29
 - [x] Automatic context enrichment now also excludes every macOS protected home collection; unsafe discovered sessions retain chat and lifecycle state but skip background Git/transcript inspection. New tasks no longer default to `/Users/samori`: they require a specific project folder, with a user-triggered folder picker for intentional access.
 - [x] Local repository identity normalized to AgentBase: the checkout lives at `/Users/samori/AgentBase`, handover instructions and project-label fixtures use that path, and the shipped product name remains Ambientic.
 - [x] Overview task creation now keeps its primary action usable before a folder is chosen, opens the native folder chooser on demand, follows newly available provider connections, and displays actionable folder/provider/startup failures instead of silently resetting the button.
+- [x] Privacy boundary hardened: Ambientic no longer polls terminal windows with Apple Events, reads Chrome session files, or scans every localhost process/CWD in the background. Local previews are inferred from provider context; window focus, preview presentation, attachments, folder selection, microphone capture, and screenshots remain explicit user actions.
+- [x] Removed the legacy terminal-specific discovery/focus adapter, hook metadata, cached identifiers, UI states, documentation, and generated hook bytecode.
 
 ### In progress
 
@@ -345,10 +347,11 @@ Last updated: 2026-07-29
 
 ### Verification
 
+- 2026-07-29 macOS privacy root cause: unified TCC logs attributed repeated five/ten-second `kTCCServiceAppleEvents` requests to Ambientic-owned `osascript` children. The periodic terminal-window and Chrome-tab pollers are removed, and regression coverage rejects their reintroduction while confirming localhost previews still derive from sanitized agent context.
 - 2026-07-29 Overview task-start regression: task-launch IPC errors are reduced to their actionable provider message, missing error text receives a stable fallback, and the production modal no longer discards rejected provider starts.
 - 2026-07-29 repository rename: tracked checkout references and the handover entry point now identify `/Users/samori/AgentBase`; the remote repository remains `Hank-Moogy/AgentBase` while the upstream `therocketgui/vibe-controller` URL is preserved as project provenance.
 - 2026-07-27 crash investigation: both macOS reports (`15:08:37` and `15:15:07`) terminate with `SIGABRT` on the main thread inside `MidiInCore::getCoreMidiClientSingleton` during `new midi.Input()`. The controller-lifetime regression confirms repeated disconnected reconnects construct exactly one native input and output pair.
-- `npm test`: 100 tests passing, including actionable managed-task startup errors, a simulated browser-to-localhost Claude OAuth callback, post-login forced usage refresh, non-repeating Claude success feedback, provider-filtered latest-thread entry, passive-reader versus live-Codex state precedence, CoreMIDI client reuse, protected project-scope and explicit-project-folder boundaries, build identity, inherited provider-session environment sanitization, transcript navigation, provider approvals, current/legacy Claude usage navigation, live Claude authentication truth, MIDI layouts, voice validation, and cross-provider workspace behavior.
+- `npm test`: 102 tests passing, including privacy-safe background discovery, sanitized provider-context localhost previews, actionable managed-task startup errors, a simulated browser-to-localhost Claude OAuth callback, post-login forced usage refresh, non-repeating Claude success feedback, provider-filtered latest-thread entry, passive-reader versus live-Codex state precedence, CoreMIDI client reuse, protected project-scope and explicit-project-folder boundaries, build identity, inherited provider-session environment sanitization, transcript navigation, provider approvals, current/legacy Claude usage navigation, live Claude authentication truth, MIDI layouts, voice validation, and cross-provider workspace behavior.
 - 2026-07-28 macOS privacy audit: background context enrichment no longer runs for home roots or protected Music, Pictures/Photos, Documents, Desktop, Downloads, Movies, Public, or Library paths. Folder access is initiated only from the new-task chooser or the explicit Attach action.
 - 2026-07-28 release-gate hardening: the simulated Claude browser callback keeps its strict lifecycle assertions but allows 15 seconds for URL and credential verification under concurrent packaging load, removing a false five-second timeout without weakening product behavior.
 - 2026-07-28 live Codex state audit: this exact Codex Desktop thread was `running` in both its local index and Ambientic's discovery store while the opened Ambientic conversation appeared idle. A regression now proves a separate passive app-server read cannot write a false idle lifecycle or override the authoritative Desktop state.

@@ -112,7 +112,6 @@ export class SessionStore extends EventEmitter {
         term_app: e.term_app || '',
         term_pid: e.term_pid || null,
         agent_pid: e.agent_pid || null,
-        ghostty_terminal_id: e.ghostty_terminal_id || '',
         transcriptPath: e.transcript_path || '',
         state: STATE.IDLE,
         since: now,
@@ -130,9 +129,9 @@ export class SessionStore extends EventEmitter {
     }
 
     // Refresh focus/context fields whenever the hook re-reports them.
-    // Ghostty's terminal cwd is the stable user-facing project. Agent hooks
-    // can temporarily report a skill/plugin cache cwd while tools execute, so
-    // never let that transient value replace a terminal cwd learned by scan.
+    // Agent hooks can temporarily report a skill/plugin cache cwd while tools
+    // execute, so never let that transient value replace a terminal cwd
+    // learned by process discovery.
     if (e.cwd && !s.terminalCwd) { s.cwd = e.cwd; if (!e.project) s.project = basename(e.cwd) || s.project }
     if (e.project && !s.terminalCwd) s.project = e.project
     if (e.tty) s.tty = e.tty
@@ -140,7 +139,6 @@ export class SessionStore extends EventEmitter {
     if (e.term_app) s.term_app = e.term_app
     if (e.term_pid) s.term_pid = e.term_pid
     if (e.agent_pid) s.agent_pid = e.agent_pid
-    if (e.ghostty_terminal_id) s.ghostty_terminal_id = e.ghostty_terminal_id
     if (e.transcript_path) s.transcriptPath = String(e.transcript_path).slice(0, 1000)
     if (e.summary) s.summary = String(e.summary).slice(0, 200)
     s.lastSeen = now

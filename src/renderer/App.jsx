@@ -502,10 +502,7 @@ export default function App () {
     if (!result?.ok) {
       setFocusedId((current) => current === id ? previousFocusedId : current)
       if (result?.reason === 'session-ended') return
-      const msg = result?.reason === 'ghostty-mapping-pending'
-        ? 'Linking this pane — it will be ready on the agent’s next event.'
-        : 'Could not focus this terminal.'
-      setFocusMsg(msg)
+      setFocusMsg('Could not focus this terminal.')
       setTimeout(() => setFocusMsg(null), 5000)
     } else if (result?.companion?.results?.length && !result.companion.results.some((item) => item.ok)) {
       setFocusMsg('Terminal focused; its linked preview could not be opened.')

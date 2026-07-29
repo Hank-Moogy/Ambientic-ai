@@ -2,43 +2,15 @@ import { EventEmitter } from 'node:events'
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { basename, join, normalize, sep } from 'node:path'
-import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
 import { loadPrefs, savePrefs } from './prefs.js'
 import { terminalContexts } from './terminal-context.js'
+import { localPreviewCandidates, localUrl } from './preview-candidates.mjs'
 
 const SCAN_INTERVAL_MS = 10_000
-const RECORD_SEPARATOR = String.fromCharCode(30)
-const FIELD_SEPARATOR = String.fromCharCode(31)
-const CONTROLLER_PORT = 47600
 const ADAPTER_PATH = `${homedir()}/Library/Android/sdk/platform-tools/adb`
 const SIMULATOR_PATH = '/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app'
-const CHROME_DATA_PATH = join(homedir(), 'Library', 'Application Support', 'Google', 'Chrome')
 const CHROME_BINARY = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-
-const CHROME_TABS_SCRIPT = `
-if application "Google Chrome" is not running then return ""
-set rows to ""
-tell application "Google Chrome"
-  set windowOrder to 0
-  repeat with w in windows
-    set windowOrder to windowOrder + 1
-    set activeIndex to active tab index of w
-    repeat with tabIndex from 1 to count tabs of w
-      set t to tab tabIndex of w
-      set tabURL to ""
-      set tabTitle to ""
-      try
-        set tabURL to URL of t as text
-        set tabTitle to title of t as text
-      end try
-      if tabURL is not "" then
-        set rows to rows & (id of w as text) & (ASCII character 31) & (windowOrder as text) & (ASCII character 31) & (tabIndex as text) & (ASCII character 31) & (activeIndex as text) & (ASCII character 31) & tabURL & (ASCII character 31) & tabTitle & (ASCII character 30)
-      end if
-    end repeat
-  end repeat
-end tell
-return rows
-`
 
 function run (file, args, timeout = 5000) {
   return new Promise((resolve, reject) => {
@@ -76,86 +48,11 @@ function sessionTerminalKey (session) {
   return session?.tty ? `tty:${session.tty}` : `session:${session?.id || ''}`
 }
 
-function localUrl (raw) {
-  try {
-    const url = new URL(raw)
-    const host = url.hostname.toLowerCase()
-    if (!['localhost', '127.0.0.1', '::1'].includes(host)) return null
-    const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80))
-    return Number.isFinite(port) ? { url, port } : null
-  } catch {
-    return null
-  }
-}
-
-export function parseChromeTabs (text) {
-  const tabs = []
-  for (const row of String(text || '').split(RECORD_SEPARATOR)) {
-    const [windowId, windowOrder, tabIndex, activeIndex, url = '', title = ''] = row.split(FIELD_SEPARATOR)
-    const local = localUrl(url)
-    if (!local) continue
-    tabs.push({
-      windowId: Number(windowId),
-      windowOrder: Number(windowOrder),
-      tabIndex: Number(tabIndex),
-      active: Number(tabIndex) === Number(activeIndex),
-      url,
-      title: title.trim(),
-      port: local.port
-    })
-  }
-  return tabs
-}
-
-export function parseListeners (text) {
-  const records = []
-  let current = null
-  for (const line of String(text || '').split('\n')) {
-    if (line.startsWith('p')) {
-      current = { pid: Number(line.slice(1)), commandName: '', ports: new Set() }
-      records.push(current)
-    } else if (current && line.startsWith('c')) {
-      current.commandName = line.slice(1)
-    } else if (current && line.startsWith('n')) {
-      const match = line.slice(1).match(/:(\d+)$/)
-      if (match) current.ports.add(Number(match[1]))
-    }
-  }
-  return records
-    .flatMap((record) => [...record.ports].map((port) => ({ ...record, ports: undefined, port })))
-    .filter((record) => Number.isInteger(record.pid) && Number.isInteger(record.port))
-}
-
-function parseLsofCwds (text) {
-  const result = new Map()
-  let pid = null
-  for (const line of String(text || '').split('\n')) {
-    if (line.startsWith('p')) pid = Number(line.slice(1))
-    else if (pid && line.startsWith('n')) result.set(pid, cleanPath(line.slice(1)))
-  }
-  return result
-}
-
 function parsePs (text) {
   return String(text || '').split('\n').flatMap((line) => {
     const match = line.match(/^\s*(\d+)\s+(.*)$/)
     return match ? [{ pid: Number(match[1]), command: match[2] }] : []
   })
-}
-
-async function processCwds (pids) {
-  const unique = [...new Set(pids.filter(Number.isInteger))]
-  if (!unique.length) return new Map()
-  try {
-    return parseLsofCwds(await run('/usr/sbin/lsof', ['-a', '-p', unique.join(','), '-d', 'cwd', '-Fn']))
-  } catch {
-    return new Map()
-  }
-}
-
-function deviceArgument (command) {
-  const match = String(command || '').match(/--device(?:=|\s+)(.+?)(?=\s+--|$)/i)
-  return match ? match[1].replace(/^['"]|['"]$/g, '').trim() : ''
 }
 
 function normalizeDeviceName (value) {
@@ -172,159 +69,8 @@ function candidateSummary (candidate, confidence = 'suggested') {
   }
 }
 
-async function scanChromeTabs () {
-  try { return parseChromeTabs(await run('/usr/bin/osascript', ['-e', CHROME_TABS_SCRIPT], 5000)) } catch { return [] }
-}
-
-function mergeChromeTabs (tabs) {
-  const merged = []
-  const seen = new Set()
-  for (const tab of tabs) {
-    if (seen.has(tab.url)) continue
-    seen.add(tab.url)
-    merged.push(tab)
-  }
-  return merged
-}
-
-function sessionPageUrl (raw) {
-  const local = localUrl(raw)
-  if (!local) return ''
-  const url = local.url
-  if (/^\/(?:api|_next|sockjs-node|__vite|assets)(?:\/|$)/i.test(url.pathname)) return ''
-  if (/\.(?:js|css|map|json|png|jpe?g|gif|svg|ico|woff2?|ttf)(?:$|\?)/i.test(url.pathname)) return ''
-  const sensitive = /^(?:code|token|access_token|refresh_token|id_token|state|key|api_key|session)$/i
-  for (const key of [...url.searchParams.keys()]) if (sensitive.test(key)) url.searchParams.delete(key)
-  url.hash = ''
-  return url.toString()
-}
-
-async function chromeSessionTabs () {
-  try {
-    const profiles = (await readdir(CHROME_DATA_PATH, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() && /^(?:Default|Profile \d+|Guest Profile)$/.test(entry.name))
-    const files = []
-    for (const profile of profiles) {
-      const directory = join(CHROME_DATA_PATH, profile.name, 'Sessions')
-      try {
-        const entries = await readdir(directory, { withFileTypes: true })
-        const recent = await Promise.all(entries
-          .filter((entry) => entry.isFile() && /^(?:Session|Tabs)_/.test(entry.name))
-          .map(async (entry) => {
-            const path = join(directory, entry.name)
-            return { path, modified: (await stat(path)).mtimeMs }
-          }))
-        files.push(...recent.sort((left, right) => right.modified - left.modified).slice(0, 4))
-      } catch {}
-    }
-
-    const found = []
-    for (const file of files.sort((left, right) => right.modified - left.modified)) {
-      let body = ''
-      try { body = (await readFile(file.path)).toString('latin1') } catch { continue }
-      const matches = body.match(/https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/[A-Za-z0-9\-._~%!$&'()*+,;=:@/?#]*/g) || []
-      for (let index = 0; index < matches.length; index++) {
-        const url = sessionPageUrl(matches[index])
-        const local = localUrl(url)
-        if (!url || !local) continue
-        found.push({
-          windowId: 0,
-          windowOrder: 999,
-          tabIndex: 0,
-          active: false,
-          url,
-          title: decodeURIComponent(local.url.pathname).replace(/^\//, '') || `localhost:${local.port}`,
-          port: local.port,
-          lastActivatedAt: file.modified + index,
-          source: 'terminal-context',
-          profile: basename(join(file.path, '..', '..'))
-        })
-      }
-    }
-
-    const unique = new Map()
-    for (const tab of found) {
-      const previous = unique.get(tab.url)
-      if (!previous || tab.lastActivatedAt > previous.lastActivatedAt) unique.set(tab.url, tab)
-    }
-    return [...unique.values()]
-  } catch {
-    return []
-  }
-}
-
 async function scanProcesses () {
   try { return parsePs(await run('/bin/ps', ['-axo', 'pid=,command='])) } catch { return [] }
-}
-
-async function scanBrowserCandidates (processes, tabs) {
-  let listeners = []
-  try { listeners = parseListeners(await run('/usr/sbin/lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn'], 6000)) } catch {}
-
-  const processByPid = new Map(processes.map((process) => [process.pid, process.command]))
-  const cwds = await processCwds(listeners.map((listener) => listener.pid))
-  const candidates = []
-  const seenPorts = new Set()
-
-  for (const listener of listeners) {
-    if (listener.port === CONTROLLER_PORT || seenPorts.has(listener.port)) continue
-    const cwd = cwds.get(listener.pid) || ''
-    if (!cwd) continue
-    const matchingTabs = tabs.filter((tab) => tab.port === listener.port).sort((a, b) => (
-      Number(b.active) - Number(a.active) || (b.lastActivatedAt || 0) - (a.lastActivatedAt || 0) || a.windowOrder - b.windowOrder
-    ))
-    const command = processByPid.get(listener.pid) || listener.commandName
-    const isMetro = /(?:^|\s|\/)(?:expo|metro)(?:\s|$)|react-native/i.test(command)
-    const looksLikeDevServer = /node|python|ruby|php|bun|deno|next|vite|webpack/i.test(`${listener.commandName} ${command}`)
-    if (!matchingTabs.length && (!looksLikeDevServer || isMetro)) continue
-
-    const routeTabs = matchingTabs.length ? matchingTabs : [{ url: `http://localhost:${listener.port}`, title: '', active: false, windowOrder: 999 }]
-    const seenUrls = new Set()
-    for (const tab of routeTabs) {
-      if (seenUrls.has(tab.url)) continue
-      seenUrls.add(tab.url)
-      const parsed = localUrl(tab.url)?.url
-      const route = parsed && parsed.pathname !== '/' ? parsed.pathname.replace(/\/$/, '') : ''
-      candidates.push({
-        id: `browser:${listener.port}:${encodeURIComponent(tab.url)}`,
-        type: 'browser',
-        label: `localhost:${listener.port}${route}`,
-        detail: tab.title || basename(cwd) || 'Browser preview',
-        url: tab.url,
-        port: listener.port,
-        priority: 1000 + (tab.active ? 500 : 0),
-        lastActivatedAt: tab.lastActivatedAt || 0,
-        source: tab.source || 'applescript',
-        chromeProfile: tab.profile || 'Default',
-        projectCwd: cwd
-      })
-    }
-    seenPorts.add(listener.port)
-  }
-
-  // A localhost tab remains manually attachable even when its server process
-  // cannot be inspected (Docker, a remote tunnel, or a briefly restarting dev server).
-  const unlinkedUrls = new Set()
-  for (const tab of tabs) {
-    if (seenPorts.has(tab.port)) continue
-    if (unlinkedUrls.has(tab.url)) continue
-    unlinkedUrls.add(tab.url)
-    candidates.push({
-      id: `browser:${tab.port}:${encodeURIComponent(tab.url)}`,
-      type: 'browser',
-      label: `localhost:${tab.port}${localUrl(tab.url)?.url.pathname.replace(/\/$/, '') || ''}`,
-      detail: tab.title || tab.url,
-      url: tab.url,
-      port: tab.port,
-      priority: 1000 + (tab.active ? 500 : 0),
-      lastActivatedAt: tab.lastActivatedAt || 0,
-      source: tab.source || 'applescript',
-      chromeProfile: tab.profile || 'Default',
-      projectCwd: ''
-    })
-  }
-
-  return candidates
 }
 
 async function scanIosCandidates (processes, launchHints) {
@@ -387,22 +133,14 @@ async function scanAndroidCandidates (processes, launchHints) {
   })
 }
 
-async function discoverCandidates () {
-  const [processes, appleTabs, sessionTabs] = await Promise.all([scanProcesses(), scanChromeTabs(), chromeSessionTabs()])
-  const tabs = mergeChromeTabs([...appleTabs, ...sessionTabs])
-  const launchProcesses = processes.filter((process) => /(?:expo\s+run:|react-native\s+run-)(?:ios|android)/i.test(process.command))
-  const launchCwds = await processCwds(launchProcesses.map((process) => process.pid))
-  const launchHints = launchProcesses.map((process) => ({
-    platform: /(?:run:ios|run-ios)/i.test(process.command) ? 'ios' : 'android',
-    device: deviceArgument(process.command),
-    cwd: launchCwds.get(process.pid) || ''
-  })).filter((hint) => hint.device && hint.cwd)
-
-  const [browser, ios, android] = await Promise.all([
-    scanBrowserCandidates(processes, tabs),
+async function discoverCandidates (sessions, contexts) {
+  const processes = await scanProcesses()
+  const launchHints = []
+  const [ios, android] = await Promise.all([
     scanIosCandidates(processes, launchHints),
     scanAndroidCandidates(processes, launchHints)
   ])
+  const browser = localPreviewCandidates(sessions, contexts)
   return [...browser, ...ios, ...android]
 }
 
@@ -907,10 +645,9 @@ export function createCompanionService (store, { intervalMs = SCAN_INTERVAL_MS }
   async function refresh () {
     if (stopped) return getState()
     if (scanning) return scanning
-    scanning = Promise.all([
-      discoverCandidates(),
-      terminalContexts(store.list())
-    ]).then(([next, nextContexts]) => {
+    const sessions = store.list()
+    scanning = terminalContexts(sessions).then(async (nextContexts) => {
+      const next = await discoverCandidates(sessions, nextContexts)
       candidates = next
       contexts = nextContexts
       scannedAt = Date.now()
