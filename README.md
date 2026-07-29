@@ -106,6 +106,8 @@ The current prerelease target is **Ambientic 0.8.1 alpha 1** for Apple-silicon M
 
 This build is ad-hoc signed and integrity-verified, but it is not Apple-notarized yet. A tester may need to move `Ambientic.app` into Applications, Control-click it, choose **Open**, and confirm the macOS warning. Accessibility is needed for terminal focus; microphone and screen-recording permissions are only requested when their corresponding hardware or preview features are used.
 
+The local release gate runs the complete test suite by default. During the known fake-Claude-CLI OAuth callback timeout investigation, a developer may explicitly set `AMBIENTIC_SKIP_CLAUDE_OAUTH_TEST=1`; this skips only that named simulator test while retaining the other Claude authentication tests, packaging checks, signature verification, installed-manifest check, restart, and health check. This override is for a user-approved local installation only and must not be used for public releases.
+
 ## Multi-agent development and local releases
 
 Claude and Codex should never package from the same dirty checkout. Give each agent a dedicated branch and worktree, then review or cherry-pick its finished commit into the integration worktree:
@@ -369,6 +371,7 @@ Last updated: 2026-07-29
 
 ### Verification
 
+- 2026-07-29 local-release exception: the user approved ignoring the single simulated Claude OAuth callback lifecycle timeout for this installation. `npm run test:local-release` excludes only that named case; the remaining suite and every packaging, signing, manifest, restart, and health gate remain mandatory.
 - 2026-07-29 Goals foundation: the dedicated three-test Goals service suite passes persistence, progress/blocker derivation, board moves, ownership updates, audit recording, and empty-name validation. `git diff --check` is clean and `npm run build` succeeds for main, preload, and renderer bundles. The broader suite currently has one unrelated intermittent Claude OAuth callback timeout that predates this increment.
 - 2026-07-29 macOS privacy root cause: unified TCC logs attributed repeated five/ten-second `kTCCServiceAppleEvents` requests to Ambientic-owned `osascript` children. The periodic terminal-window and Chrome-tab pollers are removed, and regression coverage rejects their reintroduction while confirming localhost previews still derive from sanitized agent context.
 - 2026-07-29 Overview task-start regression: task-launch IPC errors are reduced to their actionable provider message, missing error text receives a stable fallback, and the production modal no longer discards rejected provider starts.

@@ -128,7 +128,12 @@ async function main () {
 
     writeFileSync(manifestPath, `${JSON.stringify(buildInfo, null, 2)}\n`)
     console.log(`\nAmbientic ${buildInfo.version} · ${commit.slice(0, 8)} · ${branch}\n`)
-    run('npm', ['test'])
+    if (process.env.AMBIENTIC_SKIP_CLAUDE_OAUTH_TEST === '1') {
+      console.warn('⚠ Local release override: skipping only the simulated Claude OAuth callback lifecycle test.')
+      run('npm', ['run', 'test:local-release'])
+    } else {
+      run('npm', ['test'])
+    }
     run('npm', ['run', 'pack'], {
       env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
     })
