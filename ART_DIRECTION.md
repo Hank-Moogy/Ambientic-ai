@@ -75,6 +75,8 @@ Goals are not presented as another administrative issue tracker. The landing sur
 - **Ambient, not ornamental.** Each active path has a restrained cool glow and a slow vertical drift. Hover light should feel like moving through translucent material, never like an arcade reward.
 - **Operational truth remains crisp.** Blockers, ownership, target dates, definitions of done, and review states use text as well as color.
 - **Execution becomes denser on demand.** Opening a goal transitions from the spacious field to a horizontally navigable board. The tighter execution view retains the same cool atmosphere without sacrificing scan speed.
+- **Board cards stay quiet.** A ticket card carries only its title; its column already communicates state. Context, milestone, ownership, definition of done, and the accessible status control appear in a focused detail layer after selection.
+- **Goal context is progressive.** The execution view opens with the goal name and board immediately visible. Outcome, motivation, success criteria, priority, target, lifecycle, and progress remain available through one calm disclosure instead of pushing current work below the fold.
 - **Humans and agents share one board.** Ownership badges distinguish human, agent, and mixed work without making one actor visually subordinate to the other.
 - **Resting work recedes.** Paused, achieved, and archived goals remain accessible in a quieter library below the active field.
 - **Motion is optional.** Reduced-motion preferences remove card drift and sweeping highlights while preserving depth, hierarchy, and interaction feedback.

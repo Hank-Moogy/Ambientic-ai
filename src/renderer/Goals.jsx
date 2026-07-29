@@ -123,34 +123,80 @@ function TaskCreateModal ({ goal, initialStatus, onClose, onCreate }) {
   )
 }
 
-function TaskCard ({ task, onMove }) {
+function TaskCard ({ task, onOpen }) {
   return (
-    <article className="goal-task" draggable onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/ambientic-task', task.id) }}>
-      <header>{task.milestone ? <span>{task.milestone}</span> : <span>Unscheduled</span>}<i data-owner={task.ownerType}>{task.ownerType === 'agent' ? 'AI' : task.ownerType === 'mixed' ? 'Co' : 'You'}</i></header>
+    <article
+      className="goal-task"
+      draggable
+      role="button"
+      tabIndex={0}
+      aria-label={`Open ${task.title}`}
+      onClick={() => onOpen(task.id)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen(task.id)
+        }
+      }}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/ambientic-task', task.id)
+      }}
+    >
       <h3>{task.title}</h3>
-      {task.description && <p>{task.description}</p>}
-      {task.acceptanceCriteria && <div className="goal-task__proof"><span>✓</span><small>{task.acceptanceCriteria}</small></div>}
-      <footer><span>{task.ownerName || (task.ownerType === 'agent' ? 'Unassigned agent' : task.ownerType === 'mixed' ? 'Shared' : 'You')}</span><select aria-label={`Move ${task.title}`} value={task.status} onChange={(event) => onMove(task.id, event.target.value)}>{columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}</select></footer>
     </article>
+  )
+}
+
+function TaskDetailModal ({ task, onClose, onMove }) {
+  const status = columns.find((column) => column.id === task.status)
+  const owner = task.ownerName || (task.ownerType === 'agent' ? 'Unassigned agent' : task.ownerType === 'mixed' ? 'Shared' : 'You')
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="goal-ticket-modal" role="dialog" aria-modal="true" aria-labelledby={`ticket-title-${task.id}`}>
+        <header>
+          <div><span>{status?.label || task.status}</span><h2 id={`ticket-title-${task.id}`}>{task.title}</h2></div>
+          <button type="button" aria-label="Close ticket" onClick={onClose}>×</button>
+        </header>
+        <div className="goal-ticket-modal__meta">
+          <label>Status<select value={task.status} onChange={(event) => onMove(task.id, event.target.value)}>{columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}</select></label>
+          <div><span>Milestone</span><b>{task.milestone || 'Unscheduled'}</b></div>
+          <div><span>Owner</span><b>{owner}</b><small>{task.ownerType === 'mixed' ? 'Human + agent' : task.ownerType}</small></div>
+        </div>
+        <div className="goal-ticket-modal__body">
+          <section><span>Context</span><p>{task.description || 'No additional context yet.'}</p></section>
+          <section><span>Definition of done</span><p>{task.acceptanceCriteria || 'No acceptance criteria yet.'}</p></section>
+        </div>
+        <footer><small>Drag this ticket between columns for a quick move, or change its status here.</small><button type="button" onClick={onClose}>Done</button></footer>
+      </section>
+    </div>
   )
 }
 
 function GoalDetail ({ goal, onBack, onUpdateGoal, onAddTask, onMoveTask }) {
   const [newTaskStatus, setNewTaskStatus] = useState('')
-  const next = nextTask(goal)
+  const [selectedTaskId, setSelectedTaskId] = useState('')
+  const [showGoalDetails, setShowGoalDetails] = useState(false)
+  const selectedTask = goal.tasks.find((task) => task.id === selectedTaskId)
   return (
     <section className="goal-detail">
       <header className="goal-detail__topbar"><button type="button" onClick={onBack}>← All goals</button><span>Goal field</span><button type="button" onClick={() => setNewTaskStatus('ready')}>＋ Add task</button></header>
-      <div className="goal-detail__hero">
-        <div className="goal-detail__identity"><span><i data-status={goal.status} />{goalStatusLabel[goal.status]}</span><h1>{goal.title}</h1><p>{goal.outcome || 'Define the observable outcome for this goal.'}</p></div>
-        <div className="goal-detail__controls"><label>Status<select value={goal.status} onChange={(event) => onUpdateGoal(goal.id, { status: event.target.value })}>{Object.entries(goalStatusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><div><b>{goal.summary.progress}%</b><span>overall progress</span></div></div>
-        <div className="goal-detail__signals">
-          <article><span>Next action</span><b>{next?.title || 'Create the first clear task'}</b><small>{next ? columns.find((column) => column.id === next.status)?.label : 'The path is open'}</small></article>
-          <article><span>Success looks like</span><b>{goal.successCriteria || 'Not defined yet'}</b><small>{dueLabel(goal.targetDate)}</small></article>
-          <article><span>Why this matters</span><b>{goal.why || 'Add the motivation that should guide decisions.'}</b><small>{goal.priority} priority</small></article>
-        </div>
+      <div className="goal-detail__summary">
+        <h1>{goal.title}</h1>
+        <button type="button" aria-expanded={showGoalDetails} onClick={() => setShowGoalDetails((visible) => !visible)}>{showGoalDetails ? 'Hide goal details' : 'Goal details'}</button>
       </div>
-      <div className="goal-board-heading"><div><span>Execution field</span><h2>Milestones and tasks</h2></div><p>Drag work between states or use each card’s status menu. Agent execution and linked threads arrive in the next increment.</p></div>
+      {showGoalDetails && <div className="goal-detail__disclosure">
+        <section><span>Desired outcome</span><p>{goal.outcome || 'Not defined yet.'}</p></section>
+        <section><span>Why it matters</span><p>{goal.why || 'Not defined yet.'}</p></section>
+        <section><span>Definition of success</span><p>{goal.successCriteria || 'Not defined yet.'}</p></section>
+        <div className="goal-detail__disclosure-meta">
+          <label>Status<select value={goal.status} onChange={(event) => onUpdateGoal(goal.id, { status: event.target.value })}>{Object.entries(goalStatusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+          <span><small>Priority</small><b>{goal.priority}</b></span>
+          <span><small>Target</small><b>{dueLabel(goal.targetDate).replace(/^Target /, '')}</b></span>
+          <span><small>Progress</small><b>{goal.summary.progress}%</b></span>
+        </div>
+      </div>}
+      <div className="goal-board-heading"><div><span>Execution field</span><h2>{goal.tasks.length} tickets</h2></div><p>Open a ticket for its context and definition of done. Drag it between states to move it.</p></div>
       <div className="goal-board">
         {columns.map((column) => {
           const tasks = goal.tasks.filter((task) => task.status === column.id)
@@ -167,13 +213,14 @@ function GoalDetail ({ goal, onBack, onUpdateGoal, onAddTask, onMoveTask }) {
               }}
             >
               <header><div><i /><b>{column.label}</b><span>{tasks.length}</span></div><small>{column.hint}</small></header>
-              <div className="goal-column__tasks">{tasks.map((task) => <TaskCard key={task.id} task={task} onMove={onMoveTask} />)}</div>
+              <div className="goal-column__tasks">{tasks.map((task) => <TaskCard key={task.id} task={task} onOpen={setSelectedTaskId} />)}</div>
               <button className="goal-column__add" type="button" onClick={() => setNewTaskStatus(column.id)}>＋ Add task</button>
             </section>
           )
         })}
       </div>
       {newTaskStatus && <TaskCreateModal goal={goal} initialStatus={newTaskStatus} onClose={() => setNewTaskStatus('')} onCreate={onAddTask} />}
+      {selectedTask && <TaskDetailModal task={selectedTask} onClose={() => setSelectedTaskId('')} onMove={onMoveTask} />}
     </section>
   )
 }

@@ -63,6 +63,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Local goal persistence in a dedicated private application-data store, separate from window preferences and provider credentials, with atomic writes and an append-only human-action audit trail.
 - Goal capture with desired outcome, motivation, success criteria, target date, priority, and lifecycle state.
 - Six-state execution board with milestone labels, bounded task context, definitions of done, human/agent/mixed ownership, drag-and-drop movement, and an accessible status selector fallback.
+- Goal execution view simplified around the board: only the goal name remains expanded by default, goal context is disclosed on demand, ticket cards show only their titles, and selecting a ticket opens its complete context, milestone, owner, definition of done, and accessible status control.
 - Derived goal health signals including progress, active work, blockers, completion totals, and next-action surfacing.
 - Activity-first Threads sidebar with a persistent local “last opened by you” signal: the latest user-interacted conversation stays first, recently updated/actionable conversations are highlighted under **Recent & active**, and dormant history is separated under **Earlier threads**. Provider and search filters apply consistently to both lanes.
 - Threads sidebar ordered globally by the latest known user or agent message across providers; project groups and conversations move together as activity changes, with compact logo filters for All, Codex, Claude Code, and Hermes.
@@ -211,6 +212,7 @@ Last updated: 2026-07-29
 - [x] Goals renderer/main-process IPC contract plus real-time multi-window synchronization.
 
 - [x] Canonical clean-tree `npm run release:local` workflow with a cross-process lock, tests, packaging, verified local ad-hoc sealing, manifest verification, `/Applications` installation, restart, and health check.
+- [x] Local releases now wait for the exact installed Ambientic process to exit and use a narrowly scoped termination fallback before replacing the bundle, preventing a stale process from masquerading as the newly installed build.
 - [x] Installed build identity (version, Git commit, and build time) exposed in Settings for reliable Claude/Codex handoff and testing.
 - [x] Floating Electron session grid and menu-bar state.
 - [x] Claude Code, Codex, and Kimi lifecycle hook bridge.
@@ -391,6 +393,8 @@ Last updated: 2026-07-29
 
 ### Verification
 
+- 2026-07-29 installed-build restart fix: the roadmap store contained 31 tickets, but the visible app process predated the file update and retained its old in-memory Goals snapshot. The local installer now verifies that the exact installed process exits before copying or health-checking a release; it refuses replacement if a scoped termination cannot stop that process.
+- 2026-07-29 Goals density pass: the production renderer build verifies the compact goal header, progressive goal disclosure, title-only keyboard-selectable/draggable ticket cards, detailed ticket dialog, and removal of the redundant per-card status dropdown. The 31-ticket local roadmap remains persisted in the Goals store.
 - 2026-07-29 live roadmap update: the local **Build Ambientic** goal is high priority and contains 31 audited tickets across shared foundations, Workflow Builder, universal hardware mapping, Ambientic Coach, and community phases. Three immediate tickets are active, the goals file has a recoverable pre-roadmap backup, and Ambientic relaunched healthy after loading the new store.
 - 2026-07-29 roadmap synchronization: `PRODUCT.md` now specifies the shared semantic action layer, Workflow Builder, universal hardware mapping, Ambientic Coach, community bundle, privacy, and model-agnostic context contracts. `NEXT_STEPS.md`, `HANDOVER.md`, README status, and the live **Build Ambientic** goal use the same phased execution order.
 - 2026-07-29 protected-folder prompt root cause: macOS TCC logs identified Claude Code processes spawned by Ambientic as the accessing process and Ambientic as the responsible application for Media Library, Documents, Downloads, and All Files requests. Background provider probes no longer inherit the home directory, and automatic Claude refresh no longer starts the interactive TUI. Regression coverage requires the private provider runtime and passive refresh branch.

@@ -104,6 +104,39 @@ function sleep (milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))
 }
 
+function installedAppPids () {
+  try {
+    return output('pgrep', ['-f', '^/Applications/Ambientic\\.app/Contents/MacOS/Ambientic$'])
+      .split(/\s+/)
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 0)
+  } catch {
+    return []
+  }
+}
+
+async function waitForInstalledAppExit (attempts = 30) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!installedAppPids().length) return true
+    await sleep(100)
+  }
+  return false
+}
+
+async function stopInstalledApp () {
+  try { execFileSync('osascript', ['-e', 'tell application "Ambientic" to quit']) } catch {}
+  if (await waitForInstalledAppExit()) return
+
+  // Native MIDI/PTY teardown can outlive the normal AppleScript request. A
+  // release must never copy over a running bundle or health-check the old
+  // process, so terminate only the exact installed Ambientic executable.
+  for (const pid of installedAppPids()) {
+    try { process.kill(pid, 'SIGTERM') } catch {}
+  }
+  if (await waitForInstalledAppExit()) return
+  throw new Error('The previous installed Ambientic process did not exit; the release was not replaced.')
+}
+
 async function main () {
   if (process.platform !== 'darwin') throw new Error('The local Ambientic installer currently supports macOS only.')
   acquireLock()
@@ -146,8 +179,7 @@ async function main () {
     const packagedInfo = JSON.parse(readFileSync(packagedManifest, 'utf8'))
     if (packagedInfo.commit !== commit) throw new Error('Packaged build metadata does not match the release commit.')
 
-    try { execFileSync('osascript', ['-e', 'tell application "Ambientic" to quit']) } catch {}
-    await sleep(800)
+    await stopInstalledApp()
     run('ditto', [packagedApp, installedApp], { cwd: '/' })
 
     const installedManifest = join(installedApp, 'Contents', 'Resources', 'build-info.json')
