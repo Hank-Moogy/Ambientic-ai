@@ -176,7 +176,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 ### Completed
 
@@ -309,6 +309,7 @@ Last updated: 2026-07-28
 - [x] Project inspection is scope-bounded: home and filesystem roots are rejected for automatic Git/handover inspection, preventing Ambientic from traversing unrelated macOS-protected Music, Photos/Pictures, Documents, or Desktop collections.
 - [x] Automatic context enrichment now also excludes every macOS protected home collection; unsafe discovered sessions retain chat and lifecycle state but skip background Git/transcript inspection. New tasks no longer default to `/Users/samori`: they require a specific project folder, with a user-triggered folder picker for intentional access.
 - [x] Local repository identity normalized to AgentBase: the checkout lives at `/Users/samori/AgentBase`, handover instructions and project-label fixtures use that path, and the shipped product name remains Ambientic.
+- [x] Overview task creation now keeps its primary action usable before a folder is chosen, opens the native folder chooser on demand, follows newly available provider connections, and displays actionable folder/provider/startup failures instead of silently resetting the button.
 
 ### In progress
 
@@ -344,9 +345,10 @@ Last updated: 2026-07-28
 
 ### Verification
 
+- 2026-07-29 Overview task-start regression: task-launch IPC errors are reduced to their actionable provider message, missing error text receives a stable fallback, and the production modal no longer discards rejected provider starts.
 - 2026-07-29 repository rename: tracked checkout references and the handover entry point now identify `/Users/samori/AgentBase`; the remote repository remains `Hank-Moogy/AgentBase` while the upstream `therocketgui/vibe-controller` URL is preserved as project provenance.
 - 2026-07-27 crash investigation: both macOS reports (`15:08:37` and `15:15:07`) terminate with `SIGABRT` on the main thread inside `MidiInCore::getCoreMidiClientSingleton` during `new midi.Input()`. The controller-lifetime regression confirms repeated disconnected reconnects construct exactly one native input and output pair.
-- `npm test`: 98 tests passing, including a simulated browser-to-localhost Claude OAuth callback, post-login forced usage refresh, non-repeating Claude success feedback, provider-filtered latest-thread entry, passive-reader versus live-Codex state precedence, CoreMIDI client reuse, protected project-scope and explicit-project-folder boundaries, build identity, inherited provider-session environment sanitization, transcript navigation, provider approvals, current/legacy Claude usage navigation, live Claude authentication truth, MIDI layouts, voice validation, and cross-provider workspace behavior.
+- `npm test`: 100 tests passing, including actionable managed-task startup errors, a simulated browser-to-localhost Claude OAuth callback, post-login forced usage refresh, non-repeating Claude success feedback, provider-filtered latest-thread entry, passive-reader versus live-Codex state precedence, CoreMIDI client reuse, protected project-scope and explicit-project-folder boundaries, build identity, inherited provider-session environment sanitization, transcript navigation, provider approvals, current/legacy Claude usage navigation, live Claude authentication truth, MIDI layouts, voice validation, and cross-provider workspace behavior.
 - 2026-07-28 macOS privacy audit: background context enrichment no longer runs for home roots or protected Music, Pictures/Photos, Documents, Desktop, Downloads, Movies, Public, or Library paths. Folder access is initiated only from the new-task chooser or the explicit Attach action.
 - 2026-07-28 release-gate hardening: the simulated Claude browser callback keeps its strict lifecycle assertions but allows 15 seconds for URL and credential verification under concurrent packaging load, removing a false five-second timeout without weakening product behavior.
 - 2026-07-28 live Codex state audit: this exact Codex Desktop thread was `running` in both its local index and Ambientic's discovery store while the opened Ambientic conversation appeared idle. A regression now proves a separate passive app-server read cannot write a false idle lifecycle or override the authoritative Desktop state.

@@ -12,6 +12,7 @@ import './composer-controls.css'
 import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
+import { taskCreationError } from './new-task-state.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
 import hermesAgentLogo from './assets/hermes-agent.png'
 
@@ -317,13 +318,48 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
   const [cwd, setCwd] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const selectedConnector = taskConnectors.find((item) => item.id === provider)
+  const providerReady = Boolean(selectedConnector?.installed && selectedConnector.manageable !== false)
+  useEffect(() => {
+    if (providerReady) return
+    const fallback = taskConnectors.find((item) => item.installed && item.manageable !== false)
+    if (fallback && fallback.id !== provider) setProvider(fallback.id)
+  }, [provider, providerReady, taskConnectors])
   const chooseFolder = async () => {
-    const selected = await window.controller.chooseProjectFolder()
-    if (selected) setCwd(selected)
+    setError('')
+    try {
+      const selected = await window.controller.chooseProjectFolder()
+      if (selected) setCwd(selected)
+      return selected || ''
+    } catch (cause) {
+      setError(taskCreationError(cause))
+      return ''
+    }
   }
   const submit = async (event) => {
-    event.preventDefault(); setBusy(true)
-    try { await onCreate({ provider, cwd, prompt }) } finally { setBusy(false) }
+    event.preventDefault()
+    setError('')
+    if (!providerReady) {
+      setError('Connect a supported provider before starting this task.')
+      return
+    }
+    let workingDirectory = cwd.trim()
+    if (!workingDirectory) {
+      workingDirectory = await chooseFolder()
+      if (!workingDirectory) {
+        setError('Choose a project folder so the agent knows where to work.')
+        return
+      }
+    }
+    setBusy(true)
+    try {
+      await onCreate({ provider, cwd: workingDirectory, prompt })
+    } catch (cause) {
+      setError(taskCreationError(cause))
+    } finally {
+      setBusy(false)
+    }
   }
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -332,9 +368,10 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
         <label>Provider<div className="provider-choices">
           {taskConnectors.map((connector) => <button key={connector.id} type="button" data-selected={provider === connector.id} disabled={!connector.installed || connector.manageable === false} title={connector.authMessage || ''} onClick={() => setProvider(connector.id)}><AgentIcon agent={connector.id} /><span>{connector.label}<small>{!connector.installed ? 'Not installed' : connector.manageable === false ? 'Run /login first' : 'Uses local login'}</small></span></button>)}
         </div></label>
-        <label>Working folder<div className="new-task-folder"><input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="Choose a specific project folder" /><button type="button" onClick={chooseFolder}>Choose…</button></div><small>Ambientic does not scan your home or protected folders automatically.</small></label>
+        <label>Working folder<div className="new-task-folder"><input value={cwd} onChange={(event) => { setCwd(event.target.value); setError('') }} placeholder="Choose a specific project folder" /><button type="button" onClick={chooseFolder}>Choose…</button></div><small>Ambientic does not scan your home or protected folders automatically. Start task will open the folder chooser when this is empty.</small></label>
         <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should this agent do? (optional)" autoFocus /></label>
-        <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !cwd} type="submit">{busy ? 'Starting…' : 'Start task'}</button></footer>
+        {error && <div className="new-task__error" role="alert"><span>!</span><p>{error}</p></div>}
+        <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !providerReady} type="submit">{busy ? 'Starting…' : providerReady ? 'Start task' : 'Connect a provider first'}</button></footer>
       </form>
     </div>
   )
