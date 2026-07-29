@@ -4,6 +4,11 @@ contextBridge.exposeInMainWorld('controller', {
   getState: () => ipcRenderer.invoke('get-state'),
   getBuildInfo: () => ipcRenderer.invoke('get-build-info'),
   getWorkspaceThreads: () => ipcRenderer.invoke('get-workspace-threads'),
+  getGoals: () => ipcRenderer.invoke('get-goals'),
+  createGoal: (input) => ipcRenderer.invoke('create-goal', input),
+  updateGoal: (goalId, patch) => ipcRenderer.invoke('update-goal', goalId, patch),
+  createGoalTask: (goalId, input) => ipcRenderer.invoke('create-goal-task', goalId, input),
+  updateGoalTask: (taskId, patch) => ipcRenderer.invoke('update-goal-task', taskId, patch),
   getUsage: () => ipcRenderer.invoke('get-usage'),
   getConsumptionLedger: () => ipcRenderer.invoke('get-consumption-ledger'),
   getAmbientMode: () => ipcRenderer.invoke('get-ambient-mode'),
@@ -71,6 +76,11 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('workspace-threads', handler)
     return () => ipcRenderer.removeListener('workspace-threads', handler)
+  },
+  onGoals: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('goals', handler)
+    return () => ipcRenderer.removeListener('goals', handler)
   },
   onUsage: (cb) => {
     const handler = (_e, payload) => cb(payload)

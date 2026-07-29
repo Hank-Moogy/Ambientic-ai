@@ -67,6 +67,18 @@ Ambient mode keeps the Mac available for unattended agent work while the display
 - The safety check-in reuses the same orbital light at a larger scale. It asks calmly whether to continue, explains that silence leaves active agents uninterrupted, and presents two equally legible exits.
 - Operational meaning remains explicit in text; color and bloom reinforce state but never carry it alone.
 
+## Goals: the living direction field
+
+Goals are not presented as another administrative issue tracker. The landing surface is a calm campaign map: large outcome cards drift at slightly different rhythms in a deep spatial field, while progress, blockers, and the next meaningful action remain readable without opening the card.
+
+- **Direction before activity.** Cards lead with the desired outcome, not a task count. Progress and board mechanics support the goal instead of becoming the goal.
+- **Ambient, not ornamental.** Each active path has a restrained cool glow and a slow vertical drift. Hover light should feel like moving through translucent material, never like an arcade reward.
+- **Operational truth remains crisp.** Blockers, ownership, target dates, definitions of done, and review states use text as well as color.
+- **Execution becomes denser on demand.** Opening a goal transitions from the spacious field to a horizontally navigable board. The tighter execution view retains the same cool atmosphere without sacrificing scan speed.
+- **Humans and agents share one board.** Ownership badges distinguish human, agent, and mixed work without making one actor visually subordinate to the other.
+- **Resting work recedes.** Paused, achieved, and archived goals remain accessible in a quieter library below the active field.
+- **Motion is optional.** Reduced-motion preferences remove card drift and sweeping highlights while preserving depth, hierarchy, and interaction feedback.
+
 ## First-run expression: Enter the field
 
 Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained four-step progress trace, floating symbols, and one unmistakable primary action.

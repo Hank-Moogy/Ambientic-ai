@@ -31,11 +31,13 @@ This increment is deliberately personal and local. It adds the first full Ambien
 1. Open the Ambientic macOS app.
 2. See whether Claude Code, Codex, and Hermes are installed and connected.
 3. Land on an **Overview** command center instead of a conventional chat-history list.
-4. See animated Codex, Claude Code, Hermes, and create-task pads alongside active, needs-input, total-thread, and APC hardware signals.
-5. Select a centered provider card to refresh its conversations and enter **Threads** on that provider's latest work with its filter already active.
-6. Browse the cross-provider thread mosaic, or start a managed local task from the dedicated create-task pad by choosing a provider, working folder, and first prompt; Ambientic uses the provider's existing local login.
-7. Press an APC40 MKII pad to open that exact live task in **Threads** and present its linked localhost, iOS, or Android preview; then hold that physical column's **Record Arm** button to speak and release it to transcribe and send.
-8. Use green running, red input-required, and blue idle pad feedback, or open the compact controller for previews, usage, connectors, and MIDI Learn mappings.
+4. Open **Goals** from the persistent left navigation to see active outcomes as a slowly floating ambient field.
+5. Create a goal with its outcome, motivation, success criteria, priority, and target date; open it to manage human, agent, or mixed work on a milestone-aware Kanban board.
+6. See animated Codex, Claude Code, Hermes, and create-task pads alongside active, needs-input, total-thread, and APC hardware signals.
+7. Select a centered provider card to refresh its conversations and enter **Threads** on that provider's latest work with its filter already active.
+8. Browse the cross-provider thread mosaic, or start a managed local task from the dedicated create-task pad by choosing a provider, working folder, and first prompt; Ambientic uses the provider's existing local login.
+9. Press an APC40 MKII pad to open that exact live task in **Threads** and present its linked localhost, iOS, or Android preview; then hold that physical column's **Record Arm** button to speak and release it to transcribe and send.
+10. Use green running, red input-required, and blue idle pad feedback, or open the compact controller for previews, usage, connectors, and MIDI Learn mappings.
 
 ### Included
 
@@ -45,6 +47,11 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Settings → Usage & Billing with comparable Codex and Claude short/weekly quota meters, reset windows, stale/error states, manual refresh, and local weekly-session activity whenever a provider does not expose usable quota data.
 - Persistent local capacity ledger and Settings activity panel for provider limit hits, Codex reset-credit use, natural quota renewals, purchased-credit balance changes, and current observed balances. Codex reset allowance is shown beside its live plan without treating subscription capacity as currency spend.
 - Explicit Overview and Threads navigation, preserving the conventional conversation interface as a secondary tab rather than the product's default mental model.
+- First-class **Goals** section in the persistent left sidebar, with a spacious floating-card landing field and an in-section goal detail experience.
+- Local goal persistence in a dedicated private application-data store, separate from window preferences and provider credentials, with atomic writes and an append-only human-action audit trail.
+- Goal capture with desired outcome, motivation, success criteria, target date, priority, and lifecycle state.
+- Six-state execution board with milestone labels, bounded task context, definitions of done, human/agent/mixed ownership, drag-and-drop movement, and an accessible status selector fallback.
+- Derived goal health signals including progress, active work, blockers, completion totals, and next-action surfacing.
 - Activity-first Threads sidebar with a persistent local “last opened by you” signal: the latest user-interacted conversation stays first, recently updated/actionable conversations are highlighted under **Recent & active**, and dormant history is separated under **Earlier threads**. Provider and search filters apply consistently to both lanes.
 - Threads sidebar ordered globally by the latest known user or agent message across providers; project groups and conversations move together as activity changes, with compact logo filters for All, Codex, Claude Code, and Hermes.
 - Managed Codex conversations through Codex app-server, authenticated by the existing Codex installation.
@@ -90,6 +97,8 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Generic MIDI-controller output profiles.
 - Public auto-update infrastructure.
 - OpenClaw integration.
+- Agent-facing Goals tools or MCP server; this first increment establishes the canonical local model and human interface before agents receive scoped read/write access.
+- Linking an existing provider thread or artifact to a goal task, assignment leases, approval-gated agent mutations, or automated next-action reviews.
 
 ## Friend test build
 
@@ -179,6 +188,13 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 Last updated: 2026-07-29
 
 ### Completed
+
+- [x] Goals added as a first-class item in the persistent workspace sidebar.
+- [x] Dedicated local Goals service with atomic private JSON persistence, stable IDs, normalized goal/task states, validation, derived progress, and an append-only audit record.
+- [x] Ambient floating Goals landing field with active, resting, empty, progress, blocker, and next-action states.
+- [x] Goal detail experience with outcome, motivation, success criteria, priority, target date, lifecycle control, and execution signals.
+- [x] Six-column milestone-aware Kanban board with human, agent, and mixed ownership, task context, definitions of done, drag-and-drop moves, and status-selector accessibility.
+- [x] Goals renderer/main-process IPC contract plus real-time multi-window synchronization.
 
 - [x] Canonical clean-tree `npm run release:local` workflow with a cross-process lock, tests, packaging, verified local ad-hoc sealing, manifest verification, `/Applications` installation, restart, and health check.
 - [x] Installed build identity (version, Git commit, and build time) exposed in Settings for reliable Claude/Codex handoff and testing.
@@ -315,6 +331,8 @@ Last updated: 2026-07-29
 
 ### In progress
 
+- [ ] Visually validate the new Goals field at common workspace sizes with real goal/task content, including the two-column floating layout, reduced motion, horizontal board navigation, drag/drop, and compact-window fallbacks.
+- [ ] Validate the private `goals.json` store through an installed-app restart and confirm a goal, task ownership, board move, and lifecycle change all survive relaunch.
 - [ ] Evaluate whether the Overview's provider-pad scale, floating motion, metric hierarchy, and mosaic density feel better than a chat-list-first product.
 - [ ] Confirm the green/red/blue palette visually on the connected physical APC40 MKII after this build.
 - [ ] Physically validate exact pad-to-thread switching and preview presentation for one live localhost task on the connected APC40 MKII.
@@ -333,6 +351,10 @@ Last updated: 2026-07-29
 
 ### Next
 
+- [ ] Add provider-neutral AgentBase Goals tools through a small local MCP surface: compact goal listing, on-demand goal/task context, draft mutations, and explicit approval for consequential changes.
+- [ ] Link threads, runs, and artifacts to goal tasks without copying whole transcripts; add bounded task context capsules, execution evidence, provider/model metadata, and handover continuity.
+- [ ] Add agent task claims with expiring leases, idempotency keys, optimistic concurrency, and review-before-done defaults so multiple providers cannot silently duplicate or overwrite work.
+- [ ] Add explainable goal health and next-action reviews based on blockers, inactivity, target dates, and acceptance evidence rather than raw task-count gamification.
 - [ ] Replace terminal-owned Hermes and Kimi setup with guided provider-native browser/device-code ceremonies where their supported local protocols expose reliable completion callbacks.
 - [ ] Bundle a supported recording/transcription runtime so voice prompts do not depend on Homebrew tools in public builds.
 - [ ] Configure Apple notarization for distribution beyond the development Mac.
@@ -347,6 +369,7 @@ Last updated: 2026-07-29
 
 ### Verification
 
+- 2026-07-29 Goals foundation: the dedicated three-test Goals service suite passes persistence, progress/blocker derivation, board moves, ownership updates, audit recording, and empty-name validation. `git diff --check` is clean and `npm run build` succeeds for main, preload, and renderer bundles. The broader suite currently has one unrelated intermittent Claude OAuth callback timeout that predates this increment.
 - 2026-07-29 macOS privacy root cause: unified TCC logs attributed repeated five/ten-second `kTCCServiceAppleEvents` requests to Ambientic-owned `osascript` children. The periodic terminal-window and Chrome-tab pollers are removed, and regression coverage rejects their reintroduction while confirming localhost previews still derive from sanitized agent context.
 - 2026-07-29 Overview task-start regression: task-launch IPC errors are reduced to their actionable provider message, missing error text receives a stable fallback, and the production modal no longer discards rejected provider starts.
 - 2026-07-29 repository rename: tracked checkout references and the handover entry point now identify `/Users/samori/AgentBase`; the remote repository remains `Hank-Moogy/AgentBase` while the upstream `therocketgui/vibe-controller` URL is preserved as project provenance.

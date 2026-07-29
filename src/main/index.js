@@ -24,6 +24,7 @@ import { normalizeExternalUrl } from './external-url.mjs'
 import { ensureEnhancedPath } from './env-path.mjs'
 import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-mode.mjs'
 import { readBuildInfo } from './build-info.mjs'
+import { createGoalsService } from './goals-service.mjs'
 
 // Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
 // Finder-launched app otherwise only has launchd's minimal PATH, which lacks
@@ -90,6 +91,7 @@ let handovers = null
 let consumptionLedger = null
 let claudeAuth = null
 let ambientMode = null
+let goals = null
 let pendingWorkspaceSessionId = ''
 let workspaceListTimer = null
 
@@ -622,6 +624,11 @@ function createTray () {
 ipcMain.handle('get-state', () => store.list())
 ipcMain.handle('get-build-info', () => buildInfo)
 ipcMain.handle('get-workspace-threads', () => workspace.list())
+ipcMain.handle('get-goals', () => goals?.list() || { version: 1, goals: [], events: [], updatedAt: null })
+ipcMain.handle('create-goal', (_event, input) => goals.createGoal(input || {}))
+ipcMain.handle('update-goal', (_event, goalId, patch) => goals.updateGoal(goalId, patch || {}))
+ipcMain.handle('create-goal-task', (_event, goalId, input) => goals.createTask(goalId, input || {}))
+ipcMain.handle('update-goal-task', (_event, taskId, patch) => goals.updateTask(taskId, patch || {}))
 ipcMain.handle('get-usage', () => usage.getState())
 ipcMain.handle('get-consumption-ledger', () => consumptionLedger?.getState() || null)
 ipcMain.handle('get-ambient-mode', () => ambientMode?.getState() || {
@@ -1161,6 +1168,8 @@ app.whenReady().then(() => {
     aliases: prefs.threadAliases,
     onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases })
   })
+  goals = createGoalsService({ file: join(app.getPath('userData'), 'goals.json') })
+  goals.on('change', (snapshot) => sendToWindows('goals', snapshot))
   consumptionLedger = createConsumptionLedger({ file: join(app.getPath('userData'), 'consumption-ledger.json') })
   consumptionLedger.on('change', (state) => sendToWindows('consumption-ledger', state))
   handovers = new HandoverService({ workspace, usage })
