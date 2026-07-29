@@ -761,6 +761,10 @@ ipcMain.handle('choose-project-folder', async () => {
   })
   return result.canceled ? '' : (result.filePaths[0] || '')
 })
+ipcMain.handle('get-recent-projects', async () => {
+  await workspace.list()
+  return workspace.recentProjects()
+})
 ipcMain.handle('send-thread-prompt', (_event, id, text, options = {}) => workspace.send(id, text, options))
 ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))

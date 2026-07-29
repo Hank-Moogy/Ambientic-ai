@@ -318,15 +318,21 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
   const [provider, setProvider] = useState(initialProvider || taskConnectors.find((item) => item.manageable !== false)?.id || 'codex')
   const [cwd, setCwd] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [recentProjects, setRecentProjects] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const selectedConnector = taskConnectors.find((item) => item.id === provider)
   const providerReady = Boolean(selectedConnector?.installed && selectedConnector.manageable !== false)
+  const selectedProject = recentProjects.find((project) => project.cwd === cwd)
+  const selectedProjectName = selectedProject?.name || cwd.split(/[\\/]/).filter(Boolean).at(-1) || 'Existing project'
   useEffect(() => {
     if (providerReady) return
     const fallback = taskConnectors.find((item) => item.installed && item.manageable !== false)
     if (fallback && fallback.id !== provider) setProvider(fallback.id)
   }, [provider, providerReady, taskConnectors])
+  useEffect(() => {
+    window.controller.getRecentProjects().then(setRecentProjects).catch(() => setRecentProjects([]))
+  }, [])
   const chooseFolder = async () => {
     setError('')
     try {
@@ -345,17 +351,9 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
       setError('Connect a supported provider before starting this task.')
       return
     }
-    let workingDirectory = cwd.trim()
-    if (!workingDirectory) {
-      workingDirectory = await chooseFolder()
-      if (!workingDirectory) {
-        setError('Choose a project folder so the agent knows where to work.')
-        return
-      }
-    }
     setBusy(true)
     try {
-      await onCreate({ provider, cwd: workingDirectory, prompt })
+      await onCreate({ provider, cwd: cwd.trim(), prompt })
     } catch (cause) {
       setError(taskCreationError(cause))
     } finally {
@@ -369,8 +367,13 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
         <label>Provider<div className="provider-choices">
           {taskConnectors.map((connector) => <button key={connector.id} type="button" data-selected={provider === connector.id} disabled={!connector.installed || connector.manageable === false} title={connector.authMessage || ''} onClick={() => setProvider(connector.id)}><AgentIcon agent={connector.id} /><span>{connector.label}<small>{!connector.installed ? 'Not installed' : connector.manageable === false ? 'Run /login first' : 'Uses local login'}</small></span></button>)}
         </div></label>
-        <label>Working folder<div className="new-task-folder"><input value={cwd} onChange={(event) => { setCwd(event.target.value); setError('') }} placeholder="Choose a specific project folder" /><button type="button" onClick={chooseFolder}>Choose…</button></div><small>Ambientic does not scan your home or protected folders automatically. Start task will open the folder chooser when this is empty.</small></label>
         <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should this agent do? (optional)" autoFocus /></label>
+        <section className="new-task-work-area">
+          <div><span>Work area · Optional</span><b>{cwd ? selectedProjectName : 'New private workspace'}</b><small>{cwd || 'Ambientic creates a clean local folder automatically. Choose a project only when the agent needs existing files.'}</small></div>
+          <button type="button" onClick={chooseFolder}>{cwd ? 'Change' : 'Use existing project'}</button>
+        </section>
+        {!cwd && recentProjects.length > 0 && <div className="new-task-recents"><span>Recent</span>{recentProjects.map((project) => <button type="button" key={project.cwd} title={project.cwd} onClick={() => { setCwd(project.cwd); setError('') }}>{project.name}</button>)}</div>}
+        {cwd && <button className="new-task-private" type="button" onClick={() => { setCwd(''); setError('') }}>Use a new private workspace instead</button>}
         {error && <div className="new-task__error" role="alert"><span>!</span><p>{error}</p></div>}
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !providerReady} type="submit">{busy ? 'Starting…' : providerReady ? 'Start task' : 'Connect a provider first'}</button></footer>
       </form>
@@ -624,7 +627,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, 
 
         <section className="provider-field" aria-label="Agent providers">
           {providerCards.map((connector, index) => <ProviderPad key={connector.id} connector={connector} sessions={sessions} usage={usage} index={index} onOpenProvider={onOpenProvider} />)}
-          <button className="provider-pad provider-pad--new" type="button" onClick={() => onCreate('')}><span className="provider-pad--new__plus">＋</span><b>Create an agent task</b><small>Choose a provider and working folder</small></button>
+          <button className="provider-pad provider-pad--new" type="button" onClick={() => onCreate('')}><span className="provider-pad--new__plus">＋</span><b>Create an agent task</b><small>Choose a provider and start</small></button>
         </section>
 
         <section className="mosaic-section">

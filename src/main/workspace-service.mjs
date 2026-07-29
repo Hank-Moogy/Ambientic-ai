@@ -1,12 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
-import { isBroadProjectRoot } from './project-scope.mjs'
+import { canInspectProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -23,6 +23,25 @@ const CHAT_MODES = new Set(['build', 'plan', 'ask'])
 const CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku'])
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
+
+function taskWorkspaceSlug (prompt) {
+  return String(prompt || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42) || 'new-task'
+}
+
+export function createPrivateTaskWorkspace (root, prompt = '', id = randomUUID()) {
+  const base = String(root || '').trim()
+  if (!isAbsolute(base) || isBroadProjectRoot(base)) throw new Error('Ambientic private workspace location is invalid.')
+  mkdirSync(base, { recursive: true, mode: 0o700 })
+  const directory = join(base, `${taskWorkspaceSlug(prompt)}-${String(id).slice(0, 8)}`)
+  mkdirSync(directory, { mode: 0o700 })
+  return directory
+}
 
 function textContent (value) {
   if (typeof value === 'string') return value
@@ -256,7 +275,11 @@ function execJson (file, args) {
 }
 
 export class WorkspaceService extends EventEmitter {
-  constructor (store, getConnectors, { aliases = {}, onAliasesChange } = {}) {
+  constructor (store, getConnectors, {
+    aliases = {},
+    onAliasesChange,
+    taskWorkspaceRoot = join(homedir(), '.ambientic', 'workspaces')
+  } = {}) {
     super()
     this.store = store
     this.getConnectors = getConnectors
@@ -277,6 +300,7 @@ export class WorkspaceService extends EventEmitter {
     this.historyRefreshedAt = 0
     this.aliases = new Map(Object.entries(aliases || {}).filter(([, title]) => String(title || '').trim()))
     this.onAliasesChange = onAliasesChange
+    this.taskWorkspaceRoot = taskWorkspaceRoot
   }
 
   connector (id) { return this.getConnectors().find((item) => item.id === id) }
@@ -293,6 +317,23 @@ export class WorkspaceService extends EventEmitter {
   }
 
   sessionFor (id) { return this.store.list().find((item) => item.id === id) || this.history.get(id) }
+
+  recentProjects (limit = 4) {
+    const projects = new Map()
+    for (const session of [...this.store.list(), ...this.history.values()].sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))) {
+      const cwd = String(session.cwd || '').trim()
+      if (!cwd || projects.has(cwd) || !canInspectProjectRoot(cwd)) continue
+      // Automatic task workspaces are a default implementation detail, not
+      // useful "existing project" shortcuts.
+      if (cwd === this.taskWorkspaceRoot || cwd.startsWith(`${this.taskWorkspaceRoot}/`)) continue
+      projects.set(cwd, {
+        cwd,
+        name: session.project || basename(cwd) || 'Local project'
+      })
+      if (projects.size >= Math.max(1, Math.min(8, limit))) break
+    }
+    return [...projects.values()]
+  }
 
   async list ({ force = false } = {}) {
     if (force || Date.now() - this.historyRefreshedAt > 30_000) {
@@ -693,10 +734,9 @@ export class WorkspaceService extends EventEmitter {
   }
 
   async create ({ provider, cwd, prompt }) {
-    const workingDirectory = String(cwd || '').trim()
-    if (!workingDirectory || !isAbsolute(workingDirectory)) {
-      throw new Error('Choose a specific project folder before starting an agent.')
-    }
+    const requestedDirectory = String(cwd || '').trim()
+    const workingDirectory = requestedDirectory || createPrivateTaskWorkspace(this.taskWorkspaceRoot, prompt)
+    if (!isAbsolute(workingDirectory)) throw new Error('The selected project folder is not available.')
     if (isBroadProjectRoot(workingDirectory)) {
       throw new Error('Choose a project folder inside your home directory, not your whole home or filesystem.')
     }

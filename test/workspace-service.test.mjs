@@ -1,13 +1,40 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { homedir } from 'node:os'
-import { WorkspaceService } from '../src/main/workspace-service.mjs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { WorkspaceService, createPrivateTaskWorkspace } from '../src/main/workspace-service.mjs'
 
-test('managed tasks require a specific project folder instead of using the home directory', async () => {
+test('managed tasks reject unsafe or unavailable explicit project folders', async () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
-  await assert.rejects(service.create({ provider: 'codex', cwd: '' }), /specific project folder/)
   await assert.rejects(service.create({ provider: 'codex', cwd: homedir() }), /not your whole home/)
   await assert.rejects(service.create({ provider: 'codex', cwd: '/path/that/does/not/exist' }), /not available/)
+})
+
+test('creates a private task workspace when no project is selected', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-task-'))
+  try {
+    const root = join(directory, 'workspaces')
+    const workspace = createPrivateTaskWorkspace(root, 'Send Ambientic to a friend', '12345678-aaaa')
+    assert.equal(workspace, join(root, 'send-ambientic-to-a-friend-12345678'))
+    assert.equal(statSync(workspace).isDirectory(), true)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('offers real recent projects but not private task workspaces or protected folders', () => {
+  const home = homedir()
+  const taskWorkspaceRoot = join(home, '.ambientic', 'workspaces')
+  const service = new WorkspaceService({
+    list: () => [
+      { cwd: join(home, 'AgentBase'), project: 'AgentBase', updatedAt: 30 },
+      { cwd: join(taskWorkspaceRoot, 'new-task-1234'), project: 'new-task-1234', updatedAt: 40 },
+      { cwd: join(home, 'Documents', 'private-project'), project: 'Private', updatedAt: 50 }
+    ],
+    ingest: () => {}
+  }, () => [], { taskWorkspaceRoot })
+  assert.deepEqual(service.recentProjects(), [{ cwd: join(home, 'AgentBase'), name: 'AgentBase' }])
 })
 
 test('reconciles a partial Hermes ACP stream with the completed database transcript', async () => {
