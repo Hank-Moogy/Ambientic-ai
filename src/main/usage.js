@@ -262,6 +262,24 @@ async function collectClaude (force = false) {
     return await readClaudeUsageCache()
   } catch {}
 
+  // App launch and periodic refreshes must remain passive. Launching Claude's
+  // interactive TUI in the background makes macOS attribute any cwd inspection
+  // to Ambientic and can trigger unrelated protected-folder prompts. A manual
+  // Refresh usage or completed account connection passes force=true and may run
+  // the provider-owned collector from Ambientic's private runtime directory.
+  if (!force) {
+    const activity = await collectClaudeActivity()
+    if (!activity.available) throw new Error('Claude limits are waiting for a recent status-line observation. Refresh usage to sync them now.')
+    return {
+      plan: 'Claude',
+      windows: [],
+      activity,
+      quotaError: 'Claude limits are waiting for a recent status-line observation. Refresh usage to sync them now.',
+      quotaStatus: 'CLAUDE_PASSIVE_REFRESH',
+      source: 'claude-stats-cache'
+    }
+  }
+
   // Fallback: scrape Claude's interactive /usage panel for the real 5-hour and
   // weekly limit windows. This is the only source in Claude builds whose status
   // payload omits rate_limits. Cached automatically; manual refresh bypasses it.

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { providerRuntimeDirectory } from './provider-runtime.mjs'
 
 // Scrapes Claude Code's interactive /usage panel (via resources/claude_usage.py)
 // to obtain real subscription limit windows — the only local source for Claude's
@@ -25,7 +26,9 @@ function helperPath () {
 
 export function scrapeClaudeUsage (claudePath) {
   return new Promise((resolve, reject) => {
-    execFile('/usr/bin/python3', [helperPath(), claudePath], {
+    const cwd = providerRuntimeDirectory()
+    execFile('/usr/bin/python3', [helperPath(), claudePath, cwd], {
+      cwd,
       timeout: SCRAPE_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
       killSignal: 'SIGKILL'

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { claudeAccountStatus } from './claude-auth-service.mjs'
+import { providerRuntimeDirectory } from './provider-runtime.mjs'
 
 const AGENTS = [
   {
@@ -51,7 +52,7 @@ const AGENTS = [
 
 function run (file, args, timeout = 5000) {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(file, args, { cwd: providerRuntimeDirectory(), timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) reject(Object.assign(error, { stderr: String(stderr || '') }))
       else resolve(String(stdout || '').trim())
     })
@@ -108,7 +109,7 @@ function authStatus (agent, path) {
   }
   const args = agent.id === 'codex' ? ['login', 'status'] : ['status']
   return new Promise((resolve) => {
-    execFile(path, args, { timeout: 8000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
+    execFile(path, args, { cwd: providerRuntimeDirectory(), timeout: 8000, maxBuffer: 512 * 1024 }, (error, stdout, stderr) => {
       const output = `${stdout || ''}\n${stderr || ''}`.trim()
       const authenticated = agent.id === 'hermes'
         ? !error && (/✓\s+logged in/i.test(output) || /✓\s+(?:exists|configured|set)/i.test(output))

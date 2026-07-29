@@ -34,7 +34,11 @@ test('derives project-linked localhost previews from agent context without inspe
 test('background discovery contains no browser, terminal-window, or legacy terminal automation', async () => {
   const discovery = await readFile(new URL('../src/main/discovery.js', import.meta.url), 'utf8')
   const companions = await readFile(new URL('../src/main/companions.js', import.meta.url), 'utf8')
+  const usage = await readFile(new URL('../src/main/usage.js', import.meta.url), 'utf8')
+  const auth = await readFile(new URL('../src/main/claude-auth-service.mjs', import.meta.url), 'utf8')
 
   assert.doesNotMatch(discovery, /osascript/i)
   assert.doesNotMatch(companions, /scanChromeTabs|chromeSessionTabs|CHROME_DATA_PATH|lsof['"], \['-nP', '-iTCP'/)
+  assert.match(usage, /if \(!force\)[\s\S]*CLAUDE_PASSIVE_REFRESH/)
+  assert.doesNotMatch(auth, /cwd:\s*this\.env\.HOME/)
 })

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { providerRuntimeDirectory } from './provider-runtime.mjs'
 
 const ANSI = /\u001B(?:[@-_][0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001A\u001C-\u001F\u007F]/g
@@ -76,6 +77,7 @@ function cliAuthStatus (commandPath, env = process.env) {
   return new Promise((resolve) => {
     if (!commandPath) return resolve(null)
     const child = spawn(commandPath, ['auth', 'status', '--json'], {
+      cwd: providerRuntimeDirectory(env.HOME || homedir()),
       env,
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -200,7 +202,7 @@ export class ClaudeAuthService extends EventEmitter {
       ? ['auth', 'login', '--console']
       : ['auth', 'login', '--claudeai']
     const child = spawn('/usr/bin/python3', [this.helperPath, this.path, ...loginArgs], {
-      cwd: this.env.HOME || process.env.HOME,
+      cwd: providerRuntimeDirectory(this.env.HOME || homedir()),
       env: { ...this.env, TERM: 'xterm-256color', NO_COLOR: '1' },
       stdio: ['pipe', 'pipe', 'pipe']
     })

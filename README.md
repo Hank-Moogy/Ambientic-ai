@@ -329,6 +329,8 @@ Last updated: 2026-07-29
 - [x] Local repository identity normalized to AgentBase: the checkout lives at `/Users/samori/AgentBase`, handover instructions and project-label fixtures use that path, and the shipped product name remains Ambientic.
 - [x] Overview task creation now keeps its primary action usable before a folder is chosen, opens the native folder chooser on demand, follows newly available provider connections, and displays actionable folder/provider/startup failures instead of silently resetting the button.
 - [x] Privacy boundary hardened: Ambientic no longer polls terminal windows with Apple Events, reads Chrome session files, or scans every localhost process/CWD in the background. Local previews are inferred from provider context; window focus, preview presentation, attachments, folder selection, microphone capture, and screenshots remain explicit user actions.
+- [x] Background provider checks now run from `~/.ambientic/provider-runtime` rather than the user’s home directory, preventing provider-owned CLI startup inspection from being attributed to Ambientic as Music, Photos, Documents, Desktop, or Downloads access.
+- [x] Automatic Claude usage refresh is passive: it reads the privacy-preserving status-line cache or local activity only. Claude’s interactive `/usage` collector runs solely after an explicit **Refresh usage** action or completed account connection, and always from Ambientic’s private runtime directory.
 - [x] Removed the legacy terminal-specific discovery/focus adapter, hook metadata, cached identifiers, UI states, documentation, and generated hook bytecode.
 
 ### In progress
@@ -371,6 +373,7 @@ Last updated: 2026-07-29
 
 ### Verification
 
+- 2026-07-29 protected-folder prompt root cause: macOS TCC logs identified Claude Code processes spawned by Ambientic as the accessing process and Ambientic as the responsible application for Media Library, Documents, Downloads, and All Files requests. Background provider probes no longer inherit the home directory, and automatic Claude refresh no longer starts the interactive TUI. Regression coverage requires the private provider runtime and passive refresh branch.
 - 2026-07-29 local-release exception: the user approved ignoring the single simulated Claude OAuth callback lifecycle timeout for this installation. `npm run test:local-release` excludes only that named case; the remaining suite and every packaging, signing, manifest, restart, and health gate remain mandatory.
 - 2026-07-29 Goals foundation: the dedicated three-test Goals service suite passes persistence, progress/blocker derivation, board moves, ownership updates, audit recording, and empty-name validation. `git diff --check` is clean and `npm run build` succeeds for main, preload, and renderer bundles. The broader suite currently has one unrelated intermittent Claude OAuth callback timeout that predates this increment.
 - 2026-07-29 macOS privacy root cause: unified TCC logs attributed repeated five/ten-second `kTCCServiceAppleEvents` requests to Ambientic-owned `osascript` children. The periodic terminal-window and Chrome-tab pollers are removed, and regression coverage rejects their reintroduction while confirming localhost previews still derive from sanitized agent context.
