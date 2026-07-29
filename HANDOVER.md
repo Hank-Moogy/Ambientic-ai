@@ -1,14 +1,14 @@
 <!-- ambientic-handover -->
-# vibe-controller handover
+# AgentBase handover
 
 Generated: 2026-07-24T14:35:16.749Z
 Source provider: claude  
-Source task: vibe-controller  
+Source task: AgentBase
 Reason: 100% used · Current session
 
 ## Continue from here
 
-Work in `/Users/samori/vibe-controller`. Read this file, inspect the working tree, and continue the current objective. Preserve existing uncommitted work. Do not ask for the prior chat, and do not spend a turn re-summarizing this handover unless the repository contradicts it.
+Work in `/Users/samori/AgentBase`. Read this file, inspect the working tree, and continue the current objective. Preserve existing uncommitted work. Do not ask for the prior chat, and do not spend a turn re-summarizing this handover unless the repository contradicts it.
 
 ## Product direction
 
@@ -26,7 +26,7 @@ The product should own the user experience and normalized session model, not pro
 
 ## Current objective
 
-vibe-controller
+AgentBase
 
 ## Completed and material state
 

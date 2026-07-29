@@ -30,9 +30,9 @@ test('suppresses a home-directory username and falls back to the provider', () =
 
 test('uses a meaningful project when no task title is available', () => {
   assert.deepEqual(sessionLabels({
-    agent: 'hermes', project: 'vibe-controller', cwd: '/Users/samori/vibe-controller'
+    agent: 'hermes', project: 'AgentBase', cwd: '/Users/samori/AgentBase'
   }), {
-    primary: 'vibe-controller',
+    primary: 'AgentBase',
     secondary: 'Hermes',
     provider: 'Hermes',
     placeholder: false

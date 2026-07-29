@@ -2,6 +2,8 @@
 
 Ambientic is a local-first control surface for people working with several AI agents at once. It makes every active agent visible in one calm interface and maps that interface onto physical hardware so switching attention becomes immediate and habitual.
 
+The local checkout and GitHub repository are named **AgentBase**. The application and product presented to users remain **Ambientic**.
+
 The first product target is a personal macOS cockpit for **Claude Code**, **Codex**, and **Hermes**, with native hardware modes for the **Akai APC40 MKII** and **Akai APC mini mk2**.
 
 The product’s durable creative direction—fluid, aerial, ambient, and quietly alive—is defined in [`ART_DIRECTION.md`](ART_DIRECTION.md) and must be revisited for material interface, motion, lighting, sound, and hardware-expression work.
@@ -306,6 +308,7 @@ Last updated: 2026-07-28
 - [x] Native MIDI crash containment: Ambientic enforces one running application instance and reuses one CoreMIDI Input/Output pair for its lifetime instead of reconstructing native clients during three-second reconnect polling.
 - [x] Project inspection is scope-bounded: home and filesystem roots are rejected for automatic Git/handover inspection, preventing Ambientic from traversing unrelated macOS-protected Music, Photos/Pictures, Documents, or Desktop collections.
 - [x] Automatic context enrichment now also excludes every macOS protected home collection; unsafe discovered sessions retain chat and lifecycle state but skip background Git/transcript inspection. New tasks no longer default to `/Users/samori`: they require a specific project folder, with a user-triggered folder picker for intentional access.
+- [x] Local repository identity normalized to AgentBase: the checkout lives at `/Users/samori/AgentBase`, handover instructions and project-label fixtures use that path, and the shipped product name remains Ambientic.
 
 ### In progress
 
@@ -341,6 +344,7 @@ Last updated: 2026-07-28
 
 ### Verification
 
+- 2026-07-29 repository rename: tracked checkout references and the handover entry point now identify `/Users/samori/AgentBase`; the remote repository remains `Hank-Moogy/AgentBase` while the upstream `therocketgui/vibe-controller` URL is preserved as project provenance.
 - 2026-07-27 crash investigation: both macOS reports (`15:08:37` and `15:15:07`) terminate with `SIGABRT` on the main thread inside `MidiInCore::getCoreMidiClientSingleton` during `new midi.Input()`. The controller-lifetime regression confirms repeated disconnected reconnects construct exactly one native input and output pair.
 - `npm test`: 98 tests passing, including a simulated browser-to-localhost Claude OAuth callback, post-login forced usage refresh, non-repeating Claude success feedback, provider-filtered latest-thread entry, passive-reader versus live-Codex state precedence, CoreMIDI client reuse, protected project-scope and explicit-project-folder boundaries, build identity, inherited provider-session environment sanitization, transcript navigation, provider approvals, current/legacy Claude usage navigation, live Claude authentication truth, MIDI layouts, voice validation, and cross-provider workspace behavior.
 - 2026-07-28 macOS privacy audit: background context enrichment no longer runs for home roots or protected Music, Pictures/Photos, Documents, Desktop, Downloads, Movies, Public, or Library paths. Folder access is initiated only from the new-task chooser or the explicit Attach action.
