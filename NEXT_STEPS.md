@@ -41,6 +41,21 @@ Exit condition: one semantic action can be invoked from the UI, a workflow step,
 
 Exit condition: all three templates can complete, fail safely, and resume after Ambientic restarts without duplicating a consequential step.
 
+## Phase 1.5 — agent-assisted authoring and connected apps
+
+- Add an authoring-provider selector to the workflow prompt using only connected, task-capable AI providers.
+- Add a main-process `draft-workflow-with-agent` service that asks the selected provider for a structured portable manifest, validates and sanitizes it, and returns a preview without saving automatically.
+- Preserve the local deterministic prompt parser as an explicit offline/fast-draft fallback.
+- Separate the provider that authors a workflow from the provider policy used by each executable node.
+- Expose permission-scoped agent tools for workflow list/get/create/update/validate/run operations, with approval gates and local audit events for mutations and runs.
+- Add Settings → Apps & Tools, separate from AI Providers, with capability-grouped connections for Mail, Calendar, Files, Web & Research, Communication, Development, and MCP/custom tools.
+- Define a normalized connection record containing non-secret identity, account/workspace label, capabilities, read/write permission level, health, last use, and dependent workflows.
+- Add Connect, Test, Reconnect, Disable, and Disconnect flows. Before disabling or disconnecting, show the workflows and scheduled runs that depend on that capability.
+- Implement direct inbox/calendar actions only through declared adapters and capability contracts; never claim success from an agent response without tool confirmation.
+- Validate required capabilities when saving, enabling, importing, and running a workflow, with a clear “connection missing” repair path.
+
+Exit condition: a user can choose Codex, Claude Code, or Hermes to draft a validated workflow, review it before saving, connect one real app, see its exact permissions and dependent workflows, and complete one confirmed app action through a provider-neutral capability.
+
 ## Phase 2 — portable workflow library
 
 - Add local template gallery, search, duplicate/fork, version history, and import/export.
@@ -86,6 +101,11 @@ Exit condition: the Coach finds one real repeated behavior, explains it with bou
 3. Implement an atomic local workflow/template/run store.
 4. Implement a headless linear runner with cancellation, idempotency, and restart recovery tests.
 5. Wire the first action through all three surfaces: UI, workflow, and existing MIDI Learn.
+6. Add explicit AI-provider selection and validated structured output to natural-language workflow drafting.
+7. Expose permission-scoped workflow authoring and execution tools to connected agents.
+8. Define the normalized app/tool connection and capability schema.
+9. Add the Settings → Apps & Tools connection inventory and dependency view.
+10. Prove one direct calendar or inbox adapter end to end with confirmation and audit evidence.
 
 ## Validation required before each phase advances
 

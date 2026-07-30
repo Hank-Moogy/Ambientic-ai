@@ -98,6 +98,10 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Push-to-talk voice prompts from the eight APC40 MKII per-track Record Arm buttons using the Mac microphone and installed Whisper `base` model.
 - APC40 MKII MIDI Learn mappings stored locally.
 - Local connector status and guided provider setup.
+- [ ] Agent-assisted workflow authoring with an explicit connected-provider selector, validated structured manifests, preview-before-save, and the existing deterministic parser retained as an offline fallback.
+- [ ] Agent-facing workflow tools for permission-scoped create, inspect, update, validate, and run operations.
+- [ ] Settings → Apps & Tools, separate from AI Providers, with capability-grouped connections, permission and health visibility, dependent-workflow warnings, and Connect/Test/Reconnect/Disable/Disconnect controls.
+- [ ] Direct provider-neutral inbox and calendar adapters whose consequential actions require confirmation and tool evidence rather than trusting an agent's success claim.
 - Cross-provider handover surfaced directly on the thread: a **Hand off →** action in the thread header moves the task's full context to another connected agent, and an inline banner offers one-click handover to the least-loaded provider when the current one nears its rate limit. (The standalone Improve → Continuity page has been retired in favor of this in-context flow.)
 - Automatic project-level `HANDOVER.md` preparation when a managed provider reaches 85% of an available quota window, plus manual handover at any time.
 - Continuation with another connected provider using the deterministic handover file instead of replaying the source transcript.
@@ -117,7 +121,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - OpenClaw integration.
 - Agent-facing Goals tools or MCP server; this first increment establishes the canonical local model and human interface before agents receive scoped read/write access.
 - Linking an existing provider thread or artifact to a goal task, assignment leases, approval-gated agent mutations, or automated next-action reviews.
-- Executing workflow nodes against live providers or inbox/calendar connectors; the current Workflow Studio is the inspectable authoring and portable-manifest slice, while durable execution, approval journals, retries, and restart recovery remain the next engine increment.
+- Agent-powered natural-language workflow authoring and native inbox/calendar connectors. The current prompt uses a deterministic local parser; live workflow steps run through managed AI providers, while direct app actions still require normalized adapters and confirmed tool evidence.
 
 ## Friend test build
 
