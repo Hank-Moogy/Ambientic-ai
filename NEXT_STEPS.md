@@ -1,19 +1,19 @@
 # Ambientic next steps
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 This is the execution order for the next core product phase. The same work is represented as tasks under the local **Build Ambientic** goal.
 
 ## Current objective
 
-Build the smallest safe Workflow Builder vertical slice on top of a shared semantic action layer. Do not start with the community marketplace or a large free-form canvas.
+Build the smallest safe Workflow Builder vertical slice on top of a shared semantic action layer. The visual node canvas is now the primary authoring surface; keep its first execution model deliberately linear and inspectable before adding arbitrary graph semantics or the community marketplace.
 
 The first usable slice is:
 
 1. Define and validate a portable workflow manifest.
 2. Register a small provider-neutral action catalog.
 3. Run a linear workflow locally with inputs, approvals, cancellation, history, and safe resume.
-4. Build a simple ordered-step editor and run inspector.
+4. Connect the existing visual canvas and step inspector to the durable manifest and run state.
 5. Ship three real templates and validate them across connected providers.
 
 ## Phase 0 — shared foundation
@@ -32,7 +32,7 @@ Exit condition: one semantic action can be invoked from the UI, a workflow step,
 - Implement initial actions: start/resume agent, send prompt, wait for provider state, ask for human approval/input, update a goal task, collect/link an artifact, notify, and play a hardware cue.
 - Add dry run, cancel, resume, idempotency, permission gates, and a durable execution journal.
 - Add manual, schedule, session-state, rate-limit, goal-state, and hardware trigger definitions; expose manual trigger first.
-- Add a compact ordered-step editor before evaluating a node canvas.
+- Preserve the node canvas as the direct-manipulation editor while keeping the first runnable graphs linear and fully readable as ordered manifests.
 - Add run detail with inputs, current step, timeline, logs, approvals, outputs, retry, and recovery.
 - Validate three templates:
   - Rate-limit handover to another provider.

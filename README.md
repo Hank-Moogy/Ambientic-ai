@@ -60,6 +60,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Persistent local capacity ledger and Settings activity panel for provider limit hits, Codex reset-credit use, natural quota renewals, purchased-credit balance changes, and current observed balances. Codex reset allowance is shown beside its live plan without treating subscription capacity as currency spend.
 - Explicit Overview and Threads navigation, preserving the conventional conversation interface as a secondary tab rather than the product's default mental model.
 - First-class **Goals** section in the persistent left sidebar, with a spacious floating-card landing field and an in-section goal detail experience.
+- First visual **Workflows** section in the persistent left sidebar, with a pannable and zoomable node canvas, draggable provider-neutral steps, a capability palette, step inspector, natural-language drafting, sequential dry-run lighting, local draft persistence, and privacy-safe portable manifest copying.
 - Local goal persistence in a dedicated private application-data store, separate from window preferences and provider credentials, with atomic writes and an append-only human-action audit trail.
 - Goal capture with desired outcome, motivation, success criteria, target date, priority, and lifecycle state.
 - Six-state execution board with milestone labels, bounded task context, definitions of done, human/agent/mixed ownership, drag-and-drop movement, and an accessible status selector fallback.
@@ -112,6 +113,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - OpenClaw integration.
 - Agent-facing Goals tools or MCP server; this first increment establishes the canonical local model and human interface before agents receive scoped read/write access.
 - Linking an existing provider thread or artifact to a goal task, assignment leases, approval-gated agent mutations, or automated next-action reviews.
+- Executing workflow nodes against live providers or inbox/calendar connectors; the current Workflow Studio is the inspectable authoring and portable-manifest slice, while durable execution, approval journals, retries, and restart recovery remain the next engine increment.
 
 ## Friend test build
 
@@ -200,7 +202,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ### Completed
 
@@ -349,7 +351,8 @@ Last updated: 2026-07-29
 
 ### In progress
 
-- [ ] Specify and build the first Workflow Builder vertical slice: portable manifest, semantic action registry, atomic workflow/run store, headless ordered-step runner, and compact editor.
+- [x] Build the first Workflow Studio surface: a new left-navigation section, infinite visual canvas, draggable capability nodes, natural-language drafting, local persistence, permission/provider inspector, sequential dry-run visualization, and portable manifest copy.
+- [ ] Connect the Workflow Studio to a versioned manifest validator, semantic action registry, atomic workflow/run store, and deterministic headless runner.
 - [ ] Prove one semantic action can be invoked consistently from the regular UI, a workflow step, and an existing MIDI Learn mapping.
 - [ ] Validate three workflows end to end: rate-limit handover, build → test → review, and repetitive request → goal task → agent execution → artifact review.
 - [ ] Visually validate the new Goals field at common workspace sizes with real goal/task content, including the two-column floating layout, reduced motion, horizontal board navigation, drag/drop, and compact-window fallbacks.
@@ -398,6 +401,7 @@ Last updated: 2026-07-29
 - 2026-07-29 Goals density pass: the production renderer build verifies the compact goal header, progressive goal disclosure, title-only keyboard-selectable/draggable ticket cards, detailed ticket dialog, and removal of the redundant per-card status dropdown. The 31-ticket local roadmap remains persisted in the Goals store.
 - 2026-07-29 live roadmap update: the local **Build Ambientic** goal is high priority and contains 31 audited tickets across shared foundations, Workflow Builder, universal hardware mapping, Ambientic Coach, and community phases. Three immediate tickets are active, the goals file has a recoverable pre-roadmap backup, and Ambientic relaunched healthy after loading the new store.
 - 2026-07-29 roadmap synchronization: `PRODUCT.md` now specifies the shared semantic action layer, Workflow Builder, universal hardware mapping, Ambientic Coach, community bundle, privacy, and model-agnostic context contracts. `NEXT_STEPS.md`, `HANDOVER.md`, README status, and the live **Build Ambientic** goal use the same phased execution order.
+- 2026-07-30 Workflow Studio foundation: Ambientic now has a highly visual provider-neutral workflow canvas with natural-language drafting, scale-correct direct node manipulation, explicit capability permissions, a no-side-effect test animation, local draft persistence, and a privacy-safe manifest ready for the execution engine and future community exchange. The production build succeeds, the four focused workflow tests pass, and all 115 tests in the stable local-release lane pass; the separately documented fake-Claude OAuth callback simulation remains the only failure in the complete 116-test suite. Interactive browser screenshot QA was unavailable because no browser session was connected.
 - 2026-07-29 protected-folder prompt root cause: macOS TCC logs identified Claude Code processes spawned by Ambientic as the accessing process and Ambientic as the responsible application for Media Library, Documents, Downloads, and All Files requests. Background provider probes no longer inherit the home directory, and automatic Claude refresh no longer starts the interactive TUI. Regression coverage requires the private provider runtime and passive refresh branch.
 - 2026-07-29 local-release exception: the user approved ignoring the single simulated Claude OAuth callback lifecycle timeout for this installation. `npm run test:local-release` excludes only that named case; the remaining suite and every packaging, signing, manifest, restart, and health gate remain mandatory.
 - 2026-07-29 Goals foundation: the dedicated three-test Goals service suite passes persistence, progress/blocker derivation, board moves, ownership updates, audit recording, and empty-name validation. `git diff --check` is clean and `npm run build` succeeds for main, preload, and renderer bundles. The broader suite currently has one unrelated intermittent Claude OAuth callback timeout that predates this increment.

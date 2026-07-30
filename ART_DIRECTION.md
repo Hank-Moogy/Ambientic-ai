@@ -83,6 +83,17 @@ Goals are not presented as another administrative issue tracker. The landing sur
 - **Resting work recedes.** Paused, achieved, and archived goals remain accessible in a quieter library below the active field.
 - **Motion is optional.** Reduced-motion preferences remove card drift and sweeping highlights while preserving depth, hierarchy, and interaction feedback.
 
+## Workflows: currents of intent
+
+The Workflow Builder is an infinite spatial field where intent moves through clear, tactile objects. It should read as a calm current rather than a technical flowchart.
+
+- Nodes lead with human language; semantic action identifiers and permission detail appear in the inspector.
+- Connections feel continuous and directional without animated noise. A dry run may illuminate one node at a time, then return the field to rest.
+- Provider choice is a policy on agent nodes, not a visual fork of the entire workflow. “Best available agent” is the portable default.
+- Natural language is the fastest entrance, while direct manipulation keeps the generated result inspectable and correctable.
+- Inbox, calendar, web, and other consequential capabilities always expose their permission boundary before a real run.
+- Portable sharing is visible from the beginning, but the field stays private and local until the user explicitly exports it.
+
 ## First-run expression: Enter the field
 
 Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained four-step progress trace, floating symbols, and one unmistakable primary action.
