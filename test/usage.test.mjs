@@ -1,20 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { knownUsageCommandCandidates, parseClaudeStatusLineUsage, parseCodexRateLimits, sortClaudeCodeVersions, UsageService } from '../src/main/usage.js'
+import { knownUsageCommandCandidates, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
 
 test('finds the Codex binary bundled in ChatGPT when no shell command exists', () => {
   const candidates = knownUsageCommandCandidates('codex', '/Users/tester')
   assert.equal(candidates[0], '/Applications/ChatGPT.app/Contents/Resources/codex')
   assert.ok(candidates.includes('/Users/tester/.local/bin/codex'))
-})
-
-test('prefers the newest semantic Claude Desktop CLI version', () => {
-  assert.deepEqual(sortClaudeCodeVersions(['2.1.31', '2.1.217', '2.2.0', '2.1.9']), [
-    '2.2.0',
-    '2.1.217',
-    '2.1.31',
-    '2.1.9'
-  ])
 })
 
 test('preserves provider window duration and accepts a weekly-only Codex response', () => {
@@ -79,6 +70,39 @@ test('rejects stale Claude status-line limits instead of presenting them as curr
   }, 24 * 60 * 60 * 1000 + 2), /stale/i)
 })
 
+// A cached observation can sit inside the 24-hour age budget while the window it
+// describes has already rolled over — a 5-hour window recorded at 100% kept
+// reporting "rate limited" for hours after it reset.
+test('discards a cached quota window whose reset time has already passed', () => {
+  const now = 1_800_000_000_000
+  assert.throws(() => parseClaudeStatusLineUsage({
+    version: 1,
+    provider: 'claude',
+    observedAt: now - 60 * 60 * 1000,
+    plan: 'subscription',
+    windows: [
+      { id: 'five-hour', label: 'All models', period: 'short', durationMins: 300, usedPercent: 100, resetAt: now / 1000 - 600 }
+    ]
+  }, now), /already reset/i)
+})
+
+test('keeps a still-open window when a sibling window has already reset', () => {
+  const now = 1_800_000_000_000
+  const result = parseClaudeStatusLineUsage({
+    version: 1,
+    provider: 'claude',
+    observedAt: now - 60 * 60 * 1000,
+    plan: 'subscription',
+    windows: [
+      { id: 'five-hour', label: 'All models', period: 'short', durationMins: 300, usedPercent: 100, resetAt: now / 1000 - 600 },
+      { id: 'seven-day', label: 'All models', period: 'week', durationMins: 10080, usedPercent: 3, resetAt: now / 1000 + 400_000 }
+    ]
+  }, now)
+  assert.deepEqual(result.windows.map(({ id, usedPercent }) => ({ id, usedPercent })), [
+    { id: 'seven-day', usedPercent: 3 }
+  ])
+})
+
 test('queues a genuinely fresh provider pass when login completes during a refresh', async () => {
   let releaseFirst
   let claudeCalls = 0
@@ -101,4 +125,47 @@ test('queues a genuinely fresh provider pass when login completes during a refre
   releaseFirst()
   await Promise.all([initial, afterLogin])
   assert.equal(claudeCalls, 2)
+})
+
+// Claude's /usage TUI repositions the cursor mid-word, so ANSI stripping can
+// deliver "Resets 3:10pm" as "ets 3:10pm". That must still yield a countdown,
+// without a dated reset being mistaken for a bare time.
+test('parses a reset time whose label was truncated by the TUI', () => {
+  const at = resetTextToEpoch('ets 3:10pm (Europe/Paris)')
+  assert.ok(Number.isFinite(at), 'expected an epoch for a truncated label')
+  const clean = resetTextToEpoch('Resets 3:10pm (Europe/Paris)')
+  assert.equal(at, clean, 'a truncated label must resolve the same as an intact one')
+})
+
+test('keeps the date of a dated weekly reset instead of treating it as a bare time', () => {
+  const dated = resetTextToEpoch('Aug 6 at 5am (Europe/Paris)')
+  assert.ok(Number.isFinite(dated))
+  const parsed = new Date(dated * 1000)
+  assert.equal(parsed.getMonth(), 7, 'expected August')
+  assert.equal(parsed.getDate(), 6, 'expected the 6th, not the next 5am')
+})
+
+// The status-line bridge can no longer fill the usage cache (current Claude
+// builds omit rate_limits from its payload), so a forced scrape now writes it
+// and passive refreshes read it back. Writer and reader must agree on the
+// schema, or usage silently reverts to "waiting for an observation".
+test('a scraped observation round-trips through the usage cache reader', () => {
+  const now = Date.now()
+  // Exactly the document collectClaude persists after a successful scrape.
+  const persisted = {
+    version: 1,
+    provider: 'claude',
+    observedAt: now,
+    plan: 'subscription',
+    windows: [
+      { id: 'five-hour', label: 'Current session', period: 'short', durationMins: 300, usedPercent: 44, resetAt: Math.floor(now / 1000) + 1800, resetText: 'ets 3:10pm (Europe/Paris)' },
+      { id: 'seven-day', label: 'all models', period: 'week', durationMins: 10080, usedPercent: 5, resetAt: Math.floor(now / 1000) + 500000, resetText: 'Aug 6 at 5am (Europe/Paris)' }
+    ]
+  }
+  const result = parseClaudeStatusLineUsage(JSON.stringify(persisted), now)
+  assert.equal(result.plan, 'subscription')
+  assert.deepEqual(result.windows.map(({ id, usedPercent }) => ({ id, usedPercent })), [
+    { id: 'five-hour', usedPercent: 44 },
+    { id: 'seven-day', usedPercent: 5 }
+  ])
 })

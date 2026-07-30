@@ -22,14 +22,21 @@ import { HandoverService } from './handover-service.mjs'
 import { ClaudeAuthService } from './claude-auth-service.mjs'
 import { normalizeExternalUrl } from './external-url.mjs'
 import { ensureEnhancedPath } from './env-path.mjs'
+import { initFileLogging, logFilePath } from './logging.mjs'
 import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-mode.mjs'
 import { readBuildInfo } from './build-info.mjs'
 import { createGoalsService } from './goals-service.mjs'
+import { createWorkflowService } from './workflow-service.mjs'
 
 // Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
 // Finder-launched app otherwise only has launchd's minimal PATH, which lacks
 // Homebrew/nvm node and breaks Claude Code plugin hooks.
 ensureEnhancedPath()
+
+// Start capturing main-process logs to ~/.ambientic/logs/main.log before any
+// service runs, so startup failures are recorded too. A packaged app discards
+// stdout, so this file is the only diagnostic record after the fact.
+initFileLogging()
 
 // Only one Ambientic process may own CoreMIDI, the hook server, and provider
 // bridges. A second launch focuses the existing workspace instead of creating
@@ -92,8 +99,10 @@ let consumptionLedger = null
 let claudeAuth = null
 let ambientMode = null
 let goals = null
+let workflows = null
 let pendingWorkspaceSessionId = ''
 let workspaceListTimer = null
+let workspaceRendererFailures = []
 
 function sendToWindows (channel, payload) {
   for (const target of [win, workspaceWin]) {
@@ -357,6 +366,33 @@ function createWorkspaceWindow () {
   if (rendererUrl) workspaceWin.loadURL(`${rendererUrl}?surface=workspace`)
   else workspaceWin.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'workspace' } })
   workspaceWin.once('ready-to-show', () => workspaceWin.show())
+  workspaceWin.webContents.on('console-message', (_event, level, message) => {
+    if (level >= 2) console.error(`[ambientic:workspace-renderer] ${message}`)
+  })
+  const recoverWorkspaceRenderer = (reason) => {
+    const now = Date.now()
+    workspaceRendererFailures = workspaceRendererFailures.filter((timestamp) => now - timestamp < 60_000)
+    if (workspaceRendererFailures.some((timestamp) => now - timestamp < 500)) {
+      console.error(`[ambientic:workspace-renderer] duplicate recovery signal ignored: ${reason}`)
+      return
+    }
+    workspaceRendererFailures.push(now)
+    console.error(`[ambientic:workspace-renderer] recovery requested: ${reason}`)
+    if (workspaceRendererFailures.length > 2) {
+      console.error('[ambientic:workspace-renderer] automatic recovery stopped after two failures in one minute')
+      return
+    }
+    setTimeout(() => {
+      if (!workspaceWin || workspaceWin.isDestroyed() || workspaceWin.webContents.isDestroyed()) return
+      workspaceWin.webContents.reload()
+    }, 350)
+  }
+  workspaceWin.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason !== 'clean-exit') recoverWorkspaceRenderer(`process gone: ${details.reason}`)
+  })
+  workspaceWin.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    if (isMainFrame && errorCode !== -3) recoverWorkspaceRenderer(`load failed ${errorCode}: ${errorDescription}`)
+  })
   workspaceWin.webContents.on('did-finish-load', () => {
     pushState(); pushSys(); pushUsage(); pushDisplays(); pushCompanions(); pushMidi(); pushVoice(); pushConnectors()
     if (pendingWorkspaceSessionId) {
@@ -609,6 +645,7 @@ function buildTrayMenu () {
     { type: 'separator' },
     { label: 'Install / update agent hooks…', click: runInstaller },
     { label: 'Open Ambientic data folder', click: () => shell.openPath(join(app.getPath('home'), '.ambientic')) },
+    { label: 'Open diagnostic log', click: () => shell.openPath(logFilePath()) },
     { type: 'separator' },
     { label: 'Quit Ambientic', click: () => { app.isQuitting = true; app.quit() } }
   ])
@@ -629,6 +666,15 @@ ipcMain.handle('create-goal', (_event, input) => goals.createGoal(input || {}))
 ipcMain.handle('update-goal', (_event, goalId, patch) => goals.updateGoal(goalId, patch || {}))
 ipcMain.handle('create-goal-task', (_event, goalId, input) => goals.createTask(goalId, input || {}))
 ipcMain.handle('update-goal-task', (_event, taskId, patch) => goals.updateTask(taskId, patch || {}))
+ipcMain.handle('get-workflows', () => workflows?.list() || { version: 1, workflows: [], runs: [], updatedAt: null })
+ipcMain.handle('create-workflow', (_event, input) => workflows.create(input || {}))
+ipcMain.handle('update-workflow', (_event, workflowId, input) => workflows.update(workflowId, input || {}))
+ipcMain.handle('duplicate-workflow', (_event, workflowId) => workflows.duplicate(workflowId))
+ipcMain.handle('delete-workflow', (_event, workflowId) => workflows.remove(workflowId))
+ipcMain.handle('set-workflow-enabled', (_event, workflowId, enabled) => workflows.setEnabled(workflowId, enabled))
+ipcMain.handle('run-workflow', (_event, workflowId) => workflows.startRun(workflowId))
+ipcMain.handle('approve-workflow-run', (_event, runId, allow) => workflows.approve(runId, allow))
+ipcMain.handle('cancel-workflow-run', (_event, runId) => workflows.cancel(runId))
 ipcMain.handle('get-usage', () => usage.getState())
 ipcMain.handle('get-consumption-ledger', () => consumptionLedger?.getState() || null)
 ipcMain.handle('get-ambient-mode', () => ambientMode?.getState() || {
@@ -1174,12 +1220,21 @@ app.whenReady().then(() => {
   })
   goals = createGoalsService({ file: join(app.getPath('userData'), 'goals.json') })
   goals.on('change', (snapshot) => sendToWindows('goals', snapshot))
+  workflows = createWorkflowService({
+    file: join(app.getPath('userData'), 'workflows.json'),
+    connectors: () => connectors,
+    executeAgentStep: async ({ provider, prompt }) => ({
+      sessionId: await workspace.create({ provider, prompt })
+    })
+  })
+  workflows.on('change', (snapshot) => sendToWindows('workflows', snapshot))
   consumptionLedger = createConsumptionLedger({ file: join(app.getPath('userData'), 'consumption-ledger.json') })
   consumptionLedger.on('change', (state) => sendToWindows('consumption-ledger', state))
   handovers = new HandoverService({ workspace, usage })
   handovers.on('change', (records) => sendToWindows('handovers', records))
   workspace.on('change', (snapshot) => {
     sendToWindows('thread', snapshot)
+    workflows?.handleThread(snapshot)
     scheduleWorkspaceThreads()
   })
   workspace.on('provider-auth', async (payload) => {
@@ -1222,7 +1277,7 @@ app.whenReady().then(() => {
   })
   midiController.start()
   pushVoice()
-  void refreshConnectors()
+  void refreshConnectors().then(() => workflows?.startScheduler())
   startServer(store, {
     focusById: queueFocus,
     onApprovalRequest: (event, sessionId) => workspace.requestExternalApproval('claude', event, sessionId),
@@ -1252,4 +1307,4 @@ app.on('second-instance', () => {
 })
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); claudeAuth?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); workflows?.stopScheduler(); claudeAuth?.stop(); companions.stop(); usage.stop() })

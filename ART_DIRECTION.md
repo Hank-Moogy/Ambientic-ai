@@ -91,6 +91,8 @@ The Workflow Builder is an infinite spatial field where intent moves through cle
 - Connections feel continuous and directional without animated noise. A dry run may illuminate one node at a time, then return the field to rest.
 - Provider choice is a policy on agent nodes, not a visual fork of the entire workflow. “Best available agent” is the portable default.
 - Natural language is the fastest entrance, while direct manipulation keeps the generated result inspectable and correctable.
+- The canvas should reward spatial fluency: two-finger movement pans, pinching zooms around the gesture, and keyboard undo/delete behave like familiar creative tools.
+- Space is progressive. The natural-language dock and global navigation can collapse into quiet, recoverable handles without hiding their purpose.
 - Inbox, calendar, web, and other consequential capabilities always expose their permission boundary before a real run.
 - Portable sharing is visible from the beginning, but the field stays private and local until the user explicitly exports it.
 

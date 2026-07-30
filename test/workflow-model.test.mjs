@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import {
   createStarterWorkflow,
   draftWorkflowFromPrompt,
+  panViewport,
   removeWorkflowNode,
-  toPortableManifest
+  toPortableManifest,
+  zoomViewportAtPoint
 } from '../src/renderer/workflow-model.mjs'
 
 test('drafts a recurring provider-neutral workflow from natural language', () => {
@@ -38,4 +40,24 @@ test('removing a middle node reconnects the surrounding flow', () => {
   const result = removeWorkflowNode(workflow, removed.id)
   assert.equal(result.nodes.length, workflow.nodes.length - 1)
   assert.ok(result.edges.some((edge) => edge.from === workflow.nodes[1].id && edge.to === workflow.nodes[3].id))
+})
+
+test('trackpad zoom preserves the world point beneath the gesture', () => {
+  const viewport = { x: 30, y: 20, scale: 0.8 }
+  const point = { x: 420, y: 260 }
+  const before = {
+    x: (point.x - viewport.x) / viewport.scale,
+    y: (point.y - viewport.y) / viewport.scale
+  }
+  const zoomed = zoomViewportAtPoint(viewport, point, -30)
+  assert.ok(zoomed.scale > viewport.scale)
+  assert.ok(Math.abs((point.x - zoomed.x) / zoomed.scale - before.x) < 0.0001)
+  assert.ok(Math.abs((point.y - zoomed.y) / zoomed.scale - before.y) < 0.0001)
+})
+
+test('two-finger canvas scrolling pans without changing scale', () => {
+  assert.deepEqual(
+    panViewport({ x: 30, y: 20, scale: 0.8 }, 12, -8),
+    { x: 18, y: 28, scale: 0.8 }
+  )
 })

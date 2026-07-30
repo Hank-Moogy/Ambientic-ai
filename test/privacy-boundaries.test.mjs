@@ -39,6 +39,18 @@ test('background discovery contains no browser, terminal-window, or legacy termi
 
   assert.doesNotMatch(discovery, /osascript/i)
   assert.doesNotMatch(companions, /scanChromeTabs|chromeSessionTabs|CHROME_DATA_PATH|lsof['"], \['-nP', '-iTCP'/)
-  assert.match(usage, /if \(!force\)[\s\S]*CLAUDE_PASSIVE_REFRESH/)
+  // Reading Claude's plan limits requires launching its interactive TUI, because
+  // current builds send no rate_limits to the status line. That is now allowed on
+  // the periodic refresh, so the boundary that must hold is WHERE it runs: from
+  // Ambientic's private runtime directory, never the user's home, so macOS never
+  // attributes a Documents/Desktop/Photos scan to Ambientic.
+  assert.match(usage, /collectClaudeUsageWindows/)
+  const scrape = await readFile(new URL('../src/main/claude-usage-scrape.mjs', import.meta.url), 'utf8')
+  assert.match(scrape, /const cwd = providerRuntimeDirectory\(\)/)
+  // Passed to execFile as the child's cwd (shorthand) and to the helper argv, so
+  // both the python process and the Claude TUI it forks run in the private dir.
+  assert.match(scrape, /^\s*cwd,$/m)
+  assert.match(scrape, /claudePath, cwd\]/)
+  assert.doesNotMatch(scrape, /cwd:\s*homedir\(\)/)
   assert.doesNotMatch(auth, /cwd:\s*this\.env\.HOME/)
 })

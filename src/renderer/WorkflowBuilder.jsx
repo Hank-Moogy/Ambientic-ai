@@ -5,8 +5,10 @@ import {
   addWorkflowNode,
   createStarterWorkflow,
   draftWorkflowFromPrompt,
+  panViewport,
   removeWorkflowNode,
-  toPortableManifest
+  toPortableManifest,
+  zoomViewportAtPoint
 } from './workflow-model.mjs'
 import './workflows.css'
 
@@ -21,7 +23,7 @@ function loadWorkflow () {
   return createStarterWorkflow()
 }
 
-function WorkflowNode ({ node, selected, running, scale, onSelect, onMove }) {
+function WorkflowNode ({ node, selected, running, scale, onSelect, onMoveStart, onMove }) {
   const definition = NODE_KINDS[node.kind] || NODE_KINDS.tool
   const dragRef = useRef(null)
 
@@ -29,12 +31,16 @@ function WorkflowNode ({ node, selected, running, scale, onSelect, onMove }) {
     if (event.button !== 0) return
     event.stopPropagation()
     onSelect(node.id)
-    dragRef.current = { pointerX: event.clientX, pointerY: event.clientY, x: node.x, y: node.y }
+    dragRef.current = { pointerX: event.clientX, pointerY: event.clientY, x: node.x, y: node.y, checkpointed: false }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
   const move = (event) => {
     if (!dragRef.current) return
+    if (!dragRef.current.checkpointed) {
+      onMoveStart()
+      dragRef.current.checkpointed = true
+    }
     onMove(node.id, {
       x: dragRef.current.x + (event.clientX - dragRef.current.pointerX) / scale,
       y: dragRef.current.y + (event.clientY - dragRef.current.pointerY) / scale
@@ -143,25 +149,69 @@ function Inspector ({ node, onChange, onDelete, onClose }) {
   )
 }
 
-export function WorkflowBuilder () {
-  const [workflow, setWorkflow] = useState(loadWorkflow)
+export function WorkflowBuilder ({ initialWorkflow, onChange, onBack, onRun, activeRun, onApproveRun, onCancelRun } = {}) {
+  const [workflow, setWorkflow] = useState(() => initialWorkflow ? structuredClone(initialWorkflow) : loadWorkflow())
   const [selectedId, setSelectedId] = useState('')
   const [prompt, setPrompt] = useState('')
   const [viewport, setViewport] = useState({ x: 30, y: 20, scale: 0.82 })
   const [notice, setNotice] = useState('Saved locally')
   const [runningId, setRunningId] = useState('')
+  const [promptCollapsed, setPromptCollapsed] = useState(false)
   const panRef = useRef(null)
   const canvasRef = useRef(null)
   const runTimersRef = useRef([])
+  const historyRef = useRef([])
+  const onChangeRef = useRef(onChange)
+
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
 
   useEffect(() => {
     window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(workflow))
+    onChangeRef.current?.(workflow)
   }, [workflow])
 
   useEffect(() => () => runTimersRef.current.forEach(clearTimeout), [])
 
+  useEffect(() => {
+    if (!activeRun) return
+    setRunningId(activeRun.currentStepId || '')
+    const labels = {
+      queued: 'Run queued',
+      running: 'Workflow is running',
+      awaiting_approval: 'Waiting for your approval',
+      needs_attention: 'Agent needs attention in Threads',
+      completed: 'Run completed',
+      failed: `Run failed · ${activeRun.error || 'Open run details'}`,
+      denied: 'Run stopped by you',
+      cancelled: 'Run cancelled'
+    }
+    setNotice(labels[activeRun.status] || activeRun.status)
+  }, [activeRun?.id, activeRun?.status, activeRun?.currentStepId, activeRun?.error])
+
   const nodesById = useMemo(() => new Map(workflow.nodes.map((node) => [node.id, node])), [workflow.nodes])
   const selectedNode = nodesById.get(selectedId)
+
+  const checkpoint = () => {
+    historyRef.current = [...historyRef.current.slice(-59), structuredClone(workflow)]
+  }
+
+  const commitWorkflow = (updater) => {
+    setWorkflow((current) => {
+      historyRef.current = [...historyRef.current.slice(-59), structuredClone(current)]
+      return typeof updater === 'function' ? updater(current) : updater
+    })
+  }
+
+  const undo = () => {
+    const previous = historyRef.current.pop()
+    if (!previous) {
+      setNotice('Nothing to undo')
+      return
+    }
+    setWorkflow(previous)
+    setSelectedId((current) => previous.nodes.some((node) => node.id === current) ? current : '')
+    setNotice('Last canvas change undone')
+  }
 
   const fitWorkflow = (nodes = workflow.nodes) => {
     const canvas = canvasRef.current
@@ -186,18 +236,22 @@ export function WorkflowBuilder () {
     return () => cancelAnimationFrame(frame)
   }, [])
 
-  const updateNode = (nodeId, patch) => setWorkflow((current) => ({
-    ...current,
-    nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, ...patch } : node),
-    updatedAt: new Date().toISOString()
-  }))
+  const updateNode = (nodeId, patch, record = true) => {
+    const update = (current) => ({
+      ...current,
+      nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, ...patch } : node),
+      updatedAt: new Date().toISOString()
+    })
+    if (record) commitWorkflow(update)
+    else setWorkflow(update)
+  }
 
   const addNode = (kind) => {
     const center = {
       x: (420 - viewport.x) / viewport.scale,
       y: (280 - viewport.y) / viewport.scale
     }
-    setWorkflow((current) => {
+    commitWorkflow((current) => {
       const next = addWorkflowNode(current, kind, center)
       setSelectedId(next.nodes.at(-1).id)
       return next
@@ -206,8 +260,9 @@ export function WorkflowBuilder () {
 
   const draft = () => {
     if (!prompt.trim()) return
-    const next = draftWorkflowFromPrompt(prompt)
-    setWorkflow(next)
+    const drafted = draftWorkflowFromPrompt(prompt)
+    const next = { ...drafted, id: workflow.id, enabled: workflow.enabled, createdAt: workflow.createdAt }
+    commitWorkflow(next)
     setSelectedId('')
     requestAnimationFrame(() => fitWorkflow(next.nodes))
     setPrompt('')
@@ -215,6 +270,10 @@ export function WorkflowBuilder () {
   }
 
   const testWorkflow = () => {
+    if (onRun) {
+      void onRun(workflow.id)
+      return
+    }
     runTimersRef.current.forEach(clearTimeout)
     setNotice('Test run started')
     workflow.nodes.forEach((node, index) => {
@@ -240,7 +299,7 @@ export function WorkflowBuilder () {
   }
 
   const startPan = (event) => {
-    if (event.target.closest('.workflow-node') || event.button !== 0) return
+    if (event.target.closest('.workflow-node, .workflow-agent-bar, .workflow-zoom') || event.button !== 0) return
     panRef.current = { x: event.clientX, y: event.clientY, viewportX: viewport.x, viewportY: viewport.y }
     event.currentTarget.setPointerCapture(event.pointerId)
     setSelectedId('')
@@ -257,11 +316,59 @@ export function WorkflowBuilder () {
 
   const zoom = (direction) => setViewport((current) => ({ ...current, scale: Math.max(0.45, Math.min(1.35, current.scale + direction * 0.1)) }))
 
+  const navigateCanvas = (event) => {
+    if (event.target.closest('.workflow-agent-bar')) return
+    event.preventDefault()
+    const rect = canvasRef.current?.getBoundingClientRect()
+    if (!rect) return
+
+    if (event.ctrlKey || event.metaKey) {
+      const pointX = event.clientX - rect.left
+      const pointY = event.clientY - rect.top
+      setViewport((current) => zoomViewportAtPoint(current, { x: pointX, y: pointY }, event.deltaY))
+      return
+    }
+
+    setViewport((current) => panViewport(current, event.deltaX, event.deltaY))
+  }
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.addEventListener('wheel', navigateCanvas, { passive: false })
+    return () => canvas.removeEventListener('wheel', navigateCanvas)
+  }, [])
+
+  useEffect(() => {
+    const handleKeyboard = (event) => {
+      const target = event.target
+      const editing = target instanceof HTMLElement && (
+        target.matches('input, textarea, select') ||
+        target.isContentEditable
+      )
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'z' && !editing) {
+        event.preventDefault()
+        undo()
+        return
+      }
+
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId && !editing) {
+        event.preventDefault()
+        commitWorkflow((current) => removeWorkflowNode(current, selectedId))
+        setSelectedId('')
+        setNotice('Step removed · press ⌘Z to restore')
+      }
+    }
+    window.addEventListener('keydown', handleKeyboard)
+    return () => window.removeEventListener('keydown', handleKeyboard)
+  }, [selectedId, workflow])
+
   return (
     <section className="workflow-builder">
       <header className="workflow-topbar">
-        <div className="workflow-title"><span>Workflow</span><input aria-label="Workflow name" value={workflow.name} onChange={(event) => setWorkflow((current) => ({ ...current, name: event.target.value }))} /><small><i />{notice}</small></div>
-        <div className="workflow-topbar__actions"><button type="button" onClick={exportWorkflow}>Share</button><button className="workflow-run" type="button" onClick={testWorkflow}><i>▶</i> Test workflow</button></div>
+        <div className="workflow-title">{onBack && <button className="workflow-back" type="button" onClick={onBack} aria-label="Back to all workflows">←</button>}<span>Workflow</span><input aria-label="Workflow name" value={workflow.name} onChange={(event) => commitWorkflow((current) => ({ ...current, name: event.target.value }))} /><small><i />{notice}</small></div>
+        <div className="workflow-topbar__actions"><button type="button" onClick={exportWorkflow}>Share</button>{activeRun && ['queued', 'running', 'needs_attention', 'awaiting_approval'].includes(activeRun.status) ? <button type="button" onClick={() => onCancelRun?.(activeRun.id)}>Stop run</button> : <button className="workflow-run" type="button" onClick={testWorkflow}><i>▶</i> {onRun ? 'Run workflow' : 'Test workflow'}</button>}</div>
       </header>
       <div className="workflow-stage">
         <NodePalette onAdd={addNode} />
@@ -278,23 +385,44 @@ export function WorkflowBuilder () {
             <svg className="workflow-edges" width="1900" height="900" viewBox="0 0 1900 900" aria-hidden="true">
               {workflow.edges.map((edge) => <WorkflowEdge key={edge.id} from={nodesById.get(edge.from)} to={nodesById.get(edge.to)} />)}
             </svg>
-            {workflow.nodes.map((node) => <WorkflowNode key={node.id} node={node} selected={node.id === selectedId} running={node.id === runningId} scale={viewport.scale} onSelect={setSelectedId} onMove={updateNode} />)}
+            {workflow.nodes.map((node) => <WorkflowNode key={node.id} node={node} selected={node.id === selectedId} running={node.id === runningId} scale={viewport.scale} onSelect={setSelectedId} onMoveStart={checkpoint} onMove={(nodeId, patch) => updateNode(nodeId, patch, false)} />)}
           </div>
-          <div className="workflow-zoom" aria-label="Canvas controls"><button type="button" onClick={() => zoom(-1)} aria-label="Zoom out">−</button><span>{Math.round(viewport.scale * 100)}%</span><button type="button" onClick={() => zoom(1)} aria-label="Zoom in">＋</button><button type="button" onClick={() => fitWorkflow()} aria-label="Fit workflow">⌗</button></div>
-          <form className="workflow-agent-bar" onSubmit={(event) => { event.preventDefault(); draft() }}>
-            <span className="workflow-agent-bar__orb">✦</span>
-            <label><span>Build with an agent</span><input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Every weekday, check the web, summarize with an agent, let me review, then email it…" /></label>
-            <button type="submit" disabled={!prompt.trim()} aria-label="Draft workflow">↑</button>
-            <small>Ambientic drafts a portable flow. You stay in control of every permission.</small>
+          <div className="workflow-zoom" aria-label="Canvas controls"><button type="button" onClick={() => zoom(-1)} aria-label="Zoom out">−</button><span>{Math.round(viewport.scale * 100)}%</span><button type="button" onClick={() => zoom(1)} aria-label="Zoom in">＋</button><button type="button" onClick={() => fitWorkflow()} aria-label="Fit workflow">⌗</button><em>Pinch to zoom</em></div>
+          <form className="workflow-agent-bar" data-collapsed={promptCollapsed} onSubmit={(event) => { event.preventDefault(); draft() }}>
+            {promptCollapsed
+              ? <button className="workflow-agent-bar__expand" type="button" onClick={() => setPromptCollapsed(false)}><span className="workflow-agent-bar__orb">✦</span><span><b>Build with an agent</b><small>{prompt || 'Describe a workflow in natural language'}</small></span><i>⌃</i></button>
+              : <>
+                <header><span className="workflow-agent-bar__orb">✦</span><div><b>Build with an agent</b><small>Describe the whole recurring outcome. Ambientic will draft editable steps.</small></div><button type="button" onClick={() => setPromptCollapsed(true)} aria-label="Collapse workflow prompt">⌄</button></header>
+                <textarea
+                  aria-label="Build with an agent"
+                  rows="3"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault()
+                      draft()
+                    }
+                  }}
+                  placeholder="Every weekday, check the web, summarize with an agent, let me review, then email it…"
+                />
+                <footer><small>⌘↵ to draft · permissions stay under your control</small><button type="submit" disabled={!prompt.trim()}><span>Draft workflow</span> ↑</button></footer>
+              </>}
           </form>
+          {activeRun?.status === 'awaiting_approval' && <section className="workflow-run-approval">
+            <div><span>Approval required</span><b>{activeRun.steps.find((step) => step.status === 'awaiting_approval')?.label || 'Continue workflow?'}</b><p>{activeRun.steps.find((step) => step.status === 'awaiting_approval')?.approvalForAction ? 'This step can change data in a connected service.' : 'The workflow is paused at your review checkpoint.'}</p></div>
+            <button type="button" onClick={() => onApproveRun?.(activeRun.id, false)}>Deny</button>
+            <button className="primary" type="button" onClick={() => onApproveRun?.(activeRun.id, true)}>Approve & continue</button>
+          </section>}
         </main>
         <Inspector
           node={selectedNode}
           onClose={() => setSelectedId('')}
           onChange={(patch) => updateNode(selectedId, patch)}
           onDelete={() => {
-            setWorkflow((current) => removeWorkflowNode(current, selectedId))
+            commitWorkflow((current) => removeWorkflowNode(current, selectedId))
             setSelectedId('')
+            setNotice('Step removed · press ⌘Z to restore')
           }}
         />
       </div>

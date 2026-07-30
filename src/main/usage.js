@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { collectClaudeActivity } from './claude-activity.mjs'
 import { collectClaudeUsageWindows } from './claude-usage-scrape.mjs'
 import { claudeAccountStatus } from './claude-auth-service.mjs'
+import { resolveNewestClaudeCommand } from './claude-binary.mjs'
 
 const execFileAsync = promisify(execFile)
 const REFRESH_MS = 2 * 60 * 1000
@@ -84,46 +85,19 @@ export function knownUsageCommandCandidates (name, home = homedir()) {
   return candidates[name] || []
 }
 
-function compareClaudeVersions (left, right) {
-  const parts = (value) => String(value).split('.').map((part) => Number(part) || 0)
-  const a = parts(left)
-  const b = parts(right)
-  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
-    if ((a[index] || 0) !== (b[index] || 0)) return (b[index] || 0) - (a[index] || 0)
-  }
-  return 0
-}
 
-export function sortClaudeCodeVersions (versions) {
-  return [...versions].sort(compareClaudeVersions)
-}
-
-async function findClaudeDesktopCommand (home = homedir()) {
-  const root = join(home, 'Library', 'Application Support', 'Claude', 'claude-code')
-  let versions
-  try {
-    versions = await readdir(root, { withFileTypes: true })
-  } catch {
-    return null
-  }
-  for (const entry of sortClaudeCodeVersions(versions.filter((item) => item.isDirectory()).map((item) => item.name))) {
-    const command = join(root, entry, 'claude.app', 'Contents', 'MacOS', 'claude')
-    if (await pathExists(command)) return command
-  }
-  return null
-}
 
 async function resolveCommand (name) {
   if (commandPaths.has(name)) return commandPaths.get(name)
 
-  // Claude Desktop keeps a current, signed Claude Code binary outside the
-  // application bundle. Prefer its newest semantic-versioned installation over
-  // an older Homebrew CLI whose TUI or authentication state may have diverged.
+  // Several Claude installations can coexist and drift far apart in version, and
+  // an old one renders a different /usage panel. Resolve by newest version across
+  // every known location rather than by a fixed candidate order.
   if (name === 'claude') {
-    const desktopCommand = await findClaudeDesktopCommand()
-    if (desktopCommand) {
-      commandPaths.set(name, desktopCommand)
-      return desktopCommand
+    const newest = await resolveNewestClaudeCommand()
+    if (newest) {
+      commandPaths.set(name, newest)
+      return newest
     }
   }
 
@@ -149,12 +123,19 @@ async function resolveCommand (name) {
   return resolved
 }
 
-function resetTextToEpoch (text) {
+export function resetTextToEpoch (text) {
   if (!text) return null
   const clean = text.replace(/\s*\([^)]*\)\s*$/, '').replace(/\sat\s/i, ' ').trim()
   // A time-only reset like "7:09pm" (Claude's 5-hour window) means the next
   // occurrence of that local time — today, or tomorrow if it already passed.
-  const timeOnly = clean.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i)
+  // Allow a leading fragment before the time. The TUI repositions the cursor
+  // mid-word, so ANSI stripping can leave the label truncated ("Resets 3:10pm"
+  // arrives as "ets 3:10pm"); anchoring at the start dropped the whole reset
+  // time and left the 5-hour window with no countdown. A dated reset such as
+  // "Aug 6 5am" must NOT take this branch — treating it as a bare time would
+  // resolve it to the next 5am (tomorrow) and lose the date entirely.
+  const dated = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(clean)
+  const timeOnly = !dated && clean.match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i)
   if (timeOnly) {
     const now = new Date()
     let hour = Number(timeOnly[1]) % 12
@@ -238,11 +219,20 @@ export function parseClaudeStatusLineUsage (payload, now = Date.now()) {
     resetText: typeof window?.resetText === 'string' ? window.resetText : null
   })).filter((window) => window.id && window.usedPercent !== null)
   if (!windows.length) throw new Error('Claude usage cache contains no quota windows')
+  // A window whose reset time has already passed has rolled over since it was
+  // recorded, so its stored percentage describes an expired window. Serving it
+  // reports a limit the user is no longer subject to — a cached "100% used"
+  // 5-hour window kept claiming "rate limited" hours after it had reset.
+  // Discard rolled-over windows; an empty result makes the caller fall through
+  // to a live source instead of trusting an expired observation. (resetAt is in
+  // seconds; observedAt and now are milliseconds.)
+  const live = windows.filter((window) => window.resetAt === null || window.resetAt * 1000 > now)
+  if (!live.length) throw new Error('Claude limits in the cache have already reset. Refresh usage to read the current windows.')
   return {
     plan: document.plan || 'subscription',
     observedAt,
     source: 'claude-status-line',
-    windows
+    windows: live
   }
 }
 
@@ -254,37 +244,65 @@ async function readClaudeUsageCache () {
   return parseClaudeStatusLineUsage(await readFile(claudeUsageCachePath(), 'utf8'))
 }
 
+// Persist a freshly scraped observation in the same document the status-line
+// bridge writes. Current Claude builds no longer supply rate_limits to the
+// status line, so without this the cache is never written and every passive
+// refresh falls back to "waiting for an observation" — the long-standing reason
+// Claude usage did not display. Written atomically; failures are non-fatal.
+async function writeClaudeUsageCache (plan, windows) {
+  const file = claudeUsageCachePath()
+  const document = {
+    version: 1,
+    provider: 'claude',
+    observedAt: Date.now(),
+    plan: plan || 'subscription',
+    windows
+  }
+  const temporary = `${file}.${process.pid}.tmp`
+  try {
+    await mkdir(dirname(file), { recursive: true })
+    await writeFile(temporary, JSON.stringify(document), 'utf8')
+    await rename(temporary, file)
+  } catch (error) {
+    console.error(`[usage] could not persist claude limits: ${safeError(error)}`)
+    await rm(temporary, { force: true }).catch(() => {})
+  }
+}
+
 async function collectClaude (force = false) {
   // Prefer the structured, privacy-preserving status-line observation whenever
   // Claude supplies rate_limits. It contains only normalized percentages and
   // reset timestamps and is more stable than interpreting a terminal screen.
-  try {
-    return await readClaudeUsageCache()
-  } catch {}
-
-  // App launch and periodic refreshes must remain passive. Launching Claude's
-  // interactive TUI in the background makes macOS attribute any cwd inspection
-  // to Ambientic and can trigger unrelated protected-folder prompts. A manual
-  // Refresh usage or completed account connection passes force=true and may run
-  // the provider-owned collector from Ambientic's private runtime directory.
+  // An explicit Refresh must reach a live source, though: returning the cached
+  // document here made the refresh button a no-op whenever a cache file existed.
   if (!force) {
-    const activity = await collectClaudeActivity()
-    if (!activity.available) throw new Error('Claude limits are waiting for a recent status-line observation. Refresh usage to sync them now.')
-    return {
-      plan: 'Claude',
-      windows: [],
-      activity,
-      quotaError: 'Claude limits are waiting for a recent status-line observation. Refresh usage to sync them now.',
-      quotaStatus: 'CLAUDE_PASSIVE_REFRESH',
-      source: 'claude-stats-cache'
-    }
+    try {
+      return await readClaudeUsageCache()
+    } catch {}
   }
 
-  // Fallback: scrape Claude's interactive /usage panel for the real 5-hour and
-  // weekly limit windows. This is the only source in Claude builds whose status
-  // payload omits rate_limits. Cached automatically; manual refresh bypasses it.
+  // Periodic refreshes read Claude's limits too, not just explicit ones. Current
+  // Claude builds send no rate_limits to the status line, so opening the /usage
+  // panel is the only way to obtain them — gating it behind a manual Refresh is
+  // what made these gauges appear permanently empty.
+  //
+  // What keeps this acceptable as default behaviour, all verified on 2.1.220:
+  // the scrape runs from providerRuntimeDirectory() (private, 0700) so macOS
+  // never attributes a protected-folder scan to Ambientic; it sends no prompt, so
+  // it consumes no quota; it leaves no transcript in ~/.claude/projects and no
+  // stray processes; and its own cache (8 minutes on success, 4 on failure, with
+  // concurrent callers sharing one in-flight run) bounds the 2-minute refresh
+  // cycle to roughly one short-lived launch per 8 minutes.
+
+  // Scrape Claude's interactive /usage panel for the 5-hour and weekly windows.
+  // This is the only remaining live source, since the status-line payload no
+  // longer carries rate_limits. Its result is persisted below so subsequent
+  // passive refreshes can serve real numbers without launching anything.
   try {
     const command = await resolveCommand('claude')
+    // Which binary was chosen decides whether the /usage scrape can work at all
+    // (an old Homebrew CLI renders a different panel), so record it.
+    console.log(`[usage] claude collector using ${command} (force=${force})`)
     const account = await claudeAccountStatus(undefined, command)
     if (!account.connected) {
       const reason = new Error('Claude Code is signed out. Connect its Pro or Max account to sync plan limits.')
@@ -301,12 +319,22 @@ async function collectClaude (force = false) {
       resetAt: resetTextToEpoch(window.resetText),
       resetText: window.resetText || null
     })).filter((window) => window.usedPercent !== null)
-    if (windows.length) return { plan: scraped.plan || 'subscription', source: 'claude-usage-scrape', windows }
+    if (windows.length) {
+      console.log(`[usage] claude scrape ok: ${windows.map((w) => `${w.id}=${w.usedPercent}%`).join(' ')}`)
+      // Hand the observation to the on-disk cache so passive refreshes — and the
+      // next app launch — keep showing these numbers until the windows reset,
+      // without ever launching Claude in the background.
+      await writeClaudeUsageCache(scraped.plan, windows)
+      return { plan: scraped.plan || 'subscription', source: 'claude-usage-scrape', windows }
+    }
     throw new Error('Claude /usage produced no usable windows')
   } catch (error) {
     // Fallback: Claude's interactive /usage was unavailable (not logged in, TUI
     // changed, timed out). Show real recorded activity from Claude's stats cache
     // (messages/sessions this week) so the app still shows honest Claude usage.
+    // This branch is why the panel can silently show something other than live
+    // limits, so always record the reason.
+    console.error(`[usage] claude limits unavailable (${error?.code || 'no-code'}): ${safeError(error)}`)
     const activity = await collectClaudeActivity()
     const quotaError = error?.code === 'CLAUDE_SUBSCRIPTION_REQUIRED'
       ? 'Claude Code did not expose subscription limits. Reconnect its Pro or Max account, then refresh.'

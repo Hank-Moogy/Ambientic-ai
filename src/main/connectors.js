@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { claudeAccountStatus } from './claude-auth-service.mjs'
+import { resolveNewestClaudeCommand } from './claude-binary.mjs'
 import { providerRuntimeDirectory } from './provider-runtime.mjs'
 
 const AGENTS = [
@@ -60,10 +61,19 @@ function run (file, args, timeout = 5000) {
 }
 
 async function executablePath (agent) {
+  let shellPath = ''
   try {
-    const path = await run('/bin/zsh', ['-lic', `command -v ${agent.command}`], 4000)
-    if (path) return path
+    shellPath = await run('/bin/zsh', ['-lic', `command -v ${agent.command}`], 4000)
   } catch {}
+  // Claude can be installed several times over at very different versions, and
+  // the shell's first hit is not necessarily the newest — pick by version so the
+  // connector drives the same binary usage collection does. The shell result is
+  // offered as a candidate rather than trusted outright.
+  if (agent.id === 'claude') {
+    const newest = await resolveNewestClaudeCommand({ extra: shellPath ? [shellPath] : [] })
+    if (newest) return newest
+  }
+  if (shellPath) return shellPath
   return agent.executableCandidates.find((path) => existsSync(path)) || ''
 }
 

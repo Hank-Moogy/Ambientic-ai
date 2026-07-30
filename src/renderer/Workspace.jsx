@@ -10,7 +10,7 @@ import './improve.css'
 import './onboarding.css'
 import './composer-controls.css'
 import { GoalsWorkspace } from './Goals.jsx'
-import { WorkflowBuilder } from './WorkflowBuilder.jsx'
+import { WorkflowStudio } from './WorkflowStudio.jsx'
 import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
@@ -98,6 +98,7 @@ const HANDOVER_PROVIDERS = ['codex', 'claude', 'hermes']
 const HANDOVER_THRESHOLD = 85
 const THREAD_INTERACTIONS_KEY = 'ambientic.thread-interactions.v1'
 const LEGACY_THREAD_INTERACTIONS_KEY = 'agentbase.thread-interactions.v1'
+const SIDEBAR_COLLAPSED_KEY = 'ambientic.sidebar-collapsed.v1'
 
 function handoverLabel (provider, fallback) {
   return provider === 'claude' ? 'Claude' : (fallback || provider)
@@ -304,7 +305,9 @@ function ThreadPreview ({ state, onPresent }) {
 function Approval ({ approval, onResolve }) {
   return (
     <section className="approval">
-      <div><b>Permission requested</b><span>{approval.title}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail)}</code>}</div>
+      {/* Lead with what is being requested — the user decides yes/no from this
+          line — and keep the tool name as secondary context. */}
+      <div><b>{approval.title || 'Permission requested'}</b><span>{approval.tool ? `Permission requested · ${approval.tool}` : 'Permission requested'}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
       <div className="approval__actions">
         <button type="button" onClick={() => onResolve(approval.id, false)}>Deny</button>
         <button type="button" className="primary" onClick={() => onResolve(approval.id, true)}>Allow once</button>
@@ -986,6 +989,7 @@ export default function Workspace () {
   const [onboarding, setOnboarding] = useState(null)
   const [buildInfo, setBuildInfo] = useState(null)
   const [goalsSnapshot, setGoalsSnapshot] = useState({ version: 1, goals: [], events: [], updatedAt: null })
+  const [workflowSnapshot, setWorkflowSnapshot] = useState({ version: 1, workflows: [], runs: [], updatedAt: null })
   const [view, setView] = useState('overview')
   const [settingsSection, setSettingsSection] = useState('providers')
   const [selectedId, setSelectedId] = useState('')
@@ -999,6 +1003,7 @@ export default function Workspace () {
   const [tuningByProvider, setTuningByProvider] = useState({})
   const [query, setQuery] = useState('')
   const [providerFilter, setProviderFilter] = useState('all')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true')
   const [threadInteractions, setThreadInteractions] = useState(() => {
     try {
       const stored = window.localStorage.getItem(THREAD_INTERACTIONS_KEY) || window.localStorage.getItem(LEGACY_THREAD_INTERACTIONS_KEY) || '{}'
@@ -1032,6 +1037,9 @@ export default function Workspace () {
           setOnboarding(state)
           setView('overview')
         })
+      } else if (event.metaKey && event.key === '\\') {
+        event.preventDefault()
+        setSidebarCollapsed((current) => !current)
       }
     }
     window.addEventListener('keydown', triggerVibe)
@@ -1039,14 +1047,19 @@ export default function Workspace () {
   }, [])
 
   useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed))
+  }, [sidebarCollapsed])
+
+  useEffect(() => {
     window.controller.getOnboarding().then(setOnboarding)
-    Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getProviderAuth(), window.controller.getHandovers(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getAmbientMode(), window.controller.getUsage(), window.controller.getConsumptionLedger(), window.controller.getCompanions(), window.controller.getBuildInfo(), window.controller.getGoals()]).then(([state, agents, authState, handoverState, hardware, voiceState, ambientState, usageState, ledgerState, companionState, packagedBuild, goalState]) => {
-      setSessions(state); setConnectors(agents); setProviderAuth(authState); setHandovers(handoverState); setMidi(hardware); setVoice(voiceState); setAmbientMode(ambientState); setUsage(usageState); setLedger(ledgerState); setCompanions(companionState); setBuildInfo(packagedBuild); setGoalsSnapshot(goalState)
+    Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getProviderAuth(), window.controller.getHandovers(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getAmbientMode(), window.controller.getUsage(), window.controller.getConsumptionLedger(), window.controller.getCompanions(), window.controller.getBuildInfo(), window.controller.getGoals(), window.controller.getWorkflows()]).then(([state, agents, authState, handoverState, hardware, voiceState, ambientState, usageState, ledgerState, companionState, packagedBuild, goalState, workflowState]) => {
+      setSessions(state); setConnectors(agents); setProviderAuth(authState); setHandovers(handoverState); setMidi(hardware); setVoice(voiceState); setAmbientMode(ambientState); setUsage(usageState); setLedger(ledgerState); setCompanions(companionState); setBuildInfo(packagedBuild); setGoalsSnapshot(goalState); setWorkflowSnapshot(workflowState)
       if (state[0]) setSelectedId(state[0].id)
     })
     const disposers = [
       window.controller.onWorkspaceThreads(setSessions),
       window.controller.onGoals(setGoalsSnapshot),
+      window.controller.onWorkflows(setWorkflowSnapshot),
       window.controller.onConnectors(setConnectors),
       window.controller.onProviderAuth((result) => setProviderAuth((current) => ({ ...current, [result.provider]: result }))),
       window.controller.onHandovers(setHandovers),
@@ -1235,24 +1248,33 @@ export default function Workspace () {
   }
 
   return (
-    <main className="workspace-shell">
+    <main className="workspace-shell" data-sidebar-collapsed={sidebarCollapsed}>
+      <button
+        className="workspace-sidebar-toggle"
+        type="button"
+        aria-label={sidebarCollapsed ? 'Show navigation sidebar' : 'Hide navigation sidebar'}
+        title={`${sidebarCollapsed ? 'Show' : 'Hide'} navigation · ⌘\\`}
+        onClick={() => setSidebarCollapsed((current) => !current)}
+      >
+        {sidebarCollapsed ? '›' : '‹'}
+      </button>
       <aside className="workspace-sidebar">
         <header className="brand"><span className="brand__mark"><img src={ambienticLogo} alt="" /></span><div><b>Ambientic</b><small>Local agent workspace</small></div><button type="button" title="Open compact APC controller" onClick={() => window.controller.showController()}>⌘</button></header>
-        <nav className="workspace-nav"><button type="button" data-selected={view === 'overview'} onClick={() => setView('overview')}><span>✦</span><b>Overview</b></button><button type="button" data-selected={view === 'goals'} onClick={() => setView('goals')}><span>◇</span><b>Goals</b><em>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</em></button><button type="button" data-selected={view === 'workflows'} onClick={() => setView('workflows')}><span>⌁</span><b>Workflows</b><em>1</em></button><button type="button" data-selected={view === 'threads'} onClick={() => setView('threads')}><span>☷</span><b>Threads</b><em>{sessions.length}</em></button><button type="button" data-selected={view === 'settings'} onClick={() => { setSettingsSection('providers'); setView('settings') }}><span>⚙</span><b>Settings</b></button></nav>
+        <nav className="workspace-nav"><button type="button" data-selected={view === 'overview'} onClick={() => setView('overview')}><span>✦</span><b>Overview</b></button><button type="button" data-selected={view === 'goals'} onClick={() => setView('goals')}><span>◇</span><b>Goals</b><em>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</em></button><button type="button" data-selected={view === 'workflows'} onClick={() => setView('workflows')}><span>⌁</span><b>Workflows</b><em>{workflowSnapshot.workflows.length}</em></button><button type="button" data-selected={view === 'threads'} onClick={() => setView('threads')}><span>☷</span><b>Threads</b><em>{sessions.length}</em></button><button type="button" data-selected={view === 'settings'} onClick={() => { setSettingsSection('providers'); setView('settings') }}><span>⚙</span><b>Settings</b></button></nav>
         <button className="new-task-button" type="button" onClick={() => openCreate()}><span>＋</span> New agent task <kbd>⌘N</kbd></button>
         {view === 'threads' ? <><div className="thread-provider-filters" role="group" aria-label="Filter threads by provider"><button type="button" data-selected={providerFilter === 'all'} onClick={() => setProviderFilter('all')} title="All providers" aria-label="All providers"><span>✦</span></button>{providerCatalog.map((provider) => <button type="button" key={provider.id} data-provider={provider.id} data-selected={providerFilter === provider.id} onClick={() => setProviderFilter(provider.id)} title={provider.label} aria-label={`Show ${provider.label} threads`}><AgentIcon agent={provider.id} /></button>)}</div><div className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" /></div>
         <nav className="thread-list">
           {threadGroups.recent.length > 0 && <section className="thread-group thread-group--recent"><h3>Recent & active<span>{threadGroups.recent.length}</span></h3>{threadGroups.recent.map((session) => <button type="button" key={session.id} data-recent="true" data-latest={threadGroups.latestInteractedId === session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{stateLabel[session.state] || session.state} · {session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
           {threadGroups.earlier.length > 0 && <section className="thread-group thread-group--earlier"><h3>Earlier threads<span>{threadGroups.earlier.length}</span></h3>{threadGroups.earlier.map((session) => <button type="button" key={session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
           {!threadGroups.recent.length && !threadGroups.earlier.length && <div className="sidebar-empty">{sessions.length ? 'No threads match this provider and search.' : 'No live tasks yet. Start one here or install hooks to observe terminal sessions.'}</div>}
-        </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage provider accounts while credentials remain in their native local stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : view === 'goals' ? <div className="overview-side"><span>Goal field</span><p>Your outcomes, milestones, and next actions shared across human and agent work.</p><dl><div><dt>Active</dt><dd>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</dd></div><div><dt>Moving</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.active, 0)}</dd></div><div><dt>Blocked</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.blocked, 0)}</dd></div></dl></div> : view === 'workflows' ? <div className="overview-side workflow-side"><span>Workflow studio</span><p>Turn recurring intent into a portable sequence shared by your agents.</p><dl><div><dt>Drafts</dt><dd>1</dd></div><div><dt>Providers</dt><dd>Any</dd></div><div><dt>Runs</dt><dd>—</dd></div></dl><small>Private on this Mac</small></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
+        </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage provider accounts while credentials remain in their native local stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : view === 'goals' ? <div className="overview-side"><span>Goal field</span><p>Your outcomes, milestones, and next actions shared across human and agent work.</p><dl><div><dt>Active</dt><dd>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</dd></div><div><dt>Moving</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.active, 0)}</dd></div><div><dt>Blocked</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.blocked, 0)}</dd></div></dl></div> : view === 'workflows' ? <div className="overview-side workflow-side"><span>Workflow studio</span><p>Reusable routines shared across your connected agents.</p><dl><div><dt>Workflows</dt><dd>{workflowSnapshot.workflows.length}</dd></div><div><dt>Running</dt><dd>{workflowSnapshot.runs.filter((run) => ['queued', 'running'].includes(run.status)).length}</dd></div><div><dt>Need you</dt><dd>{workflowSnapshot.runs.filter((run) => ['awaiting_approval', 'needs_attention'].includes(run.status)).length}</dd></div></dl><small>Private on this Mac</small></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
         <footer className="hardware"><i data-connected={midi.connected} /><div><b>{midi.shortModel || 'APC controller'}</b><span>{midi.connected ? `Connected · ${midi.device || 'ready'}` : 'Waiting for hardware'}</span></div><button type="button" onClick={() => { setSettingsSection('midi'); setView('settings') }}>Choose</button></footer>
       </aside>
 
       {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in Ambientic.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. Ambientic is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => dismissProviderAuth('codex')}>×</button></div>}
       {claudeAuthMode === 'success' && <div className="provider-auth-toast" data-status="connected" data-provider="claude"><span>✓</span><div><b>Claude Code connected</b><small>{providerAuth.claude.email || 'Your Claude account is ready. Plan limits are syncing in Overview.'}</small></div><button type="button" aria-label="Dismiss Claude connection message" onClick={() => dismissProviderAuth('claude')}>×</button></div>}
       {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
-      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'goals' ? <GoalsWorkspace snapshot={goalsSnapshot} selectedGoalId={selectedGoalId} onSelectGoal={setSelectedGoalId} onCreateGoal={createGoal} onUpdateGoal={updateGoal} onCreateTask={createGoalTask} onUpdateTask={updateGoalTask} /> : view === 'workflows' ? <WorkflowBuilder connectors={connectors} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
+      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'goals' ? <GoalsWorkspace snapshot={goalsSnapshot} selectedGoalId={selectedGoalId} onSelectGoal={setSelectedGoalId} onCreateGoal={createGoal} onUpdateGoal={updateGoal} onCreateTask={createGoalTask} onUpdateTask={updateGoalTask} /> : view === 'workflows' ? <WorkflowStudio onOpenThread={openThread} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
           <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef} onScroll={updateTranscriptPosition}>

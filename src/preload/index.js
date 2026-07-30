@@ -9,6 +9,15 @@ contextBridge.exposeInMainWorld('controller', {
   updateGoal: (goalId, patch) => ipcRenderer.invoke('update-goal', goalId, patch),
   createGoalTask: (goalId, input) => ipcRenderer.invoke('create-goal-task', goalId, input),
   updateGoalTask: (taskId, patch) => ipcRenderer.invoke('update-goal-task', taskId, patch),
+  getWorkflows: () => ipcRenderer.invoke('get-workflows'),
+  createWorkflow: (input) => ipcRenderer.invoke('create-workflow', input),
+  updateWorkflow: (workflowId, input) => ipcRenderer.invoke('update-workflow', workflowId, input),
+  duplicateWorkflow: (workflowId) => ipcRenderer.invoke('duplicate-workflow', workflowId),
+  deleteWorkflow: (workflowId) => ipcRenderer.invoke('delete-workflow', workflowId),
+  setWorkflowEnabled: (workflowId, enabled) => ipcRenderer.invoke('set-workflow-enabled', workflowId, enabled),
+  runWorkflow: (workflowId) => ipcRenderer.invoke('run-workflow', workflowId),
+  approveWorkflowRun: (runId, allow) => ipcRenderer.invoke('approve-workflow-run', runId, allow),
+  cancelWorkflowRun: (runId) => ipcRenderer.invoke('cancel-workflow-run', runId),
   getUsage: () => ipcRenderer.invoke('get-usage'),
   getConsumptionLedger: () => ipcRenderer.invoke('get-consumption-ledger'),
   getAmbientMode: () => ipcRenderer.invoke('get-ambient-mode'),
@@ -82,6 +91,11 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('goals', handler)
     return () => ipcRenderer.removeListener('goals', handler)
+  },
+  onWorkflows: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('workflows', handler)
+    return () => ipcRenderer.removeListener('workflows', handler)
   },
   onUsage: (cb) => {
     const handler = (_e, payload) => cb(payload)

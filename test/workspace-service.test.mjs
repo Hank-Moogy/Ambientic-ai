@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WorkspaceService, createPrivateTaskWorkspace } from '../src/main/workspace-service.mjs'
+import { WorkspaceService, createPrivateTaskWorkspace, describeApprovalRequest } from '../src/main/workspace-service.mjs'
 
 test('managed tasks reject unsafe or unavailable explicit project folders', async () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
@@ -406,4 +406,27 @@ test('applies a persistent user alias to workspace lists and snapshots', async (
   assert.equal(saved[session.id], 'Ambientic')
   assert.equal((await service.list()).find((item) => item.id === session.id).task, 'Ambientic')
   assert.equal(service.baseSnapshot(session).title, 'Ambientic')
+})
+
+// An approval card must say what is being requested, not just which tool wants
+// to run — the title is the whole basis for allowing or denying.
+test('approval titles describe the actual request, not just the tool name', () => {
+  assert.equal(describeApprovalRequest('Bash', { command: 'git push origin main', description: 'Push the branch' }), 'Run: Push the branch')
+  assert.equal(describeApprovalRequest('Bash', { command: 'rm -rf build' }), 'Run: rm -rf build')
+  assert.equal(describeApprovalRequest('Write', { file_path: '/tmp/a/b/c/notes.md' }), 'Write \u2026/c/notes.md')
+  assert.equal(describeApprovalRequest('WebFetch', { url: 'https://example.com/a/b?x=1' }), 'Fetch example.com')
+  assert.equal(describeApprovalRequest('WebSearch', { query: 'electron pty' }), 'Web search: electron pty')
+  assert.equal(describeApprovalRequest('Grep', { pattern: 'TODO', path: '/tmp/x/src' }), 'Search for TODO in \u2026/x/src')
+})
+
+test('approval titles handle MCP tools and unknown tools without losing meaning', () => {
+  assert.equal(describeApprovalRequest('mcp__github__create_issue', {}), 'github: create issue')
+  assert.equal(describeApprovalRequest('SomeNewTool', { path: '/tmp/thing' }), 'SomeNewTool: /tmp/thing')
+  assert.equal(describeApprovalRequest('', {}), 'Claude Code tool')
+})
+
+test('approval titles stay short enough for the card', () => {
+  const title = describeApprovalRequest('Bash', { command: 'echo ' + 'x'.repeat(500) })
+  assert.ok(title.length <= 120, `title was ${title.length} chars`)
+  assert.ok(title.endsWith('\u2026'))
 })

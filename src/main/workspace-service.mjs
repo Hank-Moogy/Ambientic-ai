@@ -57,6 +57,77 @@ function stripAmbienticContext (text) {
   return String(text || '').replace(AMBIENTIC_CONTEXT, '').trim()
 }
 
+// Claude's PermissionRequest hook reports only the tool name and its raw input,
+// so an approval card titled "Bash" or "Edit" never says what is actually being
+// asked for. Build a one-line, human-readable request title — the thing the user
+// reads to decide yes or no — from the tool's own input fields. Values are
+// truncated (never parsed or executed) so a long command or file list cannot
+// blow out the card.
+const APPROVAL_TITLE_LIMIT = 120
+
+function shortPath (value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const home = homedir()
+  const tidy = text.startsWith(home) ? `~${text.slice(home.length)}` : text
+  // Keep the final two segments: enough to identify the file without the noise
+  // of a deep absolute path.
+  const parts = tidy.split('/').filter(Boolean)
+  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : tidy
+}
+
+function clip (value, limit = APPROVAL_TITLE_LIMIT) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
+}
+
+export function describeApprovalRequest (toolName, toolInput = {}) {
+  const name = String(toolName || '').trim()
+  const input = toolInput && typeof toolInput === 'object' ? toolInput : {}
+  const files = Array.isArray(input.edits) ? input.edits.length : 0
+  switch (name) {
+    case 'Bash':
+    case 'BashOutput':
+      // Claude supplies its own short `description` for Bash; prefer it and keep
+      // the command itself for the detail line beneath the title.
+      return clip(input.description ? `Run: ${input.description}` : `Run: ${input.command || 'a shell command'}`)
+    case 'Edit':
+      return clip(`Edit ${shortPath(input.file_path)}${files > 1 ? ` (${files} changes)` : ''}` )
+    case 'MultiEdit':
+      return clip(`Edit ${shortPath(input.file_path)}${files ? ` (${files} changes)` : ''}`)
+    case 'Write':
+      return clip(`Write ${shortPath(input.file_path)}`)
+    case 'NotebookEdit':
+      return clip(`Edit notebook ${shortPath(input.notebook_path || input.file_path)}`)
+    case 'Read':
+      return clip(`Read ${shortPath(input.file_path)}`)
+    case 'Glob':
+      return clip(`Find files matching ${input.pattern || ''}`)
+    case 'Grep':
+      return clip(`Search for ${input.pattern || ''}${input.path ? ` in ${shortPath(input.path)}` : ''}`)
+    case 'WebFetch': {
+      let host = ''
+      try { host = new URL(String(input.url)).hostname } catch { host = String(input.url || '') }
+      return clip(`Fetch ${host}`)
+    }
+    case 'WebSearch':
+      return clip(`Web search: ${input.query || ''}`)
+    case 'Task':
+      return clip(`Run ${input.subagent_type || 'an'} agent: ${input.description || ''}`)
+    case 'KillShell':
+      return clip('Stop a running shell')
+    default:
+      break
+  }
+  // MCP tools arrive as mcp__<server>__<tool>; surface both halves plainly.
+  const mcp = name.match(/^mcp__([^_]+(?:_[^_]+)*)__(.+)$/)
+  if (mcp) return clip(`${mcp[1]}: ${mcp[2].replace(/_/g, ' ')}`)
+  // Unknown tool: fall back to the name plus the most identifying input value.
+  const hint = input.command || input.file_path || input.path || input.url || input.query || input.pattern
+  if (name && hint) return clip(`${name}: ${typeof hint === 'string' ? hint : ''}`)
+  return clip(name || 'Claude Code tool')
+}
+
 export function reconcileProviderMessage (messages, incoming) {
   const list = [...(messages || [])]
   let index = list.findIndex((entry) => entry.id === incoming.id)
@@ -622,7 +693,8 @@ export class WorkspaceService extends EventEmitter {
       provider,
       sessionId,
       method: 'PermissionRequest',
-      title: event.tool_name || 'Claude Code tool',
+      title: describeApprovalRequest(event.tool_name, toolInput),
+      tool: String(event.tool_name || ''),
       detail,
       options: [],
       canRemember: suggestions.length > 0
@@ -808,6 +880,9 @@ export class WorkspaceService extends EventEmitter {
         return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode, model: attempt.model, effort: attempt.effort })
       }
       this.claudeAttempts.delete(session.id)
+      // A failed turn is the single most common bug report ("chat just fails"),
+      // and the binary plus Claude's own error text are what make it diagnosable.
+      console.error(`[claude] turn failed (exit ${code}) via ${path}: ${String(errorText).slice(0, 500)}`)
       this.fail(session.id, new Error(this.claudeResultError(session.id, errorText)))
     })
   }

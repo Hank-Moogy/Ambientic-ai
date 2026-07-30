@@ -192,6 +192,25 @@ export function removeWorkflowNode (workflow, nodeId) {
   }
 }
 
+export function zoomViewportAtPoint (viewport, point, deltaY) {
+  const scale = Math.max(0.35, Math.min(1.7, viewport.scale * Math.exp(-deltaY * 0.006)))
+  const worldX = (point.x - viewport.x) / viewport.scale
+  const worldY = (point.y - viewport.y) / viewport.scale
+  return {
+    x: point.x - worldX * scale,
+    y: point.y - worldY * scale,
+    scale
+  }
+}
+
+export function panViewport (viewport, deltaX, deltaY) {
+  return {
+    ...viewport,
+    x: viewport.x - deltaX,
+    y: viewport.y - deltaY
+  }
+}
+
 export function toPortableManifest (workflow) {
   return {
     schema: 'ambientic.workflow',
