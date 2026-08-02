@@ -20,6 +20,10 @@ The first user is a technically curious builder running several agent conversati
 
 ## Product pillars
 
+### 0. Context and capability substrate
+
+Underpins every other pillar. Ambientic owns a durable local memory of the user, their projects, and their decisions, and a single gateway through which any agent on any provider reaches tools. An agent started from Ambientic knows what the user is trying to achieve and can act through connections the user authorized once, without Ambientic handing credentials to the provider or copying whole transcripts into every model. Specified in **Memory layer and tool gateway** below.
+
 ### 1. Unified agent cockpit
 
 Normalize provider conversations, turns, approvals, artifacts, usage, and lifecycle state while keeping credentials in provider-owned stores.
@@ -123,14 +127,124 @@ User / MIDI / Keyboard / Schedule / Coach suggestion
 
 An action definition declares its identifier, schema, required capabilities, permission level, idempotency behavior, result shape, and compatibility version. Provider adapters translate that stable contract into the provider's supported local protocol. Unsupported capabilities are explicit and never silently emulated with brittle UI automation.
 
-## Model-agnostic context strategy
+## Memory layer and tool gateway
+
+This is the provider-agnostic substrate. Everything else in the product — Goals, workflows, Coach, handover — reads and writes through it.
+
+### Principles
 
 - Store canonical goals, tasks, workflow definitions, mappings, execution results, and recommendations outside model transcripts.
-- Give an agent a compact context capsule containing the objective, current task, acceptance criteria, relevant decisions, artifact references, and requested action.
-- Retrieve full conversation or artifact context only when the action requires it.
-- Record stable references and short derived facts instead of copying entire chats into every model.
 - Treat provider/model choice as runtime policy; a workflow step requests capabilities and constraints, then Ambientic resolves an eligible connected provider.
 - Preserve deterministic execution state locally so a different provider can resume without replaying unrelated conversation history.
+- Never hand a provider a third-party credential. An agent receives a capability, not a token.
+
+### Two context channels
+
+Context reaches an agent through two channels with deliberately different budgets. Pushing more is not the goal; making the right thing reachable is.
+
+| | Push — session capsule | Pull — gateway tools |
+| --- | --- | --- |
+| Budget | Hard cap, 600–1200 tokens | Unbounded, agent-paced |
+| Carries | Identity, active goal, current task and acceptance criteria, project card, standing constraints, and an index of what else exists | Transcript history, past decisions, artifacts, prior sessions, entity facts |
+| Written | Once per session, byte-stable | On demand |
+| Cost | Every turn | Only when used |
+
+The capsule's most valuable content is the index, not the facts: it tells the agent what Ambientic holds and under which conditions to ask for it. Capsule instructions must be trigger-shaped ("before assuming a project convention, recall it") rather than capability-shaped ("you have a recall tool"), because agents do not reliably use a tool they are merely told exists.
+
+The capsule must be stable for the life of a session. Rebuilding it per turn breaks provider prompt caching and multiplies cost for no gain. Material mid-session changes — goal status, task switch, a revoked connection — are delivered as an explicit bounded context update, never by rewriting the capsule.
+
+The capsule budget is enforced in code, surfaced in the UI, and rank-dropped when exceeded.
+
+### Memory tiers
+
+| Tier | Horizon | Contents | Key |
+| --- | --- | --- | --- |
+| T0 working | Current turn | The provider's own context window | Session |
+| T1 episodic | 30–90 days, decaying | Session objective, what changed, decisions taken, files touched, outcome | Session |
+| T2 project | Weeks to months | Stack, conventions, entry points, current objective, open threads, known gotchas | Project root |
+| T3 semantic | Durable, curated, small | User profile, working preferences, standing constraints, entity facts | User |
+
+T2 is keyed by project root, which every session already carries, and is the highest-leverage tier: it is what makes a fresh session on any provider immediately useful in a known repository. T3 stays small and is superseded rather than mutated, so provenance survives.
+
+### Write path
+
+The write path is deterministic first and inferential second. Structured signals Ambientic already emits are harvested with no model call: goal and task transitions, approved tool calls, files written, commits, provider switches, recurring errors. Session transcripts and provider snapshots are additionally mined locally for decisions and rationale.
+
+Anything derived, inferred, or asserted by an agent enters a **candidate** store with confidence, provenance, and expiry. Candidates are not visible to the capsule. A candidate is promoted to T2 or T3 when it recurs, when the user accepts it, or when an agent uses it without correction. Agents write only candidates; an agent can never silently mutate durable memory.
+
+Promotion, Coach evidence, and recommendation ranking are the same mechanism and must not be built twice.
+
+### Retrieval
+
+Ranked local retrieval over structured filters — project, goal, tier, type, recency decay — with lexical search doing the scoring. For a single user's own memory this is sufficient and, unlike vector similarity, it is inspectable when a recall returns the wrong thing. Retrieval sits behind an interface so semantic search can be added later without changing callers.
+
+### Tool gateway
+
+Ambientic runs one long-lived local gateway that speaks the tool protocol the provider CLIs already support. Each session Ambientic starts is issued a session token bound to its session, provider, project root, goal, and permission scope.
+
+```text
+             agent (any provider, any runtime)
+                          │  tool protocol + session token
+                          ▼
+   ┌───────────────────────────────────────────────────┐
+   │  Ambientic gateway                                │
+   │    token          → session identity              │
+   │    tool call      → semantic capability resolver  │
+   │    capability     → permission policy             │
+   │                     (read / draft / consequential)│
+   │    consequential  → approval boundary             │
+   │    dispatch       → adapter                       │
+   │    result         → audit journal ──▶ harvester   │
+   └────────┬──────────────────────────────────────────┘
+            │
+   ┌────────┼─────────────┬──────────────────────┐
+   ▼        ▼             ▼                      ▼
+ memory   goals /      connected tool         app adapters
+ tools    workflow     servers (proxied)      (deferred)
+          tools
+```
+
+Requirements:
+
+- A single gateway instance, not one per session, so identity, permission, audit, and cache are shared and every call is attributable to a session, project, and goal.
+- Third-party credentials remain in Ambientic's own credential store. The agent holds only a session token. Revoking a session revokes its reach immediately.
+- Gateway permission requests surface through the same approval boundary as provider-native tool approvals. The user should not have to know which layer asked.
+- Every call is journaled locally, and the journal is an input to the memory harvester.
+- Tools are requested as semantic capabilities resolved to an eligible connection at validation or runtime, never as a hard-coded vendor.
+
+Ambientic also acts as a proxy for tool servers the user connects once: a server configured in Ambientic becomes available to every agent on every provider, under one permission policy and one audit trail, without per-provider configuration.
+
+### Cross-provider continuity
+
+Once T1 and T2 exist, a new session's capsule *is* the handover. Provider switching stops being a distinct feature with its own document and becomes the default behavior of the memory layer. The generated handover file remains as a portable export format, not as the transfer mechanism.
+
+### Trust boundaries specific to this layer
+
+- An agent that reads untrusted content can attempt to write memory. Candidate-only agent writes, retained provenance, and user review are the mitigation and are not optional.
+- Transcript mining stays local and is a distinct opt-in from goal and event harvesting.
+- The user can inspect exactly what any agent will see for a given project before starting it, and can edit, reject, or forget any memory record.
+
+## Deferred — memory and gateway backlog
+
+These are specified now so the substrate is designed for them, and deliberately excluded from the first implementation.
+
+### Model-assisted memory distillation
+
+Session tails are sent to a user-selected provider to distill decisions and rationale into higher-quality episodic and project memory, beyond what deterministic harvesting and local transcript mining produce.
+
+Requirements before implementation: candidate queue and provenance proven in production; explicit opt-in separate from transcript mining; user-chosen distillation provider with visible token cost per session; distilled records marked as model-derived and never auto-promoted to T3; a local-only mode that disables it entirely.
+
+### Native app adapters
+
+Direct adapters for Mail, Calendar, Files, and Communication behind semantic capabilities such as `calendar.event.create`, with their own OAuth flows owned by Ambientic.
+
+Requirements before implementation: capability resolver, permission policy, approval boundary, and audit journal proven with native and proxied tools; read, draft, and consequential-write permission levels enforced independently; dependent-workflow disclosure before disconnect; no success ever reported from an agent's assertion without adapter confirmation.
+
+### Ambientic-hosted agent runtime
+
+A native turn loop against model APIs for providers that ship no local CLI, making the capsule and gateway reachable by any model rather than any CLI.
+
+Requirements before implementation: the context assembler and gateway transport must stay runtime-agnostic from the outset, so this drops in behind the same interfaces. Adds ownership of streaming, tool-call parsing, retry, and per-provider cost accounting, plus direct API key custody — a materially different trust posture from the current model where each provider owns its own credentials.
 
 ## Trust and privacy
 

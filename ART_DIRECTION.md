@@ -28,7 +28,7 @@ Provider filters should remain compact, icon-led, and softly illuminated in each
 
 Overview provider cards are portals into existing work, not shortcuts for silently creating new tasks. Each card reserves a calm upper identity row: the provider artwork sits to the left while its name and state form a separate text block, and usage metrics remain isolated below. Marks must never overlap a provider label or status. Provider-supplied artwork may replace a generic glyph on this surface when it remains legible in the provider accent; selecting the card transitions directly into that provider’s freshest thread field with the matching filter already illuminated.
 
-Starting a task should feel like expressing intent, not configuring a runtime. Provider and prompt are the primary decisions. Ambientic silently creates a private local workspace when no existing project is selected; the optional project control stays visually secondary, offers recent safe projects, and explains its consequence without exposing privacy implementation detail as a blocking error.
+Starting a task should feel like expressing intent, not configuring a runtime. The choices follow one readable current: provider, that provider's model and reasoning level, project context, then the first prompt. Model controls use the provider's own names and capabilities rather than exposing adapter detail. A safe recent real project is visibly selected by default so a new agent begins with the user's working context; choosing another folder remains an explicit action, and an empty private scratch workspace is a clearly labeled escape hatch rather than an invisible default. The project surface should feel grounded and trustworthy without turning the modal into a setup wizard.
 
 ## Identity mark
 

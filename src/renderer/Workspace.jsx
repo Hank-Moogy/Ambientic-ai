@@ -11,6 +11,7 @@ import './onboarding.css'
 import './composer-controls.css'
 import { GoalsWorkspace } from './Goals.jsx'
 import { WorkflowStudio } from './WorkflowStudio.jsx'
+import { AppsToolsSettings, LaunchContext, MemoryWorkspace, ThreadContextPanel } from './ContextMemory.jsx'
 import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
@@ -303,45 +304,89 @@ function ThreadPreview ({ state, onPresent }) {
 }
 
 function Approval ({ approval, onResolve }) {
+  const destructive = approval.risk === 'destructive' || approval.permission === 'destructive'
   return (
-    <section className="approval">
+    <section className="approval" data-risk={destructive ? 'destructive' : approval.risk || approval.permission || 'write'}>
       {/* Lead with what is being requested — the user decides yes/no from this
           line — and keep the tool name as secondary context. */}
-      <div><b>{approval.title || 'Permission requested'}</b><span>{approval.tool ? `Permission requested · ${approval.tool}` : 'Permission requested'}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
+      <div><b>{approval.title || 'Permission requested'}</b><span>{[approval.provider, approval.projectName, approval.taskName, approval.connectionName, approval.tool].filter(Boolean).join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
       <div className="approval__actions">
         <button type="button" onClick={() => onResolve(approval.id, false)}>Deny</button>
         <button type="button" className="primary" onClick={() => onResolve(approval.id, true)}>Allow once</button>
-        {approval.canRemember && <button type="button" onClick={() => onResolve(approval.id, true, true)}>Always allow</button>}
+        {approval.canRemember && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, true)}>Allow for session</button>}
       </div>
     </section>
   )
 }
 
-function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
+function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreate, onCreateGoal }) {
   const taskConnectors = connectors.filter((item) => item.taskCapable !== false && providerCatalog.some((provider) => provider.id === item.id))
   const [provider, setProvider] = useState(initialProvider || taskConnectors.find((item) => item.manageable !== false)?.id || 'codex')
   const [cwd, setCwd] = useState('')
+  const [model, setModel] = useState('')
+  const [effort, setEffort] = useState('')
+  const [taskOptions, setTaskOptions] = useState({ provider: '', models: [], efforts: [] })
+  const [loadingOptions, setLoadingOptions] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [recentProjects, setRecentProjects] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [contextBinding, setContextBinding] = useState({})
+  const projectChoiceMade = useRef(false)
   const selectedConnector = taskConnectors.find((item) => item.id === provider)
   const providerReady = Boolean(selectedConnector?.installed && selectedConnector.manageable !== false)
   const selectedProject = recentProjects.find((project) => project.cwd === cwd)
   const selectedProjectName = selectedProject?.name || cwd.split(/[\\/]/).filter(Boolean).at(-1) || 'Existing project'
+  const selectedModel = taskOptions.models.find((item) => item.id === model)
+  const effortOptions = selectedModel?.efforts?.length ? selectedModel.efforts : taskOptions.efforts
   useEffect(() => {
     if (providerReady) return
     const fallback = taskConnectors.find((item) => item.installed && item.manageable !== false)
     if (fallback && fallback.id !== provider) setProvider(fallback.id)
   }, [provider, providerReady, taskConnectors])
   useEffect(() => {
-    window.controller.getRecentProjects().then(setRecentProjects).catch(() => setRecentProjects([]))
+    window.controller.getRecentProjects().then((projects) => {
+      setRecentProjects(projects)
+      // A real, recently used project is the most useful default. Scratch work
+      // remains one explicit click away and is never confused with project work.
+      setCwd((current) => projectChoiceMade.current ? current : (current || projects[0]?.cwd || ''))
+    }).catch(() => setRecentProjects([]))
   }, [])
+  useEffect(() => {
+    let active = true
+    setLoadingOptions(true)
+    setTaskOptions({ provider, models: [], efforts: [] })
+    setModel('')
+    setEffort('')
+    window.controller.getProviderTaskOptions(provider).then((options) => {
+      if (!active) return
+      const next = options || { provider, models: [], efforts: [] }
+      const defaultModel = next.models?.find((item) => item.isDefault) || next.models?.[0]
+      const efforts = defaultModel?.efforts?.length ? defaultModel.efforts : (next.efforts || [])
+      const defaultEffort = efforts.find((item) => item.id === defaultModel?.defaultEffort) || efforts.find((item) => item.isDefault) || efforts[0]
+      setTaskOptions(next)
+      setModel(defaultModel?.id || '')
+      setEffort(defaultEffort?.id || '')
+    }).catch(() => {
+      if (active) setTaskOptions({ provider, models: [], efforts: [] })
+    }).finally(() => { if (active) setLoadingOptions(false) })
+    return () => { active = false }
+  }, [provider])
+  const chooseModel = (value) => {
+    setModel(value)
+    const nextModel = taskOptions.models.find((item) => item.id === value)
+    const efforts = nextModel?.efforts?.length ? nextModel.efforts : taskOptions.efforts
+    const nextEffort = efforts.find((item) => item.id === nextModel?.defaultEffort) || efforts.find((item) => item.isDefault) || efforts[0]
+    setEffort(nextEffort?.id || '')
+  }
   const chooseFolder = async () => {
     setError('')
     try {
       const selected = await window.controller.chooseProjectFolder()
-      if (selected) setCwd(selected)
+      if (selected) {
+        projectChoiceMade.current = true
+        setCwd(selected)
+      }
       return selected || ''
     } catch (cause) {
       setError(taskCreationError(cause))
@@ -357,7 +402,7 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
     }
     setBusy(true)
     try {
-      await onCreate({ provider, cwd: cwd.trim(), prompt })
+      await onCreate({ provider, cwd: cwd.trim(), prompt, model, effort, mode: 'build', contextBinding })
     } catch (cause) {
       setError(taskCreationError(cause))
     } finally {
@@ -371,13 +416,22 @@ function NewTask ({ connectors, initialProvider, onClose, onCreate }) {
         <label>Provider<div className="provider-choices">
           {taskConnectors.map((connector) => <button key={connector.id} type="button" data-selected={provider === connector.id} disabled={!connector.installed || connector.manageable === false} title={connector.authMessage || ''} onClick={() => setProvider(connector.id)}><AgentIcon agent={connector.id} /><span>{connector.label}<small>{!connector.installed ? 'Not installed' : connector.manageable === false ? 'Run /login first' : 'Uses local login'}</small></span></button>)}
         </div></label>
-        <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should this agent do? (optional)" autoFocus /></label>
-        <section className="new-task-work-area">
-          <div><span>Work area · Optional</span><b>{cwd ? selectedProjectName : 'New private workspace'}</b><small>{cwd || 'Ambientic creates a clean local folder automatically. Choose a project only when the agent needs existing files.'}</small></div>
-          <button type="button" onClick={chooseFolder}>{cwd ? 'Change' : 'Use existing project'}</button>
+        <section className="new-task-tuning">
+          <div className="new-task-section-title"><span>Model &amp; reasoning</span><small>{loadingOptions ? 'Reading provider capabilities…' : 'Applied to the first turn'}</small></div>
+          {taskOptions.models.length > 0 ? <div className="new-task-tuning-grid">
+            <label>Model<select value={model} disabled={loadingOptions} onChange={(event) => chooseModel(event.target.value)}>{taskOptions.models.map((item) => <option key={item.id || 'default'} value={item.id}>{item.label}</option>)}</select></label>
+            <label>Reasoning<select value={effort} disabled={loadingOptions || effortOptions.length === 0} onChange={(event) => setEffort(event.target.value)}>{effortOptions.length ? effortOptions.map((item) => <option key={item.id || 'default'} value={item.id}>{item.label}</option>) : <option value="">Provider managed</option>}</select></label>
+          </div> : <div className="new-task-tuning-empty">{loadingOptions ? 'Loading model choices…' : `${selectedConnector?.label || 'This provider'} manages its own model settings.`}</div>}
+          {(selectedModel?.description || effortOptions.find((item) => item.id === effort)?.description) && <small className="new-task-tuning-note">{[selectedModel?.description, effortOptions.find((item) => item.id === effort)?.description].filter(Boolean).join(' · ')}</small>}
         </section>
-        {!cwd && recentProjects.length > 0 && <div className="new-task-recents"><span>Recent</span>{recentProjects.map((project) => <button type="button" key={project.cwd} title={project.cwd} onClick={() => { setCwd(project.cwd); setError('') }}>{project.name}</button>)}</div>}
-        {cwd && <button className="new-task-private" type="button" onClick={() => { setCwd(''); setError('') }}>Use a new private workspace instead</button>}
+        <section className="new-task-work-area">
+          <div><span>Project context</span><b>{cwd ? selectedProjectName : 'Scratch workspace'}</b><small>{cwd || 'A new empty local folder. Use this only for work that does not belong to an existing project.'}</small></div>
+          <button type="button" onClick={chooseFolder}>{cwd ? 'Browse' : 'Choose project'}</button>
+        </section>
+        {recentProjects.length > 0 && <div className="new-task-recents"><span>Recent projects</span>{recentProjects.map((project) => <button type="button" key={project.cwd} data-selected={cwd === project.cwd} title={project.cwd} onClick={() => { projectChoiceMade.current = true; setCwd(project.cwd); setError('') }}>{project.name}</button>)}</div>}
+        {cwd && <button className="new-task-private" type="button" onClick={() => { projectChoiceMade.current = true; setCwd(''); setError('') }}>Start in an empty scratch workspace</button>}
+        <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} goalsSnapshot={goalsSnapshot} onChange={setContextBinding} onCreateGoal={onCreateGoal} />
+        <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={cwd ? `What should the agent do in ${selectedProjectName}? (optional)` : 'What should this agent create? (optional)'} autoFocus /></label>
         {error && <div className="new-task__error" role="alert"><span>!</span><p>{error}</p></div>}
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !providerReady} type="submit">{busy ? 'Starting…' : providerReady ? 'Start task' : 'Connect a provider first'}</button></footer>
       </form>
@@ -936,11 +990,11 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
 
   return (
     <section className="settings-page">
-      <header className="settings-topbar"><div><span>Settings</span><h1>{section === 'providers' ? 'AI provider accounts' : section === 'usage' ? 'Usage & billing' : section === 'ambient' ? 'Ambient mode' : 'MIDI hardware'}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
+      <header className="settings-topbar"><div><span>Settings</span><h1>{section === 'providers' ? 'AI provider accounts' : section === 'tools' ? 'Apps & tools' : section === 'usage' ? 'Usage & billing' : section === 'ambient' ? 'Ambient mode' : 'MIDI hardware'}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
       <div className="settings-scroll">
-        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'ambient'} onClick={() => setSection('ambient')}><b>Ambient Mode</b><small>Sleep prevention and safety</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart the first-run experience</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'usage' ? 'Measured honestly' : section === 'ambient' ? 'Temporary and reversible' : 'One controller at a time'}</b><p>{section === 'providers' ? 'Ambientic delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : section === 'ambient' ? 'Ambient mode is always user-controlled, leaves display sleep intact, and releases its assertion when the app quits.' : 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div><footer className="settings-build"><span>Installed build</span><b>Ambientic {buildInfo?.version || 'development'}</b><code>{buildInfo?.commit === 'development' ? 'Development' : buildInfo?.commit?.slice(0, 8)}</code>{buildInfo?.builtAt && <small>{buildInfo.branch} · {new Date(buildInfo.builtAt).toLocaleString()}{buildInfo.dirty ? ' · modified' : ''}</small>}</footer></aside>
+        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'tools'} onClick={() => setSection('tools')}><b>Apps &amp; Tools</b><small>Shared MCP capabilities</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'ambient'} onClick={() => setSection('ambient')}><b>Ambient Mode</b><small>Sleep prevention and safety</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart the first-run experience</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'tools' ? 'One permission boundary' : section === 'usage' ? 'Measured honestly' : section === 'ambient' ? 'Temporary and reversible' : 'One controller at a time'}</b><p>{section === 'providers' ? 'Ambientic delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'tools' ? 'Ambientic brokers capabilities and approvals so agents never receive third-party credentials.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : section === 'ambient' ? 'Ambient mode is always user-controlled, leaves display sleep intact, and releases its assertion when the app quits.' : 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div><footer className="settings-build"><span>Installed build</span><b>Ambientic {buildInfo?.version || 'development'}</b><code>{buildInfo?.commit === 'development' ? 'Development' : buildInfo?.commit?.slice(0, 8)}</code>{buildInfo?.builtAt && <small>{buildInfo.branch} · {new Date(buildInfo.builtAt).toLocaleString()}{buildInfo.dirty ? ' · modified' : ''}</small>}</footer></aside>
         <main className="provider-settings">
-          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'ambient' ? <AmbientModeSettings ambientMode={ambientMode} onToggle={onAmbientToggle} onCheckInChange={onAmbientCheckIn} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : <>
+          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'ambient' ? <AmbientModeSettings ambientMode={ambientMode} onToggle={onAmbientToggle} onCheckInChange={onAmbientCheckIn} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : section === 'tools' ? <AppsToolsSettings /> : <>
           <div className="provider-settings__intro"><span className="eyebrow"><i /> Local account bridge</span><h2>Connect the agents you already use.</h2><p>Each provider keeps ownership of authentication. Ambientic checks the installed CLI, opens its official login flow, and uses that existing local session.</p></div>
           {notice && <div className="settings-notice"><span>i</span>{notice}</div>}
           <div className="provider-account-list">
@@ -1185,6 +1239,7 @@ export default function Workspace () {
 
   const create = async (options) => {
     const id = await window.controller.createManagedThread(options)
+    setThreadTuning(options.provider, { model: options.model || '', effort: options.effort || '' })
     setNewTask(false); setSelectedId(id)
     if (onboarding && !onboarding.completed) await saveOnboarding({ step: 3 })
     else setView('threads')
@@ -1242,7 +1297,7 @@ export default function Workspace () {
       <>
         <Onboarding state={onboarding} connectors={connectors} providerAuth={providerAuth} midi={midi} onSave={saveOnboarding} onConnect={(id) => window.controller.connectProvider(id)} onRefresh={() => window.controller.refreshConnectors()} onInstallHooks={() => window.controller.installHooks()} onCreate={() => setNewTask(true)} onFinish={finishOnboarding} />
         {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
-        {newTask && <NewTask connectors={connectors} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} />}
+        {newTask && <NewTask connectors={connectors} goalsSnapshot={goalsSnapshot} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} onCreateGoal={(input) => window.controller.createGoal(input)} />}
       </>
     )
   }
@@ -1260,21 +1315,21 @@ export default function Workspace () {
       </button>
       <aside className="workspace-sidebar">
         <header className="brand"><span className="brand__mark"><img src={ambienticLogo} alt="" /></span><div><b>Ambientic</b><small>Local agent workspace</small></div><button type="button" title="Open compact APC controller" onClick={() => window.controller.showController()}>⌘</button></header>
-        <nav className="workspace-nav"><button type="button" data-selected={view === 'overview'} onClick={() => setView('overview')}><span>✦</span><b>Overview</b></button><button type="button" data-selected={view === 'goals'} onClick={() => setView('goals')}><span>◇</span><b>Goals</b><em>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</em></button><button type="button" data-selected={view === 'workflows'} onClick={() => setView('workflows')}><span>⌁</span><b>Workflows</b><em>{workflowSnapshot.workflows.length}</em></button><button type="button" data-selected={view === 'threads'} onClick={() => setView('threads')}><span>☷</span><b>Threads</b><em>{sessions.length}</em></button><button type="button" data-selected={view === 'settings'} onClick={() => { setSettingsSection('providers'); setView('settings') }}><span>⚙</span><b>Settings</b></button></nav>
+        <nav className="workspace-nav"><button type="button" data-selected={view === 'overview'} onClick={() => setView('overview')}><span>✦</span><b>Overview</b></button><button type="button" data-selected={view === 'goals'} onClick={() => setView('goals')}><span>◇</span><b>Goals</b><em>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</em></button><button type="button" data-selected={view === 'memory'} onClick={() => setView('memory')}><span>◌</span><b>Memory</b></button><button type="button" data-selected={view === 'workflows'} onClick={() => setView('workflows')}><span>⌁</span><b>Workflows</b><em>{workflowSnapshot.workflows.length}</em></button><button type="button" data-selected={view === 'threads'} onClick={() => setView('threads')}><span>☷</span><b>Threads</b><em>{sessions.length}</em></button><button type="button" data-selected={view === 'settings'} onClick={() => { setSettingsSection('providers'); setView('settings') }}><span>⚙</span><b>Settings</b></button></nav>
         <button className="new-task-button" type="button" onClick={() => openCreate()}><span>＋</span> New agent task <kbd>⌘N</kbd></button>
         {view === 'threads' ? <><div className="thread-provider-filters" role="group" aria-label="Filter threads by provider"><button type="button" data-selected={providerFilter === 'all'} onClick={() => setProviderFilter('all')} title="All providers" aria-label="All providers"><span>✦</span></button>{providerCatalog.map((provider) => <button type="button" key={provider.id} data-provider={provider.id} data-selected={providerFilter === provider.id} onClick={() => setProviderFilter(provider.id)} title={provider.label} aria-label={`Show ${provider.label} threads`}><AgentIcon agent={provider.id} /></button>)}</div><div className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" /></div>
         <nav className="thread-list">
           {threadGroups.recent.length > 0 && <section className="thread-group thread-group--recent"><h3>Recent & active<span>{threadGroups.recent.length}</span></h3>{threadGroups.recent.map((session) => <button type="button" key={session.id} data-recent="true" data-latest={threadGroups.latestInteractedId === session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{stateLabel[session.state] || session.state} · {session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
           {threadGroups.earlier.length > 0 && <section className="thread-group thread-group--earlier"><h3>Earlier threads<span>{threadGroups.earlier.length}</span></h3>{threadGroups.earlier.map((session) => <button type="button" key={session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
           {!threadGroups.recent.length && !threadGroups.earlier.length && <div className="sidebar-empty">{sessions.length ? 'No threads match this provider and search.' : 'No live tasks yet. Start one here or install hooks to observe terminal sessions.'}</div>}
-        </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage provider accounts while credentials remain in their native local stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : view === 'goals' ? <div className="overview-side"><span>Goal field</span><p>Your outcomes, milestones, and next actions shared across human and agent work.</p><dl><div><dt>Active</dt><dd>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</dd></div><div><dt>Moving</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.active, 0)}</dd></div><div><dt>Blocked</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.blocked, 0)}</dd></div></dl></div> : view === 'workflows' ? <div className="overview-side workflow-side"><span>Workflow studio</span><p>Reusable routines shared across your connected agents.</p><dl><div><dt>Workflows</dt><dd>{workflowSnapshot.workflows.length}</dd></div><div><dt>Running</dt><dd>{workflowSnapshot.runs.filter((run) => ['queued', 'running'].includes(run.status)).length}</dd></div><div><dt>Need you</dt><dd>{workflowSnapshot.runs.filter((run) => ['awaiting_approval', 'needs_attention'].includes(run.status)).length}</dd></div></dl><small>Private on this Mac</small></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
+        </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage providers and shared tool connections while credentials remain in their native stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : view === 'goals' ? <div className="overview-side"><span>Goal field</span><p>Your outcomes, milestones, and next actions shared across human and agent work.</p><dl><div><dt>Active</dt><dd>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</dd></div><div><dt>Moving</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.active, 0)}</dd></div><div><dt>Blocked</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.blocked, 0)}</dd></div></dl></div> : view === 'memory' ? <div className="overview-side"><span>Context field</span><p>Durable preferences, project decisions, and consented history shared only when relevant.</p><small>Private on this Mac</small></div> : view === 'workflows' ? <div className="overview-side workflow-side"><span>Workflow studio</span><p>Reusable routines shared across your connected agents.</p><dl><div><dt>Workflows</dt><dd>{workflowSnapshot.workflows.length}</dd></div><div><dt>Running</dt><dd>{workflowSnapshot.runs.filter((run) => ['queued', 'running'].includes(run.status)).length}</dd></div><div><dt>Need you</dt><dd>{workflowSnapshot.runs.filter((run) => ['awaiting_approval', 'needs_attention'].includes(run.status)).length}</dd></div></dl><small>Private on this Mac</small></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
         <footer className="hardware"><i data-connected={midi.connected} /><div><b>{midi.shortModel || 'APC controller'}</b><span>{midi.connected ? `Connected · ${midi.device || 'ready'}` : 'Waiting for hardware'}</span></div><button type="button" onClick={() => { setSettingsSection('midi'); setView('settings') }}>Choose</button></footer>
       </aside>
 
       {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in Ambientic.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. Ambientic is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => dismissProviderAuth('codex')}>×</button></div>}
       {claudeAuthMode === 'success' && <div className="provider-auth-toast" data-status="connected" data-provider="claude"><span>✓</span><div><b>Claude Code connected</b><small>{providerAuth.claude.email || 'Your Claude account is ready. Plan limits are syncing in Overview.'}</small></div><button type="button" aria-label="Dismiss Claude connection message" onClick={() => dismissProviderAuth('claude')}>×</button></div>}
       {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
-      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'goals' ? <GoalsWorkspace snapshot={goalsSnapshot} selectedGoalId={selectedGoalId} onSelectGoal={setSelectedGoalId} onCreateGoal={createGoal} onUpdateGoal={updateGoal} onCreateTask={createGoalTask} onUpdateTask={updateGoalTask} /> : view === 'workflows' ? <WorkflowStudio onOpenThread={openThread} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
+      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'goals' ? <GoalsWorkspace snapshot={goalsSnapshot} selectedGoalId={selectedGoalId} onSelectGoal={setSelectedGoalId} onCreateGoal={createGoal} onUpdateGoal={updateGoal} onCreateTask={createGoalTask} onUpdateTask={updateGoalTask} /> : view === 'memory' ? <MemoryWorkspace /> : view === 'workflows' ? <WorkflowStudio onOpenThread={openThread} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
           <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef} onScroll={updateTranscriptPosition}>
@@ -1331,12 +1386,13 @@ export default function Workspace () {
 
       <aside className="artifact-panel">
         <header><span>Context</span><button type="button">···</button></header>
+        <ThreadContextPanel sessionId={selectedId} thread={thread} goalsSnapshot={goalsSnapshot} />
         <section><h3>Task</h3><dl><div><dt>Provider</dt><dd>{thread?.providerLabel || '—'}</dd></div><div><dt>Status</dt><dd><i data-state={thread?.state} />{stateLabel[thread?.state] || '—'}</dd></div><div><dt>Project</dt><dd>{thread?.project || '—'}</dd></div></dl></section>
         <section><h3>Preview <span>{companions?.bySession?.[selectedId]?.activeCount || 0}</span></h3><ThreadPreview state={companions?.bySession?.[selectedId]} onPresent={() => window.controller.presentPreview(selectedId)} /></section>
         <section><h3>Artifacts <span>{thread?.artifacts?.length || 0}</span></h3>{thread?.artifacts?.length ? <div className="artifacts">{thread.artifacts.map((artifact) => <button key={artifact.path} type="button" title={artifact.path} onClick={() => window.controller.openArtifact(artifact.path)}><span>⌘</span><div><b>{artifact.name}</b><small>{artifact.path}</small></div></button>)}</div> : <div className="no-artifacts">Files touched by the agent appear here.</div>}</section>
         <section className="capabilities"><h3>Connection</h3><p>Provider credentials stay in the provider’s own local store. Ambientic never asks for or copies your API keys.</p></section>
       </aside></>}
-      {newTask && <NewTask key={newTaskProvider || 'any'} connectors={connectors} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} />}
+      {newTask && <NewTask key={newTaskProvider || 'any'} connectors={connectors} goalsSnapshot={goalsSnapshot} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} onCreateGoal={createGoal} />}
       <AmbientModeCheckIn ambientMode={ambientMode} onContinue={() => window.controller.continueAmbientMode()} onTurnOff={() => window.controller.setAmbientMode(false)} />
     </main>
   )

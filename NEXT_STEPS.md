@@ -56,6 +56,53 @@ Exit condition: all three templates can complete, fail safely, and resume after 
 
 Exit condition: a user can choose Codex, Claude Code, or Hermes to draft a validated workflow, review it before saving, connect one real app, see its exact permissions and dependent workflows, and complete one confirmed app action through a provider-neutral capability.
 
+## Phase 1.6 — memory layer and tool gateway
+
+Specified in `PRODUCT.md` → **Memory layer and tool gateway**. This is the substrate the other phases assume: Goals context capsules, Coach evidence, cross-provider handover, and workflow capability resolution all read and write through it. It can be built alongside Phase 1.5 because it shares the connection and permission model, but it must not wait for the community phases.
+
+Scope decisions for this increment:
+
+- Target the local provider CLIs. Keep the context assembler and gateway transport runtime-agnostic so an Ambientic-hosted agent runtime can drop in later without rework.
+- Harvest deterministic events plus local transcript mining. Model-assisted distillation is deferred to the backlog.
+- Ship Ambientic-native tools and proxied tool servers. Native app adapters are deferred to the backlog.
+
+### 1.6a — context assembler seam
+
+- Extract turn composition out of the hard-coded provider prompt string into a context assembler returning a provider-neutral system capsule and user text.
+- Keep output byte-identical at first so this lands as a pure refactor and unblocks the rest.
+- Add the three injection adapters: system-prompt flag for Claude Code, session parameters for Hermes ACP, and the verified mechanism for the Codex app server.
+- Confirm how the Codex app server accepts per-session tool servers before committing to per-session tokens for it; a global-config-only path needs a different token strategy and weaker session attribution.
+
+### 1.6b — memory store
+
+- Define tiers T1 episodic, T2 project, T3 semantic, plus the candidate store with confidence, provenance, and expiry.
+- Implement ranked local retrieval over project, goal, tier, type, and recency-decay filters.
+- Harvest deterministically from goal and task transitions, approved tool calls, files written, commits, provider switches, and recurring errors.
+- Add local transcript and provider-snapshot mining as a distinct opt-in from event harvesting.
+- Backfill T1 and T2 from existing local conversation history and known project roots.
+- Enforce the capsule token budget in code and surface it in the UI.
+
+### 1.6c — gateway
+
+- Run one long-lived local gateway with per-session tokens bound to session, provider, project root, goal, and permission scope.
+- Ship the native tool surface: recall, goal listing, project brief, remember-as-candidate, and task update as the first consequential write.
+- Add tool-server proxying so a server connected once in Ambientic is available to every agent on every provider under one permission policy and audit trail.
+- Route gateway permission requests through the existing approval boundary so provider-native and gateway approvals are indistinguishable to the user.
+- Journal every call and feed the journal to the harvester.
+- Stop passing an empty tool-server list on session creation.
+
+### 1.6d — memory review surface
+
+- Candidate queue with accept, edit, reject, and forget.
+- Provenance and supersession history per record.
+- A per-project preview of exactly what an agent will see before a session starts.
+
+### 1.6e — continuity
+
+- Make a new session's capsule the handover mechanism; keep the generated handover file as a portable export rather than the transfer path.
+
+Exit condition: a task started on any connected provider, in a known project, receives the active goal, its acceptance criteria, and the project card without transcript copying; recalls a decision it was never told; performs one approved consequential write through the gateway with an audit record; and a second provider resumes that task from memory alone. Capsule size stays inside budget and is identical across turns of a session.
+
 ## Phase 2 — portable workflow library
 
 - Add local template gallery, search, duplicate/fork, version history, and import/export.

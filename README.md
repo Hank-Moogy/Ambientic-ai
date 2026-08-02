@@ -24,7 +24,9 @@ The product should own the user experience and normalized session model, not pro
 
 ## Core roadmap
 
-The next product phase has three major user-facing systems built on one shared, versioned semantic action layer:
+The next product phase has three major user-facing systems built on one shared, versioned semantic action layer, over one provider-agnostic substrate:
+
+0. **Memory layer and tool gateway** — the substrate the rest assumes. Ambientic keeps a durable local memory of the user, their projects, and their decisions, pushes a small stable capsule into any provider's session, and lets the agent pull the rest through a single local gateway that also owns tool authentication, permissions, and audit. Specified in `PRODUCT.md` → *Memory layer and tool gateway*; sequenced in `NEXT_STEPS.md` → Phase 1.6.
 
 1. **Workflow Builder** — turn repetitive requests into inspectable, resumable sequences across agents, humans, Goals, artifacts, rate limits, and hardware. The first increment is a deterministic local runner and compact ordered-step editor with approvals, cancellation, idempotency, history, and restart recovery.
 2. **Universal Hardware Mapping** — configure arbitrary MIDI and keyboard devices through discovery, learn, layers, banks, modifiers, conditions, and output feedback while preserving native APC40 MKII behavior.
@@ -47,7 +49,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 5. Create a goal with its outcome, motivation, success criteria, priority, and target date; open it to manage human, agent, or mixed work on a milestone-aware Kanban board.
 6. See animated Codex, Claude Code, Hermes, and create-task pads alongside active, needs-input, total-thread, and APC hardware signals.
 7. Select a centered provider card to refresh its conversations and enter **Threads** on that provider's latest work with its filter already active.
-8. Browse the cross-provider thread mosaic, or start a managed local task from the dedicated create-task pad by choosing a provider and writing a first prompt. Ambientic creates a private task workspace automatically; selecting an existing project is optional.
+8. Browse the cross-provider thread mosaic, or start a managed local task from the dedicated create-task pad by choosing a provider, its model and reasoning level, a visible project context, and an optional first prompt. Ambientic defaults to the most recent safe real project; an empty private scratch workspace remains available explicitly.
 9. Press an APC40 MKII pad to open that exact live task in **Threads** and present its linked localhost, iOS, or Android preview; then hold that physical column's **Record Arm** button to speak and release it to transcribe and send.
 10. Use green running, red input-required, and blue idle pad feedback, or open the compact controller for previews, usage, connectors, and MIDI Learn mappings.
 
@@ -73,6 +75,8 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Activity-first Threads sidebar with a persistent local “last opened by you” signal: the latest user-interacted conversation stays first, recently updated/actionable conversations are highlighted under **Recent & active**, and dormant history is separated under **Earlier threads**. Provider and search filters apply consistently to both lanes.
 - Threads sidebar ordered globally by the latest known user or agent message across providers; project groups and conversations move together as activity changes, with compact logo filters for All, Codex, Claude Code, and Hermes.
 - Managed Codex conversations through Codex app-server, authenticated by the existing Codex installation.
+- Provider-native new-task tuning: Codex models and their supported reasoning levels come from the live app-server catalog, Claude exposes its supported model aliases and effort levels, and the chosen settings are applied to the first managed turn.
+- Project-aware task starts select the most recent safe real project visibly, keep recent-project shortcuts and the native folder browser, and seed the first turn with a bounded orientation instruction to read repository guidance, manifests, and working-tree state. Scratch workspaces remain explicit and local.
 - Managed Hermes conversations through Hermes ACP, including streamed messages, tool activity, cancellation, and permission requests.
 - Completed Hermes turns are reconciled against Hermes' local database so dropped ACP chunks cannot leave a partial answer in the transcript.
 - User and assistant messages are selectable, each message has a Copy action, and the thread header can copy the complete human-readable chat without tool payloads.
@@ -170,6 +174,25 @@ Hermes ACP ───────┘                                      │
 
 Provider quota adapters ──> current capacity ──> local consumption ledger ──> Overview history
 Provider billing APIs (future, optional) ────────────────────────────────────> currency spend
+
+Planned — memory layer and tool gateway (PRODUCT.md, NEXT_STEPS.md Phase 1.6):
+
+goal + task events ─┐
+approved tool calls ┼──> harvester ──> candidates ──> promotion ──> memory tiers
+local transcripts ──┘                                                  │
+                                                                       ▼
+                                                            context assembler
+                                                                       │
+                                        ┌──────────────────────────────┴──────┐
+                                   session capsule                    recall on demand
+                                        │                                     │
+      Claude system prompt ─┐           │                                     │
+      Hermes ACP session ───┼───────────┘                                     │
+      Codex app server ─────┘                                                 │
+                                                                              │
+      agent tool call ──> local gateway ──> policy ──> approval ──> adapter ──┘
+                              │                                        │
+                              └──> audit journal ──> harvester    proxied tool servers
 ```
 
 The Electron main process owns local system access, session state, connectors, previews, and MIDI. The renderer receives a narrow IPC surface through the preload script. Provider credentials remain in provider-owned local stores.
@@ -351,7 +374,7 @@ Last updated: 2026-07-30
 - [x] Project inspection is scope-bounded: home and filesystem roots are rejected for automatic Git/handover inspection, preventing Ambientic from traversing unrelated macOS-protected Music, Photos/Pictures, Documents, or Desktop collections.
 - [x] Automatic context enrichment excludes every macOS protected home collection; unsafe discovered sessions retain chat and lifecycle state but skip background Git/transcript inspection. New tasks never default to the home directory.
 - [x] Local repository identity normalized to AgentBase: the checkout lives at `/Users/samori/AgentBase`, handover instructions and project-label fixtures use that path, and the shipped product name remains Ambientic.
-- [x] Overview task creation now requires only a provider and optional first prompt. With no project selected, Ambientic creates a uniquely named private workspace under `~/.ambientic/workspaces`; **Use existing project** remains optional and offers safe recent-project shortcuts plus the native folder chooser.
+- [x] Overview task creation now follows provider → model/reasoning → project context → prompt. Codex choices come from its live model catalog, Claude choices use its native CLI aliases, the most recent safe real project is selected visibly, and an explicit scratch choice still creates a uniquely named private workspace under `~/.ambientic/workspaces`.
 - [x] Privacy boundary hardened: Ambientic no longer polls terminal windows with Apple Events, reads Chrome session files, or scans every localhost process/CWD in the background. Local previews are inferred from provider context; window focus, preview presentation, attachments, folder selection, microphone capture, and screenshots remain explicit user actions.
 - [x] Background provider checks now run from `~/.ambientic/provider-runtime` rather than the user’s home directory, preventing provider-owned CLI startup inspection from being attributed to Ambientic as Music, Photos, Documents, Desktop, or Downloads access.
 - [x] Automatic Claude usage refresh is passive: it reads the privacy-preserving status-line cache or local activity only. Claude’s interactive `/usage` collector runs solely after an explicit **Refresh usage** action or completed account connection, and always from Ambientic’s private runtime directory.
@@ -386,8 +409,22 @@ Last updated: 2026-07-30
 - [ ] Add the universal mapping foundation for arbitrary MIDI and keyboard devices: capability discovery, semantic actions, layers/banks/modifiers, input monitoring, feedback profiles, conflict detection, and portable setup bundles.
 - [ ] Build Ambientic Coach as an opt-in local signal and recommendation system with bounded evidence, source provenance, user feedback, and one-click draft workflows/mappings/goal tasks.
 - [ ] Add privacy-safe local template/profile import and export, then validate clean-profile sharing before designing community accounts, public discovery, ratings, or moderation.
-- [ ] Add provider-neutral AgentBase Goals tools through a small local MCP surface: compact goal listing, on-demand goal/task context, draft mutations, and explicit approval for consequential changes.
+- [ ] Extract turn composition into a provider-neutral context assembler, then inject a byte-stable session capsule through the Claude system prompt, Hermes ACP session parameters, and the verified Codex app-server mechanism.
+- [ ] Build the local memory store: episodic, project, and semantic tiers plus a candidate store with confidence, provenance, and expiry; ranked retrieval filtered by project, goal, tier, type, and recency.
+- [ ] Harvest memory from goal and task transitions, approved tool calls, files written, commits, and provider switches, with local transcript mining as a separate opt-in; backfill from existing local conversation history.
+- [ ] Run one long-lived local gateway with per-session tokens: provider-neutral recall, goal listing, project brief, remember-as-candidate, and task update through the existing approval boundary, with every call journaled and fed back to the harvester.
+- [ ] Proxy user-connected tool servers through the gateway so one connection reaches every agent on every provider under a single permission policy and audit trail.
+- [ ] Add the memory review surface: candidate queue, provenance and supersession history, and a per-project preview of what an agent will see before a session starts.
 - [ ] Link threads, runs, and artifacts to goal tasks without copying whole transcripts; add bounded task context capsules, execution evidence, provider/model metadata, and handover continuity.
+- [ ] Make the session capsule the cross-provider handover mechanism and keep the generated handover file as a portable export rather than the transfer path.
+
+### Deferred — memory and gateway backlog
+
+Specified in `PRODUCT.md` → *Deferred — memory and gateway backlog*. Designed for now, excluded from the first implementation.
+
+- [ ] Model-assisted memory distillation: opt-in, user-chosen provider, visible per-session token cost, model-derived records marked and never auto-promoted to durable memory, with a local-only mode that disables it.
+- [ ] Native app adapters for Mail, Calendar, Files, and Communication behind semantic capabilities, with Ambientic-owned OAuth, independent read/draft/consequential-write permission levels, and no success claimed without adapter confirmation.
+- [ ] Ambientic-hosted agent runtime for providers with no local CLI, behind the same context assembler and gateway interfaces, accepting direct API key custody and per-provider cost accounting.
 - [ ] Add agent task claims with expiring leases, idempotency keys, optimistic concurrency, and review-before-done defaults so multiple providers cannot silently duplicate or overwrite work.
 - [ ] Add explainable goal health and next-action reviews based on blockers, inactivity, target dates, and acceptance evidence rather than raw task-count gamification.
 - [ ] Replace terminal-owned Hermes and Kimi setup with guided provider-native browser/device-code ceremonies where their supported local protocols expose reliable completion callbacks.
@@ -404,6 +441,7 @@ Last updated: 2026-07-30
 
 ### Verification
 
+- 2026-08-01 project-aware task start: focused regressions verify live Codex model/effort normalization, first-turn model and reasoning propagation, bounded project-orientation context, recent-project default selection, explicit scratch fallback, and the renderer-to-main capability IPC. `npm run build` succeeds; the stable local-release gate passes all 148 tests, while the unfiltered suite retains its separately documented simulated Claude OAuth callback timeout (148/149 passing).
 - 2026-07-29 frictionless task start: focused regressions verify automatic private-workspace creation, safe slugging, protected/recent-project filtering, renderer-to-main IPC for recent projects, and a submit path that never forces the folder chooser. Explicit home/filesystem roots remain rejected.
 - 2026-07-29 installed-build restart fix: the roadmap store contained 31 tickets, but the visible app process predated the file update and retained its old in-memory Goals snapshot. The local installer now verifies that the exact installed process exits before copying or health-checking a release; it refuses replacement if a scoped termination cannot stop that process.
 - 2026-07-29 Goals density pass: the production renderer build verifies the compact goal header, progressive goal disclosure, title-only keyboard-selectable/draggable ticket cards, detailed ticket dialog, and removal of the redundant per-card status dropdown. The 31-ticket local roadmap remains persisted in the Goals store.

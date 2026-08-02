@@ -17,12 +17,40 @@ const COMPACTION_HEADER = 'You are resuming a conversation that exceeded the mod
 const COMPACTION_BUDGET = 24000
 const AMBIENTIC_CONTEXT = /<(?:ambientic|agentbase)-context\b[^>]*>[\s\S]*?<\/(?:ambientic|agentbase)-context>\s*/i
 const CHAT_MODES = new Set(['build', 'plan', 'ask'])
-// Aliases Claude Code's `--model` accepts, and the levels its `--effort` accepts.
-// Codex reuses the effort names for the ACP collaboration mode's reasoning_effort
-// (it tops out at 'high'), so the extra levels are simply never offered for it.
+// Aliases Claude Code's `--model` accepts, plus the union of effort labels the
+// supported provider surfaces currently expose. Codex's exact per-model subset
+// is discovered from app-server instead of being inferred from this set.
 const CLAUDE_MODELS = new Set(['opus', 'sonnet', 'haiku'])
-const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
+
+const CLAUDE_TASK_OPTIONS = {
+  provider: 'claude',
+  models: [
+    { id: '', label: 'Claude default', description: 'Use the model configured by Claude Code.', isDefault: true },
+    { id: 'opus', label: 'Opus', description: 'Highest-capability Claude model.' },
+    { id: 'sonnet', label: 'Sonnet', description: 'Balanced Claude model.' },
+    { id: 'haiku', label: 'Haiku', description: 'Fastest Claude model.' }
+  ],
+  efforts: [
+    { id: '', label: 'Claude default', description: 'Use Claude Code\'s configured effort.', isDefault: true },
+    ...['low', 'medium', 'high', 'xhigh', 'max'].map((id) => ({ id, label: id === 'xhigh' ? 'X-high' : `${id[0].toUpperCase()}${id.slice(1)}` }))
+  ]
+}
+
+const PROVIDER_DEFAULT_TASK_OPTIONS = {
+  codex: {
+    provider: 'codex',
+    models: [{ id: '', label: 'Codex default', description: 'Use the model configured by Codex.', isDefault: true }],
+    efforts: [{ id: '', label: 'Codex default', description: 'Use the model\'s default reasoning level.', isDefault: true }]
+  },
+  claude: CLAUDE_TASK_OPTIONS,
+  hermes: {
+    provider: 'hermes',
+    models: [{ id: '', label: 'Hermes default', description: 'Hermes selects its configured model.', isDefault: true }],
+    efforts: []
+  }
+}
 
 function taskWorkspaceSlug (prompt) {
   return String(prompt || '')
@@ -151,13 +179,22 @@ export function reconcileProviderMessage (messages, incoming) {
   return list
 }
 
-function normalizePromptOptions (options = {}) {
+function normalizePromptOptions (options = {}, provider = '') {
   const mode = CHAT_MODES.has(options.mode) ? options.mode : 'build'
   // Model and effort come from the renderer's composer. Validate against the
   // values the provider CLIs actually accept — an unknown one is dropped rather
   // than forwarded, so a stale UI can never make a turn fail to launch.
-  const model = CLAUDE_MODELS.has(options.model) ? options.model : ''
+  const requestedModel = String(options.model || '').trim()
+  const model = provider === 'claude'
+    ? (CLAUDE_MODELS.has(requestedModel) ? requestedModel : '')
+    : (provider === 'codex' && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(requestedModel) ? requestedModel : '')
   const effort = EFFORT_LEVELS.has(options.effort) ? options.effort : ''
+  const projectContext = options.projectContext && isAbsolute(String(options.projectContext.cwd || ''))
+    ? {
+        cwd: String(options.projectContext.cwd),
+        name: String(options.projectContext.name || basename(String(options.projectContext.cwd))).replace(/\s+/g, ' ').trim().slice(0, 100)
+      }
+    : null
   const attachments = []
   for (const item of Array.isArray(options.attachments) ? options.attachments.slice(0, 12) : []) {
     const path = String(item?.path || '')
@@ -171,20 +208,23 @@ function normalizePromptOptions (options = {}) {
       })
     } catch {}
   }
-  return { mode, attachments, model, effort }
+  return { mode, attachments, model, effort, projectContext }
 }
 
-function providerPrompt (text, { mode, attachments }) {
+function providerPrompt (text, { mode, attachments, projectContext }) {
   const guidance = mode === 'plan'
     ? 'Planning mode: inspect and reason, but do not modify files or run destructive commands. Return a concise implementation plan.'
     : mode === 'ask'
         ? 'Ask mode: answer and explain only. Do not modify files or run destructive commands.'
         : ''
-  if (!guidance && !attachments.length) return text
+  const project = projectContext
+    ? `Project context: you are working on ${projectContext.name || 'this project'} at ${projectContext.cwd}. Treat that directory as the project root. Before changing files, orient yourself by reading the nearest AGENTS.md and relevant README or project manifests, then inspect the current working tree. Do not treat this as an empty scratch workspace.`
+    : ''
+  if (!guidance && !attachments.length && !project) return text
   const paths = attachments.length
     ? `\nAttached local context:\n${attachments.map((item) => `- ${item.kind}: ${item.path}`).join('\n')}`
     : ''
-  return `<ambientic-context mode="${mode}">\n${guidance}${paths}\n</ambientic-context>\n${text}`
+  return `<ambientic-context mode="${mode}">\n${[guidance, project].filter(Boolean).join('\n')}${paths}\n</ambientic-context>\n${text}`
 }
 
 function codexInputs (text, attachments) {
@@ -622,7 +662,43 @@ export class WorkspaceService extends EventEmitter {
     }
   }
 
-  async codexCollaborationMode (rpc, requestedMode, requestedEffort = '') {
+  async taskOptions (provider) {
+    if (provider !== 'codex') return PROVIDER_DEFAULT_TASK_OPTIONS[provider] || { provider, models: [], efforts: [] }
+    try {
+      const rpc = await this.codexClient()
+      const models = []
+      let cursor = null
+      do {
+        const result = await rpc.request('model/list', { cursor, limit: 100, includeHidden: false }, 10_000)
+        models.push(...(Array.isArray(result?.data) ? result.data : []))
+        cursor = result?.nextCursor || null
+      } while (cursor && models.length < 300)
+      if (!models.length) return PROVIDER_DEFAULT_TASK_OPTIONS.codex
+      const normalized = models.map((item) => ({
+        id: String(item.model || item.id || ''),
+        label: String(item.displayName || item.model || item.id || 'Codex model'),
+        description: String(item.description || ''),
+        isDefault: Boolean(item.isDefault),
+        defaultEffort: String(item.defaultReasoningEffort || ''),
+        efforts: (Array.isArray(item.supportedReasoningEfforts) ? item.supportedReasoningEfforts : [])
+          .map((option) => ({
+            id: String(option.reasoningEffort || ''),
+            label: String(option.reasoningEffort || '').replace(/^./, (value) => value.toUpperCase()),
+            description: String(option.description || '')
+          }))
+          .filter((option) => option.id)
+      })).filter((item) => item.id)
+      return {
+        provider: 'codex',
+        models: normalized,
+        efforts: normalized.find((item) => item.isDefault)?.efforts || normalized[0]?.efforts || []
+      }
+    } catch {
+      return PROVIDER_DEFAULT_TASK_OPTIONS.codex
+    }
+  }
+
+  async codexCollaborationMode (rpc, requestedMode, requestedEffort = '', requestedModel = '') {
     if (this.codexCollaborationModes === undefined) {
       try {
         const result = await rpc.request('collaborationMode/list', {})
@@ -637,7 +713,7 @@ export class WorkspaceService extends EventEmitter {
     return {
       mode: desired,
       settings: {
-        model: preset.model,
+        model: requestedModel || preset.model,
         // The composer's effort choice overrides the preset's own reasoning_effort.
         reasoning_effort: requestedEffort || preset.reasoning_effort || null,
         developer_instructions: null
@@ -757,7 +833,12 @@ export class WorkspaceService extends EventEmitter {
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
     const snapshot = await this.read(id)
-    const promptOptions = normalizePromptOptions(options)
+    const promptOptions = normalizePromptOptions(options, session.agent)
+    const hasConversation = snapshot.messages.some((entry) => entry.role === 'user' || entry.role === 'assistant')
+    const cwd = String(session.cwd || '')
+    if (!promptOptions.projectContext && !hasConversation && !this.activeTurns.has(id) && cwd && canInspectProjectRoot(cwd) && cwd !== this.taskWorkspaceRoot && !cwd.startsWith(`${this.taskWorkspaceRoot}/`)) {
+      promptOptions.projectContext = { cwd, name: session.project || basename(cwd) }
+    }
     const pending = message('user', text, {
       pendingProvider: true,
       mode: promptOptions.mode,
@@ -774,9 +855,9 @@ export class WorkspaceService extends EventEmitter {
       const threadId = this.codexThreadId(session)
       await rpc.request('thread/resume', { threadId })
       const activeTurnId = this.activeTurns.get(id)
-      const collaborationMode = activeTurnId ? null : await this.codexCollaborationMode(rpc, promptOptions.mode, promptOptions.effort)
+      const collaborationMode = activeTurnId ? null : await this.codexCollaborationMode(rpc, promptOptions.mode, promptOptions.effort, promptOptions.model)
       const providerText = collaborationMode && promptOptions.mode !== 'ask'
-        ? text
+        ? (promptOptions.projectContext ? providerPrompt(text, { ...promptOptions, mode: 'build', attachments: [] }) : text)
         : providerPrompt(text, promptOptions)
       const input = codexInputs(providerText, promptOptions.attachments)
       if (activeTurnId) {
@@ -790,7 +871,12 @@ export class WorkspaceService extends EventEmitter {
           threadId,
           input,
           clientUserMessageId: pending.id,
-          ...(collaborationMode ? { collaborationMode } : {})
+          ...(collaborationMode
+            ? { collaborationMode }
+            : {
+                ...(promptOptions.model ? { model: promptOptions.model } : {}),
+                ...(promptOptions.effort ? { effort: promptOptions.effort } : {})
+              })
         })
         this.activeTurns.set(id, result.turn?.id || result.id)
       }
@@ -805,7 +891,7 @@ export class WorkspaceService extends EventEmitter {
     return this.emitSnapshot(snapshot)
   }
 
-  async create ({ provider, cwd, prompt }) {
+  async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build' }) {
     const requestedDirectory = String(cwd || '').trim()
     const workingDirectory = requestedDirectory || createPrivateTaskWorkspace(this.taskWorkspaceRoot, prompt)
     if (!isAbsolute(workingDirectory)) throw new Error('The selected project folder is not available.')
@@ -819,10 +905,12 @@ export class WorkspaceService extends EventEmitter {
     }
     if (provider === 'codex') {
       const rpc = await this.codexClient()
-      const result = await rpc.request('thread/start', { cwd: workingDirectory })
+      const normalized = normalizePromptOptions({ model, effort, mode }, provider)
+      const result = await rpc.request('thread/start', { cwd: workingDirectory, ...(normalized.model ? { model: normalized.model } : {}) })
       const thread = result.thread
       this.store.ingest({ event: 'session_start', session_id: thread.id, agent: 'codex', project: basename(workingDirectory), cwd: workingDirectory, summary: thread.name || thread.preview || 'New Codex task' })
-      if (prompt) await this.send(thread.id, prompt)
+      if (prompt) await this.send(thread.id, prompt, { ...normalized, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
+      else if (normalized.effort) await rpc.request('thread/settings/update', { threadId: thread.id, effort: normalized.effort })
       return thread.id
     }
     if (provider === 'hermes') {
@@ -830,14 +918,14 @@ export class WorkspaceService extends EventEmitter {
       const result = await rpc.request('session/new', { cwd: workingDirectory, mcpServers: [] })
       const id = result.sessionId
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'hermes', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Hermes task' })
-      if (prompt) await this.send(id, prompt)
+      if (prompt) await this.send(id, prompt, { mode, model, effort, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       return id
     }
     if (provider === 'claude') {
       if (this.connector('claude')?.manageable === false) throw new Error('Claude Code is not logged in. Run `claude /login` in a terminal, then refresh Ambientic connectors.')
       const id = randomUUID()
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'claude', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Claude task' })
-      if (prompt) await this.send(id, prompt)
+      if (prompt) await this.send(id, prompt, { mode, model, effort, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       return id
     }
     throw new Error('Choose Codex, Claude Code, or Hermes.')

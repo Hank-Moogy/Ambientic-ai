@@ -1,7 +1,7 @@
 {
-  "version": null,
-  "commit": "development",
-  "branch": "local",
-  "builtAt": null,
-  "dirty": true
+  "version": "0.8.1",
+  "commit": "f50bb222e8c38c1fbf08fe9b0d76271a9b2f2368",
+  "branch": "agent/workflow-studio",
+  "builtAt": "2026-07-30T07:09:35.524Z",
+  "dirty": false
 }

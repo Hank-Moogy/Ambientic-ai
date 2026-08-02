@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('controller', {
   chooseThreadContext: () => ipcRenderer.invoke('choose-thread-context'),
   chooseProjectFolder: () => ipcRenderer.invoke('choose-project-folder'),
   getRecentProjects: () => ipcRenderer.invoke('get-recent-projects'),
+  getProviderTaskOptions: (provider) => ipcRenderer.invoke('get-provider-task-options', provider),
   sendThreadPrompt: (id, text, options = {}) => ipcRenderer.invoke('send-thread-prompt', id, text, options),
   interruptThread: (id) => ipcRenderer.invoke('interrupt-thread', id),
   createManagedThread: (options) => ipcRenderer.invoke('create-managed-thread', options),

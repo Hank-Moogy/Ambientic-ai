@@ -23,6 +23,64 @@ test('creates a private task workspace when no project is selected', () => {
   }
 })
 
+test('reads Codex models and their supported reasoning levels from the provider', async () => {
+  const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
+  service.codexClient = async () => ({
+    request: async (method) => {
+      assert.equal(method, 'model/list')
+      return {
+        data: [{
+          id: 'model-id',
+          model: 'gpt-test',
+          displayName: 'GPT Test',
+          description: 'Test model',
+          isDefault: true,
+          defaultReasoningEffort: 'high',
+          supportedReasoningEfforts: [
+            { reasoningEffort: 'medium', description: 'Balanced' },
+            { reasoningEffort: 'high', description: 'Deeper' }
+          ]
+        }],
+        nextCursor: null
+      }
+    }
+  })
+
+  const options = await service.taskOptions('codex')
+
+  assert.equal(options.models[0].id, 'gpt-test')
+  assert.equal(options.models[0].defaultEffort, 'high')
+  assert.deepEqual(options.models[0].efforts.map((item) => item.id), ['medium', 'high'])
+})
+
+test('creates a Codex task with its chosen model, effort, and explicit project context', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-project-'))
+  try {
+    const requests = []
+    let sent = null
+    const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
+    service.codexClient = async () => ({
+      request: async (method, params) => {
+        requests.push({ method, params })
+        if (method === 'thread/start') return { thread: { id: 'new-thread' } }
+        return {}
+      }
+    })
+    service.send = async (...args) => { sent = args }
+
+    const id = await service.create({ provider: 'codex', cwd: directory, prompt: 'Fix the task flow.', model: 'gpt-test', effort: 'high' })
+
+    assert.equal(id, 'new-thread')
+    assert.equal(requests[0].params.model, 'gpt-test')
+    assert.equal(sent[0], 'new-thread')
+    assert.equal(sent[2].model, 'gpt-test')
+    assert.equal(sent[2].effort, 'high')
+    assert.deepEqual(sent[2].projectContext, { cwd: directory, name: directory.split('/').at(-1) })
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('offers real recent projects but not private task workspaces or protected folders', () => {
   const home = homedir()
   const taskWorkspaceRoot = join(home, '.ambientic', 'workspaces')
@@ -298,13 +356,17 @@ test('sends Codex folders as native mentions and uses its native plan preset', a
 
   await service.send(session.id, 'Review this folder.', {
     mode: 'plan',
+    model: 'gpt-test',
+    effort: 'high',
     attachments: [{ path: '/tmp' }]
   })
 
   const start = requests.find((entry) => entry.method === 'turn/start').params
   assert.deepEqual(start.input[1], { type: 'mention', name: 'tmp', path: '/tmp' })
   assert.equal(start.collaborationMode.mode, 'plan')
-  assert.equal(start.collaborationMode.settings.model, 'test-model')
+  assert.equal(start.collaborationMode.settings.model, 'gpt-test')
+  assert.equal(start.collaborationMode.settings.reasoning_effort, 'high')
+  assert.match(start.input[0].text, /Project context: you are working on tmp at \/tmp/)
   assert.ok(start.clientUserMessageId)
 })
 
