@@ -77,7 +77,6 @@
     "mac": {
       "icon": "build/ambientic-icon-1024.png",
       "category": "public.app-category.developer-tools",
-      "identity": "Apple Development: samori.osei@gmail.com (N72VQSKU6T)",
       "type": "development",
       "target": [
         "dmg"

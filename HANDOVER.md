@@ -160,8 +160,14 @@ with no identity it falls back to the binary's cdhash, which changes on **every
 build**. Each local release therefore looked like a brand-new app and silently
 discarded every permission previously granted.
 
-Fixed by setting `build.mac.identity` to the machine's one available certificate
-plus `"type": "development"`. Verified on a fresh `npm run pack`:
+Fixed by making `release:local` discover the machine's available Apple
+Development or Developer ID certificate (with `AMBIENTIC_SIGNING_IDENTITY` as an
+explicit override) while keeping only `"type": "development"` in shared build
+configuration. The release pipeline now rejects ad-hoc output before install
+instead of overwriting the stable package signature. Packaging and signing are
+separate: the official Electron signer excludes the duplicate
+`Versions/Current` framework traversal that otherwise invalidates sealed
+resources on this macOS/tooling combination. Verified on a fresh pack:
 `Authority=Apple Development: samori.osei@gmail.com`, `TeamIdentifier=K78PT544J5`,
 chain to Apple Root CA, `codesign --verify --deep --strict` clean.
 
@@ -522,3 +528,12 @@ The Electron main process owns local system access, session state, connectors, p
 ## First action
 
 Run `git status --short`, read the directly relevant files, and continue the current objective with the smallest verifiable increment.
+
+## 2026-08-02 — provider-memory onboarding
+
+- Added a fifth onboarding step after provider connection that explicitly asks permission to build the user's local starting memory from connected Claude Code, Codex, and Hermes runtimes.
+- Provider exports run in isolated Ask-mode sessions: no Ambientic capsule, MCP tools, automatic transcript learning, or goal reconciliation can contaminate the result.
+- Safe results are parsed into bounded structured records, secret-shaped and sensitive personal claims are rejected, and the user chooses exactly which records become active before seeing a deterministic high-level summary.
+- Added main/preload lifecycle APIs and live progress events, deterministic service tests, empty-selection behavior, and replay reset support.
+- Moved Memory from the primary workspace navigation to Settings → Memory and recorded the consent/review/empty-result visual rules in `ART_DIRECTION.md`.
+- The renderer and targeted onboarding/context tests pass. The in-app browser backend was unavailable for screenshot QA in this session, so an installed-app human pass through Settings → Replay onboarding remains required after packaging.

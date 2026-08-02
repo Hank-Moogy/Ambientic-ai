@@ -29,6 +29,7 @@ import { createGoalsRepository, createWorkflowsRepository } from './repositories
 import { createContextStore } from './context-store.mjs'
 import { createContextEngine } from './context-engine.mjs'
 import { createCapabilityGateway } from './capability-gateway.mjs'
+import { createMemoryBootstrapService } from './memory-bootstrap-service.mjs'
 
 // Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
 // Finder-launched app otherwise only has launchd's minimal PATH, which lacks
@@ -105,6 +106,7 @@ let workflows = null
 let contextStore = null
 let contextEngine = null
 let capabilityGateway = null
+let memoryBootstrap = null
 let contextStartupError = ''
 let pendingWorkspaceSessionId = ''
 let workspaceListTimer = null
@@ -716,6 +718,10 @@ ipcMain.handle('memory-remember', (_event, command = {}) => {
 })
 ipcMain.handle('memory-forget', (_event, id) => contextEngine?.forget(String(id || '')) || false)
 ipcMain.handle('memory-resolve-conflict', (_event, id, resolution = {}) => contextEngine?.resolveConflict(String(id || ''), resolution))
+ipcMain.handle('memory-bootstrap-status', () => memoryBootstrap?.getState() || { status: 'unavailable', providers: [], items: [], summary: '', error: 'Memory setup is not available.' })
+ipcMain.handle('memory-bootstrap-start', (_event, options = {}) => requireContextService(memoryBootstrap).start(options))
+ipcMain.handle('memory-bootstrap-commit', (_event, options = {}) => requireContextService(memoryBootstrap).commit(options))
+ipcMain.handle('memory-bootstrap-reset', () => memoryBootstrap?.reset() || { status: 'idle', providers: [], items: [] })
 ipcMain.handle('tools-list-connections', () => ({ connections: requireContextService(capabilityGateway).listConnections() }))
 ipcMain.handle('tools-upsert-connection', (_event, connection = {}) => requireContextService(capabilityGateway).upsertConnection(connection))
 ipcMain.handle('tools-test-connection', (_event, id) => requireContextService(capabilityGateway).testConnection(String(id || '')))
@@ -747,17 +753,19 @@ ipcMain.handle('dismiss-provider-auth', (_event, provider) => providerAuthState.
 ipcMain.handle('get-onboarding', () => {
   const value = loadPrefs().onboarding
   return value && typeof value === 'object'
-    ? { completed: false, step: 0, name: '', memoryConsent: false, ...value }
-    : { completed: false, step: 0, name: '', memoryConsent: false }
+    ? { completed: false, step: 0, name: '', memoryConsent: false, providerMemoryConsent: false, providerMemoryImportedAt: null, ...value }
+    : { completed: false, step: 0, name: '', memoryConsent: false, providerMemoryConsent: false, providerMemoryImportedAt: null }
 })
 ipcMain.handle('save-onboarding', (_event, patch = {}) => {
   const prefs = loadPrefs()
   const current = prefs.onboarding && typeof prefs.onboarding === 'object' ? prefs.onboarding : {}
   const onboarding = {
     completed: Boolean(patch.completed ?? current.completed),
-    step: Math.max(0, Math.min(3, Number(patch.step ?? current.step) || 0)),
+    step: Math.max(0, Math.min(4, Number(patch.step ?? current.step) || 0)),
     name: String(patch.name ?? current.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 48),
     memoryConsent: Boolean(patch.memoryConsent ?? current.memoryConsent),
+    providerMemoryConsent: Boolean(patch.providerMemoryConsent ?? current.providerMemoryConsent),
+    providerMemoryImportedAt: patch.providerMemoryImportedAt ?? current.providerMemoryImportedAt ?? null,
     completedAt: patch.completed ? Date.now() : (current.completedAt || null)
   }
   savePrefs({ ...prefs, onboarding })
@@ -765,8 +773,9 @@ ipcMain.handle('save-onboarding', (_event, patch = {}) => {
 })
 ipcMain.handle('reset-onboarding', () => {
   const prefs = loadPrefs()
-  const onboarding = { completed: false, step: 0, name: '', memoryConsent: false }
+  const onboarding = { completed: false, step: 0, name: '', memoryConsent: false, providerMemoryConsent: false, providerMemoryImportedAt: null }
   savePrefs({ ...prefs, onboarding })
+  try { memoryBootstrap?.reset() } catch {}
   return onboarding
 })
 ipcMain.handle('get-handovers', () => handovers?.list() || [])
@@ -1304,6 +1313,10 @@ app.whenReady().then(() => {
     gatewayExecutable: process.execPath,
     gatewayShimPath: app.isPackaged ? join(process.resourcesPath, 'ambientic-mcp-shim.mjs') : join(app.getAppPath(), 'resources', 'ambientic-mcp-shim.mjs')
   })
+  if (contextEngine) {
+    memoryBootstrap = createMemoryBootstrapService({ workspace, contextEngine, contextStore, connectors: () => connectors })
+    memoryBootstrap.on('change', (state) => sendToWindows('memory-bootstrap', state))
+  }
   workflows = createWorkflowsRepository({
     file: join(app.getPath('userData'), 'workflows.json'),
     connectors: () => connectors,

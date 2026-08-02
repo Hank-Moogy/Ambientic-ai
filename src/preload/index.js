@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld('controller', {
   getOnboarding: () => ipcRenderer.invoke('get-onboarding'),
   saveOnboarding: (patch) => ipcRenderer.invoke('save-onboarding', patch),
   resetOnboarding: () => ipcRenderer.invoke('reset-onboarding'),
+  getMemoryBootstrap: () => ipcRenderer.invoke('memory-bootstrap-status'),
+  startMemoryBootstrap: (options = {}) => ipcRenderer.invoke('memory-bootstrap-start', options),
+  commitMemoryBootstrap: (options = {}) => ipcRenderer.invoke('memory-bootstrap-commit', options),
+  resetMemoryBootstrap: () => ipcRenderer.invoke('memory-bootstrap-reset'),
   getHandovers: () => ipcRenderer.invoke('get-handovers'),
   generateHandover: (sessionId) => ipcRenderer.invoke('generate-handover', sessionId),
   continueHandover: (sessionId, targetProvider) => ipcRenderer.invoke('continue-handover', sessionId, targetProvider),
@@ -133,6 +137,11 @@ contextBridge.exposeInMainWorld('controller', {
     ipcRenderer.on('provider-auth', handler)
     return () => ipcRenderer.removeListener('provider-auth', handler)
   },
+  onMemoryBootstrap: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('memory-bootstrap', handler)
+    return () => ipcRenderer.removeListener('memory-bootstrap', handler)
+  },
   onHandovers: (cb) => {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('handovers', handler)
@@ -187,7 +196,11 @@ contextBridge.exposeInMainWorld('ambientic', {
     search: (options = {}) => ipcRenderer.invoke('memory-search', options),
     remember: (command = {}) => ipcRenderer.invoke('memory-remember', command),
     forget: (id) => ipcRenderer.invoke('memory-forget', id),
-    resolveConflict: (id, resolution = {}) => ipcRenderer.invoke('memory-resolve-conflict', id, resolution)
+    resolveConflict: (id, resolution = {}) => ipcRenderer.invoke('memory-resolve-conflict', id, resolution),
+    bootstrapStatus: () => ipcRenderer.invoke('memory-bootstrap-status'),
+    bootstrapStart: (options = {}) => ipcRenderer.invoke('memory-bootstrap-start', options),
+    bootstrapCommit: (options = {}) => ipcRenderer.invoke('memory-bootstrap-commit', options),
+    bootstrapReset: () => ipcRenderer.invoke('memory-bootstrap-reset')
   },
   tools: {
     listConnections: () => ipcRenderer.invoke('tools-list-connections'),

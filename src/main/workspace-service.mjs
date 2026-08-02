@@ -422,6 +422,9 @@ export class WorkspaceService extends EventEmitter {
     this.contextArtifactRoot = contextArtifactRoot
     this.spawnProcess = spawnProcess
     this.gatewayRuntime = new Map()
+    // Memory-export sessions are deliberately isolated from Ambientic's own
+    // context so an import can never echo the local capsule back into itself.
+    this.contextSuppressedSessions = new Set()
   }
 
   connector (id) { return this.getConnectors().find((item) => item.id === id) }
@@ -684,13 +687,15 @@ export class WorkspaceService extends EventEmitter {
       } else if (session.agent === 'hermes') {
         snapshot.messages = await this.hermesMessages(session.id)
       }
-      const context = this.ensureContext(session)
-      if (context?.binding) snapshot.contextBinding = context.binding
-      this.contextEngine?.observeTurn({
-        provider: session.agent,
-        providerSessionId: this.providerSessionId(session),
-        messages: snapshot.messages.filter((entry) => ['user', 'assistant'].includes(entry.role))
-      })
+      if (!this.contextSuppressedSessions.has(id)) {
+        const context = this.ensureContext(session)
+        if (context?.binding) snapshot.contextBinding = context.binding
+        this.contextEngine?.observeTurn({
+          provider: session.agent,
+          providerSessionId: this.providerSessionId(session),
+          messages: snapshot.messages.filter((entry) => ['user', 'assistant'].includes(entry.role))
+        })
+      }
       snapshot.error = ''
     } catch (error) {
       snapshot.error = error.message
@@ -964,11 +969,13 @@ export class WorkspaceService extends EventEmitter {
     if (!this.history.size) await this.list()
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
+    const contextSuppressed = Boolean(options.skipAmbienticContext || this.contextSuppressedSessions.has(id))
+    if (contextSuppressed) this.contextSuppressedSessions.add(id)
     const snapshot = await this.read(id)
     const promptOptions = normalizePromptOptions(options, session.agent)
-    const context = this.ensureContext(session, { prompt: text, contextBinding: options.contextBinding || {} })
+    const context = contextSuppressed ? null : this.ensureContext(session, { prompt: text, contextBinding: options.contextBinding || {} })
     const startsTurn = !this.activeTurns.has(id)
-    if (startsTurn) this.contextEngine?.beginGoalReconciliation?.(session.agent, this.providerSessionId(session))
+    if (startsTurn && !contextSuppressed) this.contextEngine?.beginGoalReconciliation?.(session.agent, this.providerSessionId(session))
     const hasConversation = snapshot.messages.some((entry) => entry.role === 'user' || entry.role === 'assistant')
     const cwd = String(session.cwd || '')
     if (!promptOptions.projectContext && !hasConversation && !this.activeTurns.has(id) && cwd && canInspectProjectRoot(cwd) && cwd !== this.taskWorkspaceRoot && !cwd.startsWith(`${this.taskWorkspaceRoot}/`)) {
@@ -1033,7 +1040,7 @@ export class WorkspaceService extends EventEmitter {
     return this.emitSnapshot(snapshot)
   }
 
-  async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build', contextBinding = {} }) {
+  async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build', contextBinding = {}, skipAmbienticContext = false }) {
     const requestedDirectory = String(cwd || '').trim()
     const workingDirectory = requestedDirectory || createPrivateTaskWorkspace(this.taskWorkspaceRoot, prompt)
     if (!isAbsolute(workingDirectory)) throw new Error('The selected project folder is not available.')
@@ -1048,7 +1055,7 @@ export class WorkspaceService extends EventEmitter {
     if (provider === 'codex') {
       const rpc = await this.codexClient()
       const normalized = normalizePromptOptions({ model, effort, mode }, provider)
-      const context = this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
+      const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
       const result = await rpc.request('thread/start', {
         cwd: workingDirectory,
         ...(normalized.model ? { model: normalized.model } : {}),
@@ -1056,28 +1063,31 @@ export class WorkspaceService extends EventEmitter {
         ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
       })
       const thread = result.thread
+      if (skipAmbienticContext) this.contextSuppressedSessions.add(thread.id)
       if (context?.binding) this.contextFiles(this.contextEngine.bindProviderSession(context.binding.id, thread.id))
       this.store.ingest({ event: 'session_start', session_id: thread.id, agent: 'codex', project: basename(workingDirectory), cwd: workingDirectory, summary: thread.name || thread.preview || 'New Codex task' })
-      if (prompt) await this.send(thread.id, prompt, { ...normalized, contextBinding, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
+      if (prompt) await this.send(thread.id, prompt, { ...normalized, contextBinding, skipAmbienticContext, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       else if (normalized.effort) await rpc.request('thread/settings/update', { threadId: thread.id, effort: normalized.effort })
       return thread.id
     }
     if (provider === 'hermes') {
       const rpc = await this.hermesClient()
-      const context = this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
+      const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
       const result = await rpc.request('session/new', { cwd: workingDirectory, mcpServers: context?.mcp ? [{ name: 'ambientic', ...context.mcp }] : [] })
       const id = result.sessionId
+      if (skipAmbienticContext) this.contextSuppressedSessions.add(id)
       if (context?.binding) this.contextFiles(this.contextEngine.bindProviderSession(context.binding.id, id))
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'hermes', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Hermes task' })
-      if (prompt) await this.send(id, prompt, { mode, model, effort, contextBinding, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
+      if (prompt) await this.send(id, prompt, { mode, model, effort, contextBinding, skipAmbienticContext, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       return id
     }
     if (provider === 'claude') {
       if (this.connector('claude')?.manageable === false) throw new Error('Claude Code is not logged in. Run `claude /login` in a terminal, then refresh Ambientic connectors.')
       const id = randomUUID()
-      this.prepareContext({ provider, providerSessionId: id, cwd: workingDirectory, prompt, contextBinding })
+      if (skipAmbienticContext) this.contextSuppressedSessions.add(id)
+      else this.prepareContext({ provider, providerSessionId: id, cwd: workingDirectory, prompt, contextBinding })
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'claude', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Claude task' })
-      if (prompt) await this.send(id, prompt, { mode, model, effort, contextBinding, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
+      if (prompt) await this.send(id, prompt, { mode, model, effort, contextBinding, skipAmbienticContext, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       return id
     }
     throw new Error('Choose Codex, Claude Code, or Hermes.')
@@ -1094,7 +1104,7 @@ export class WorkspaceService extends EventEmitter {
     const started = Boolean(this.claudeTranscriptFor(session))
     const permissionMode = mode === 'build' ? 'acceptEdits' : 'plan'
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', permissionMode]
-    context ||= this.ensureContext(session, { prompt })
+    if (!this.contextSuppressedSessions.has(session.id)) context ||= this.ensureContext(session, { prompt })
     if (context?.capsulePath) args.push('--append-system-prompt-file', context.capsulePath)
     if (context?.mcpConfigPath) args.push('--mcp-config', context.mcpConfigPath, '--strict-mcp-config')
     // Only forward these when the user picked something; omitting them lets
@@ -1329,12 +1339,14 @@ export class WorkspaceService extends EventEmitter {
       }
       for (const entry of snapshot.messages) delete entry.streaming
       snapshot.updatedAt = Date.now()
-      this.contextEngine?.observeTurn({
-        provider: session?.agent,
-        providerSessionId: session ? this.providerSessionId(session) : id,
-        messages: snapshot.messages.filter((entry) => ['user', 'assistant'].includes(entry.role))
-      })
-      this.contextEngine?.finishGoalReconciliation?.(session?.agent, session ? this.providerSessionId(session) : id)
+      if (!this.contextSuppressedSessions.has(id)) {
+        this.contextEngine?.observeTurn({
+          provider: session?.agent,
+          providerSessionId: session ? this.providerSessionId(session) : id,
+          messages: snapshot.messages.filter((entry) => ['user', 'assistant'].includes(entry.role))
+        })
+        this.contextEngine?.finishGoalReconciliation?.(session?.agent, session ? this.providerSessionId(session) : id)
+      }
       this.ingestLifecycle(id, this.hasPendingApproval(id) || awaitingReply ? 'notification' : 'stop_idle')
       this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true })
     }

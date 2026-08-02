@@ -131,7 +131,7 @@ An action definition declares its identifier, schema, required capabilities, per
 
 This is the provider-agnostic substrate. Everything else in the product — Goals, workflows, Coach, continuity — reads and writes through it.
 
-Implementation status: the local SQLite/FTS5 kernel, frozen capsules, deterministic turn observation, scoped gateway tokens, native tools, generic MCP proxying, Claude/Codex/Hermes injection, Memory workspace, launch/thread context UX, Apps & Tools, and approval/audit presentation are implemented. The Electron 33 native rebuild, archive unpacking, and packaged-app SQLite/FTS5 smoke pass. Release validation still requires one real external MCP server and the full three-provider scenario.
+Implementation status: the local SQLite/FTS5 kernel, frozen capsules, deterministic turn observation, scoped gateway tokens, native tools, generic MCP proxying, Claude/Codex/Hermes injection, Settings → Memory workspace, optional reviewed provider-memory bootstrap, launch/thread context UX, Apps & Tools, and approval/audit presentation are implemented. The Electron 33 native rebuild, archive unpacking, and packaged-app SQLite/FTS5 smoke pass. Release validation still requires one real external MCP server and the full three-provider scenario.
 
 Ambientic remains the operating layer above provider-native agents. It does not become an agent runtime of its own in this release.
 
@@ -203,6 +203,8 @@ Promotion rules:
 - Forgetting removes content and its search rows, retaining only a content-free audit tombstone.
 
 Ordinary learning appears in a quiet activity feed with an unread badge. Only conflicts and sensitive candidates interrupt the user.
+
+Onboarding offers one explicit provider-memory bootstrap after account connection. When accepted, Ambientic starts isolated Ask-mode sessions against connected Claude Code, Codex, and Hermes runtimes, requesting only durable context already available through their native memory or standing instructions. These sessions receive no Ambientic capsule, tools, automatic learning, or goal reconciliation, so local memory cannot be echoed back as a provider import. Secret-shaped and sensitive personal assertions are filtered before a review screen; only checked records are activated. A deterministic high-level summary reports the result, including the normal empty case when a CLI exposes no provider memory. The feature is replayable from Settings without changing provider-owned authentication.
 
 Promotion, Coach evidence, and recommendation ranking are the same mechanism and must not be built twice.
 

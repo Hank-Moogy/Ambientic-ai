@@ -47,7 +47,7 @@ export function looksSecret (value) {
   return redactSecrets(value).sensitive
 }
 
-function looksSensitivePersonal (value) {
+export function looksSensitivePersonal (value) {
   return /\b(?:medical|diagnos(?:is|ed)|disability|religion|religious|politic(?:s|al)|sexual orientation|ethnicity|race|pregnan(?:t|cy)|mental health|therapy|bankruptcy|criminal record)\b/i.test(String(value || ''))
 }
 

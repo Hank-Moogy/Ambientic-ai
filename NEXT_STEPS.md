@@ -90,6 +90,8 @@ Neither lane rewrites or discards unrelated existing user changes. The working t
 
 **C3 — context kernel.** Projects, session bindings, inference, frozen capsule generation, hashing, token budgeting, and provenance. Normalize visible provider turns after onboarding consent. Deterministic candidate creation, corroboration, promotion, expiry, conflicts, supersession, and forgetting. Completed-turn observation is the durability path; session-end and pre-compression events are enrichment only.
 
+Implemented follow-up: first-run setup now offers an explicit, reviewed provider-memory bootstrap. Connected Claude Code, Codex, and Hermes runtimes are queried through isolated Ask-mode sessions with Ambientic context, tools, transcript learning, and goal reconciliation suppressed. Safety filtering runs before review, only selected records activate, and Memory now lives under Settings with onboarding replay as the repeatable test entrance.
+
 **C4 — gateway.** One long-lived gateway plus the stdio shim. Per-session capability tokens passed only into the shim's environment, persisted as hashes, bound to provider, session, project, goal, task, permissions, and expiry, and revoked on removal, disconnect, permission change, or reauthorization. The six native tools, the authorization policy, approvals, audit, cancellation, and idempotency.
 
 Implemented follow-up: linked goal/task sessions now use a systematic closeout protocol on every meaningful work turn. Agents must read the current goal, update only tickets justified by evidence, and explicitly reconcile; missing reconciliation is audited, and cross-goal ticket writes are rejected.

@@ -106,7 +106,9 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - One capability-token-scoped Ambientic MCP gateway shared by Claude, Codex, and Hermes, exposing context, recall, remember, Goals, task updates, and capability search/invoke without giving agents external credentials.
 - Systematic goal closeout for linked work: every meaningful agent turn receives a required read → evidence check → ticket update → reconciliation protocol. Ambientic scopes writes to the linked goal and records a visible missing-closeout event when an agent skips the protocol; it never guesses completion on the agent's behalf.
 - Provider-native context injection: Claude append-system-prompt files plus strict MCP config, Codex developer instructions plus per-thread MCP configuration, and Hermes MCP session configuration plus a first-message capsule envelope.
-- Top-level Memory workspace, inferred context in New Agent, inspectable and correctable thread bindings, audit filters, onboarding consent, and per-project/provider transcript exclusions.
+- Local releases discover an installed Apple Development or Developer ID certificate (or use `AMBIENTIC_SIGNING_IDENTITY`) and reject ad-hoc output before installation, preserving macOS permission continuity without hard-coding one developer's identity in shared build configuration.
+- Settings → Memory workspace, inferred context in New Agent, inspectable and correctable thread bindings, audit filters, onboarding consent, and per-project/provider transcript exclusions.
+- Optional provider-memory bootstrap after account connection: Ambientic asks each connected native agent runtime for durable context it already has, with Ambientic context/tools disabled for that isolated export. Secret-shaped and sensitive personal content is rejected, the user reviews every item, and a short local summary closes the step.
 - [ ] Agent-assisted workflow authoring with an explicit connected-provider selector, validated structured manifests, preview-before-save, and the existing deterministic parser retained as an offline fallback.
 - [ ] Agent-facing workflow tools for permission-scoped create, inspect, update, validate, and run operations.
 - [x] Settings → Apps & Tools, separate from AI Providers, with generic stdio/Streamable HTTP MCP connections, capability permissions, health, dependents, and Connect/Test/Reconnect/Disable/Disconnect controls.
@@ -135,7 +137,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 
 The current prerelease target is **Ambientic 0.8.1 alpha 1** for Apple-silicon Macs (`arm64`). The distributable is a ZIP containing `Ambientic.app`.
 
-This build is ad-hoc signed and integrity-verified, but it is not Apple-notarized yet. A tester may need to move `Ambientic.app` into Applications, Control-click it, choose **Open**, and confirm the macOS warning. Accessibility is needed for terminal focus; microphone and screen-recording permissions are only requested when their corresponding hardware or preview features are used.
+Personal local releases are signed with the developer's installed Apple Development certificate so macOS permission grants survive rebuilds. A build shared with another Mac still requires a Developer ID certificate and notarization; a development signature is not a public distribution mechanism. Accessibility is needed for terminal focus; microphone and screen-recording permissions are requested only when their corresponding hardware or preview features are used.
 
 The local release gate runs the complete test suite by default. During the known fake-Claude-CLI OAuth callback timeout investigation, a developer may explicitly set `AMBIENTIC_SKIP_CLAUDE_OAUTH_TEST=1`; this skips only that named simulator test while retaining the other Claude authentication tests, packaging checks, signature verification, installed-manifest check, restart, and health check. This override is for a user-approved local installation only and must not be used for public releases.
 
@@ -154,7 +156,7 @@ Only the integration worktree installs the shared app in `/Applications`. Once t
 npm run release:local
 ```
 
-That command takes an exclusive local release lock, refuses uncommitted input, records the Git commit, branch, version, build time, and clean-tree status, runs the complete tests and packaging flow, applies and verifies a fast ad-hoc seal for local macOS use, validates the packaged manifest, replaces `/Applications/Ambientic.app`, restarts it, and waits for the local health endpoint. Settings shows the installed version, short commit, branch, and build time so an agent or tester can identify the running build without guessing.
+That command takes an exclusive local release lock, refuses uncommitted input, records the Git commit, branch, version, build time, and clean-tree status, runs the complete tests and packaging flow, discovers a stable local code-signing identity, rejects ad-hoc output, validates the packaged manifest, replaces `/Applications/Ambientic.app`, restarts it, and waits for the local health endpoint. Settings shows the installed version, short commit, branch, and build time so an agent or tester can identify the running build without guessing.
 
 This is the personal-development release lane. Public beta releases still require signing/notarization, update distribution, and a release branch policy.
 
@@ -254,7 +256,7 @@ Last updated: 2026-07-30
 - [x] Six-column milestone-aware Kanban board with human, agent, and mixed ownership, task context, definitions of done, drag-and-drop moves, and status-selector accessibility.
 - [x] Goals renderer/main-process IPC contract plus real-time multi-window synchronization.
 
-- [x] Canonical clean-tree `npm run release:local` workflow with a cross-process lock, tests, packaging, verified local ad-hoc sealing, manifest verification, `/Applications` installation, restart, and health check.
+- [x] Canonical clean-tree `npm run release:local` workflow with a cross-process lock, tests, packaging, stable local development signing, explicit ad-hoc rejection, manifest verification, `/Applications` installation, restart, and health check.
 - [x] Local releases now wait for the exact installed Ambientic process to exit and use a narrowly scoped termination fallback before replacing the bundle, preventing a stale process from masquerading as the newly installed build.
 - [x] Installed build identity (version, Git commit, and build time) exposed in Settings for reliable Claude/Codex handoff and testing.
 - [x] Floating Electron session grid and menu-bar state.
@@ -362,7 +364,7 @@ Last updated: 2026-07-30
 - [x] Overview provider cards use a stable upper identity row: provider artwork sits left of a separate name/status block, operational state remains in the corner, and the footer is reserved for metrics. Hermes uses the supplied transparent portrait mark, tinted with its violet accent for dark-surface legibility.
 - [x] Overview provider cards now open existing work instead of the new-task dialog: selecting Codex, Claude Code, or Hermes refreshes the workspace index, opens Threads with that provider filter active, clears stale search text, and selects that provider’s latest thread. The dedicated create-task card remains the only creation shortcut in the provider field.
 - [x] Codex Desktop running state remains authoritative after a conversation is opened in Ambientic: the passive transcript app-server can enrich messages and promote activity, but its separate idle result can no longer demote a real in-progress Desktop turn or turn the corresponding screen/APC signal blue.
-- [x] Native four-screen first-run experience added: mysterious Welcome, local display-name capture, provider connection/first-task choice, and skippable MIDI controller discovery before Overview.
+- [x] Native five-screen first-run experience added: mysterious Welcome, local display-name capture, provider connection/first-task choice, optional reviewed provider-memory bootstrap, and skippable MIDI controller discovery before Overview.
 - [x] Onboarding uses full-screen single decisions, oversized type, floating spatial objects, provider-specific connection cards, one dominant CTA, reduced-motion support, and the ambient game/instrument language recorded in `ART_DIRECTION.md`.
 - [x] Codex and Claude reuse their guided Ambientic authentication; Hermes opens its provider-owned local setup; Kimi Code is detected as an account-only connector and links to its official install path when absent.
 - [x] APC40 MKII and APC mini mk2 connection transitions automatically play one temporary cold Vibe composition, then restore truthful task LEDs.
@@ -409,7 +411,7 @@ Last updated: 2026-07-30
 - [ ] Explore a supported shared-host transport for live Codex desktop mirroring. Today Ambientic and Codex desktop share persisted task history, but their separate stdio app-server processes do not share the same in-memory active turn; reopen the task in Codex to refresh it after an Ambientic-owned turn.
 - [ ] Validate Codex and Hermes approval cards against a real tool permission request.
 - [ ] Reconnect Claude Code itself with the restored Pro/Max subscription. The current CLI's authoritative auth result is `loggedIn: false` even though stale local profile metadata still identifies the account as Claude Pro; after connection, send one Claude message or refresh Overview and confirm the five-hour/weekly balances.
-- [ ] Run one human-paced onboarding pass from a clean profile, including Codex browser login, Claude embedded login, first-task creation, controller skip, and replay from Settings.
+- [ ] Run one human-paced onboarding pass from a clean profile, including Codex browser login, Claude embedded login, reviewed provider-memory import, first-task creation, controller skip, and replay from Settings.
 - [ ] Physically repeat the arrival-light test with the APC mini mk2; automated coverage confirms the same 64-pad Vibe path, while the connected visual smoke used an APC40 MKII.
 - [ ] Use a thread's **Hand off →** action (or the near-limit banner) as the first live cross-provider takeover test now that Claude is connected.
 - [ ] Validate automatic handover regeneration against a real provider window crossing 85%, including reset-window deduplication.
@@ -546,6 +548,8 @@ npm run build
 Replay onboarding without changing any provider account or conversation data:
 
 - In the app: **Settings → Replay onboarding**
+
+The optional memory step asks only connected Claude Code, Codex, and Hermes runtimes for durable provider-native user context. Those temporary export sessions receive no Ambientic capsule or gateway tools and are excluded from automatic transcript learning, preventing circular imports. Nothing becomes active memory until it is selected in the review screen. Provider runtimes may return no memory; this is expected when their CLI cannot expose consumer-chat memory.
 - From anywhere in the workspace: `⌘⇧O`
 - For an isolated developer smoke: launch with `AMBIENTIC_STATE_DIR=/tmp/your-ambientic-smoke`
 

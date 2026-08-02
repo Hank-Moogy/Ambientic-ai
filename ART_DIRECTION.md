@@ -99,7 +99,7 @@ The Workflow Builder is an infinite spatial field where intent moves through cle
 
 ## Memory: a quiet archive of continuity
 
-Memory should feel like a local field the user can inspect and prune, never like an invisible personality dossier. The Memory workspace keeps the same deep, cool atmosphere while making origin and control unusually explicit.
+Memory should feel like a local field the user can inspect and prune, never like an invisible personality dossier. Memory lives inside Settings because it is a trust and control surface, not a daily navigation destination. It keeps the same deep, cool atmosphere while making origin and control unusually explicit.
 
 - Active memories are calm, readable objects; candidates and conflicts change border temperature rather than adding motion or alarms.
 - Provenance, scope, confidence, and provider origin stay legible but secondary to the remembered statement.
@@ -110,11 +110,14 @@ Memory should feel like a local field the user can inspect and prune, never like
 
 ## First-run expression: Enter the field
 
-Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained four-step progress trace, floating symbols, and one unmistakable primary action.
+Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained five-step progress trace, floating symbols, and one unmistakable primary action.
 
 - Welcome is mysterious but immediately legible: one breathing Ambientic object, one promise, one entrance.
 - Identity asks only for a local display name. The input and next action are the entire interaction.
 - Provider connection presents four large playable objects—Codex, Claude Code, Hermes, and Kimi—with provider color used only for identity and connection truth.
+- Provider-memory setup is an invitation, never an extraction surprise: the user opts in, connected agents answer independently, and every safe memory remains selectable before activation. Progress feels like quiet signals arriving, not surveillance.
+- The learned summary is a first portrait, not a verdict. It stays high-level, names the local boundary, and leads naturally to Settings → Memory for provenance, correction, exclusions, and forgetting.
+- Never imply that provider runtimes are omniscient. Empty results are normal when a CLI cannot expose consumer-chat memory, and the interface says so without turning absence into an error.
 - Hardware connection visualizes the controller as an instrument waiting in darkness. Detection wakes both the on-screen grid and the real APC with the same temporary cold-water composition.
 - Skipping hardware is always possible. Expressive light never blocks setup and operational green/red/blue state returns after the welcome phrase.
 - Reduced-motion settings stop drifting, orbiting, and pulsing while preserving hierarchy, connection state, and every action.

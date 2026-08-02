@@ -30,10 +30,15 @@ test('memory and tool labels keep inference and risk boundaries explicit', () =>
   assert.equal(riskLabel('read'), 'Read only')
 })
 
-test('workspace exposes context, memory, and shared tool surfaces without experimental dynamic tools', () => {
+test('workspace exposes context, Settings memory, and shared tool surfaces without experimental dynamic tools', () => {
   const workspace = readFileSync(new URL('../src/renderer/Workspace.jsx', import.meta.url), 'utf8')
   const context = readFileSync(new URL('../src/renderer/ContextMemory.jsx', import.meta.url), 'utf8')
   assert.match(workspace, /<b>Memory<\/b>/)
+  assert.match(workspace, /section === 'memory' \? <MemoryWorkspace/)
+  assert.doesNotMatch(workspace, /setView\('memory'\)/)
+  assert.match(workspace, /Build my memory/)
+  assert.match(workspace, /Step \$\{step \+ 1\} of 5/)
+  assert.match(workspace, /startMemoryBootstrap/)
   assert.match(workspace, /<AppsToolsSettings/)
   assert.match(workspace, /<ThreadContextPanel/)
   assert.match(workspace, /contextBinding/)

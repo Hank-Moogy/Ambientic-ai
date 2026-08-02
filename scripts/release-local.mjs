@@ -33,6 +33,21 @@ function output (command, args) {
   return execFileSync(command, args, { cwd: root, encoding: 'utf8' }).trim()
 }
 
+function outputWithStderr (command, args) {
+  const result = spawnSync(command, args, { cwd: root, encoding: 'utf8' })
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed with exit code ${result.status}`)
+  return `${result.stdout || ''}\n${result.stderr || ''}`.trim()
+}
+
+function localSigningIdentity () {
+  const configured = String(process.env.AMBIENTIC_SIGNING_IDENTITY || process.env.CSC_NAME || '').trim()
+  if (configured) return configured
+  const identities = outputWithStderr('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'])
+  const matches = [...identities.matchAll(/"((?:Apple Development|Developer ID Application):[^"]+)"/g)]
+  return matches[0]?.[1] || ''
+}
+
 function processIsAlive (pid) {
   if (!Number.isInteger(pid) || pid < 1) return false
   try {
@@ -169,16 +184,34 @@ async function main () {
       console.warn('⚠ Local release override: skipping only the simulated Claude OAuth callback lifecycle test.')
       run('npm', ['run', 'test:local-release'])
     } else {
-      run('npm', ['test'])
+    run('npm', ['test'])
+    }
+    const signingIdentity = localSigningIdentity()
+    if (!signingIdentity) {
+      throw new Error('A stable Apple Development or Developer ID signing identity is required for a local release. Set AMBIENTIC_SIGNING_IDENTITY or install a code-signing certificate.')
     }
     run('npm', ['run', 'pack'], {
+      // Sign exactly once below. electron-builder 25 delegates to
+      // @electron/osx-sign 1.3, whose default walker can traverse both a
+      // framework's version directory and its Versions/Current symlink on
+      // newer macOS releases, invalidating its own sealed resources.
       env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
     })
 
     const packagedApp = findPackagedApp(join(root, 'release'))
     if (!packagedApp) throw new Error('Packaging completed, but release/Ambientic.app was not found.')
-    run('codesign', ['--force', '--deep', '--sign', '-', packagedApp])
+    run(join(root, 'node_modules', '.bin', 'electron-osx-sign'), [
+      packagedApp,
+      `--identity=${signingIdentity}`,
+      '--type=development',
+      '--strictVerify',
+      '--ignore=Versions/Current'
+    ])
     run('codesign', ['--verify', '--deep', '--strict', packagedApp])
+    const signature = outputWithStderr('codesign', ['-dv', '--verbose=4', packagedApp])
+    if (/Signature=adhoc|TeamIdentifier=not set/.test(signature)) {
+      throw new Error('The packaged Ambientic app was ad-hoc signed; refusing to install a build that would lose existing macOS permission grants.')
+    }
     const packagedManifest = join(packagedApp, 'Contents', 'Resources', 'build-info.json')
     const packagedInfo = JSON.parse(readFileSync(packagedManifest, 'utf8'))
     if (packagedInfo.commit !== commit) throw new Error('Packaged build metadata does not match the release commit.')

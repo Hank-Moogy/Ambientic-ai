@@ -62,6 +62,29 @@ test('Codex receives one frozen capsule and the Ambientic MCP server on start', 
   }
 })
 
+test('provider-memory export sessions receive no Ambientic capsule or gateway', async () => {
+  const value = setup('codex')
+  try {
+    const { mkdirSync } = await import('node:fs'); mkdirSync(value.project)
+    let startParams
+    let sendOptions
+    value.service.codexClient = async () => ({ request: async (method, params) => {
+      if (method === 'thread/start') { startParams = params; return { thread: { id: 'codex-memory-export' } } }
+      return {}
+    } })
+    value.service.send = async (_id, _prompt, options) => { sendOptions = options }
+    const id = await value.service.create({ provider: 'codex', cwd: value.project, prompt: 'Share native memory.', mode: 'ask', skipAmbienticContext: true })
+    assert.equal(id, 'codex-memory-export')
+    assert.equal(startParams.developerInstructions, undefined)
+    assert.equal(startParams.config, undefined)
+    assert.equal(sendOptions.skipAmbienticContext, true)
+    assert.equal(value.contextEngine.bindingFor('codex', id), null)
+    assert.equal(value.service.contextSuppressedSessions.has(id), true)
+  } finally {
+    value.store.close(); rmSync(value.root, { recursive: true, force: true })
+  }
+})
+
 test('Hermes receives the Ambientic MCP server at session creation', async () => {
   const value = setup('hermes')
   try {
