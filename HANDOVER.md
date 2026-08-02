@@ -147,6 +147,40 @@ honours. It is a no-op when disabled or when the assertion still holds.
 No user-space assertion of any type prevents sleep when the lid is closed. That
 limitation is inherent, not a bug to chase.
 
+## macOS permission prompts — root cause was ad-hoc signing, fixed 2026-08-02
+
+Reported symptom: Ambientic re-asking for Apple Music, Photos, and Documents
+access, having been granted them previously. Not related to the ambient mode
+work — `powerMonitor` and `powerSaveBlocker` are not TCC-gated.
+
+`build.mac` set no `identity`, so electron-builder fell back to ad-hoc signing
+(`Signature=adhoc`, `TeamIdentifier=not set`). macOS keys TCC grants for a
+properly signed app to signing identity plus bundle ID, which survives rebuilds;
+with no identity it falls back to the binary's cdhash, which changes on **every
+build**. Each local release therefore looked like a brand-new app and silently
+discarded every permission previously granted.
+
+Fixed by setting `build.mac.identity` to the machine's one available certificate
+plus `"type": "development"`. Verified on a fresh `npm run pack`:
+`Authority=Apple Development: samori.osei@gmail.com`, `TeamIdentifier=K78PT544J5`,
+chain to Apple Root CA, `codesign --verify --deep --strict` clean.
+
+Two things worth knowing:
+
+- `project-scope.mjs` still correctly blocks Ambientic from inspecting protected
+  home children, and the context kernel's project backfill is guarded at its call
+  site in `workspace-service.mjs`. That guard was never the problem, and it also
+  cannot be the whole solution: Ambientic spawns provider CLIs as children, and
+  macOS attributes a child's file access to the responsible parent process, so
+  anything an agent reads under `~` prompts under Ambientic's name. Sessions whose
+  cwd is the home directory will therefore always surface these prompts.
+- This is a development certificate. It stops the permission churn on this
+  machine, but the app is not distributable to others without a Developer ID
+  certificate, `hardenedRuntime`, and notarization.
+
+Remaining manual step: install the newly signed build and grant the permissions
+once more. They persist across subsequent rebuilds from that point.
+
 ## Resolved — better-sqlite3 ABI transition in the release lane
 
 The Electron package and the system Node test runner require different native
