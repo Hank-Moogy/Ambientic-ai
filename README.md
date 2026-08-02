@@ -156,7 +156,7 @@ Only the integration worktree installs the shared app in `/Applications`. Once t
 npm run release:local
 ```
 
-That command takes an exclusive local release lock, refuses uncommitted input, records the Git commit, branch, version, build time, and clean-tree status, runs the complete tests and packaging flow, discovers a stable local code-signing identity, rejects ad-hoc output, validates the packaged manifest, replaces `/Applications/Ambientic.app`, restarts it, and waits for the local health endpoint. Settings shows the installed version, short commit, branch, and build time so an agent or tester can identify the running build without guessing.
+That command takes an exclusive local release lock, refuses uncommitted input, records the Git commit, branch, version, build time, and clean-tree status, runs the complete tests and packaging flow, discovers a stable local code-signing identity, rejects ad-hoc output, validates the packaged manifest, replaces `/Applications/Ambientic.app`, restarts it, and waits for the local health endpoint. Local Apple Development signing deliberately omits distribution-only hardened-runtime timestamps so installation does not depend on Apple's timestamp service while the stable team identity is preserved. Settings shows the installed version, short commit, branch, and build time so an agent or tester can identify the running build without guessing.
 
 This is the personal-development release lane. Public beta releases still require signing/notarization, update distribution, and a release branch policy.
 

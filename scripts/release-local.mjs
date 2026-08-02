@@ -11,6 +11,7 @@ import { createConnection } from 'node:net'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { signAsync } from '@electron/osx-sign'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(scriptDirectory, '..')
@@ -200,13 +201,18 @@ async function main () {
 
     const packagedApp = findPackagedApp(join(root, 'release'))
     if (!packagedApp) throw new Error('Packaging completed, but release/Ambientic.app was not found.')
-    run(join(root, 'node_modules', '.bin', 'electron-osx-sign'), [
-      packagedApp,
-      `--identity=${signingIdentity}`,
-      '--type=development',
-      '--strictVerify',
-      '--ignore=Versions/Current'
-    ])
+    await signAsync({
+      app: packagedApp,
+      identity: signingIdentity,
+      type: 'development',
+      strictVerify: true,
+      ignore: 'Versions/Current',
+      // Secure timestamps and hardened runtime are distribution concerns. A
+      // local Apple Development build keeps its stable team identity without
+      // either, avoiding network-dependent timestamp failures on resources.
+      timestamp: 'none',
+      hardenedRuntime: false
+    })
     run('codesign', ['--verify', '--deep', '--strict', packagedApp])
     const signature = outputWithStderr('codesign', ['-dv', '--verbose=4', packagedApp])
     if (/Signature=adhoc|TeamIdentifier=not set/.test(signature)) {
