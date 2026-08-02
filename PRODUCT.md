@@ -214,7 +214,9 @@ Each managed session receives a random capability token passed only into its shi
 
 The native tool surface is deliberately narrow and stable:
 
-`ambientic_context_get`, `ambientic_recall`, `ambientic_remember`, `ambientic_goals` (list/get), `ambientic_task_update`, and `ambientic_capability` (search/invoke).
+`ambientic_context_get`, `ambientic_recall`, `ambientic_remember`, `ambientic_goals` (list/get/reconcile), `ambientic_task_update`, and `ambientic_capability` (search/invoke).
+
+When a session is linked to a goal and task, its frozen capsule contains a mandatory closeout protocol. Before finishing meaningful work, the agent reads the latest linked goal, compares actual evidence with affected tickets' acceptance criteria, requests justified status changes, and confirms reconciliation even when no status changed. Ambientic restricts ticket writes to the linked goal and audits both completed and missing reconciliation. It does not infer `done` from a successful process exit or from the agent merely claiming completion.
 
 Authorization policy:
 

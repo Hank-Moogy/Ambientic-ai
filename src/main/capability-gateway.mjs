@@ -223,11 +223,23 @@ export class CapabilityGateway extends EventEmitter {
     if (tool === 'ambientic_goals') {
       const snapshot = this.goals?.list?.() || { goals: [] }
       if (args.action === 'list') return snapshot.goals
-      const goal = snapshot.goals.find((item) => item.id === args.goalId)
+      const goalId = cleanText(args.goalId, 120) || binding.goalId
+      if (binding.goalId && goalId !== binding.goalId) throw new Error('This session can reconcile only its linked goal.')
+      const goal = snapshot.goals.find((item) => item.id === goalId)
       if (!goal) throw new Error('Goal not found.')
+      if (args.action === 'reconcile') return this.contextEngine.confirmGoalReconciliation(binding, args.note)
+      if (args.action === 'get') this.contextEngine.recordGoalRead(binding)
       return goal
     }
     if (tool === 'ambientic_task_update') {
+      const snapshot = this.goals?.list?.() || { goals: [] }
+      const linkedGoal = binding.goalId ? snapshot.goals.find((item) => item.id === binding.goalId) : null
+      if (binding.goalId && !linkedGoal?.tasks?.some((item) => item.id === args.taskId)) {
+        throw new Error('This session can update only tickets in its linked goal.')
+      }
+      if (binding.goalId && binding.taskId && !this.contextEngine.hasCurrentGoalRead(binding)) {
+        throw new Error('Read the latest linked goal before updating its tickets.')
+      }
       await this.authorize({ binding, tool, permission: 'write', arguments: args, title: 'Update an Ambientic task' })
       const patch = {}
       if (args.status) patch.status = args.status

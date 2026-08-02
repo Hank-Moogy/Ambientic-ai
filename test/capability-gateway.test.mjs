@@ -13,11 +13,14 @@ function fixture ({ start = true, requestApproval } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'ambientic-gateway-'))
   const store = new ContextStore({ file: join(directory, 'context.db') })
   const goals = {
-    list: () => ({ goals: [{ id: 'goal-1', title: 'Ship', tasks: [{ id: 'task-1', goalId: 'goal-1', title: 'Test', status: 'ready' }] }] }),
+    list: () => ({ goals: [
+      { id: 'goal-1', title: 'Ship', tasks: [{ id: 'task-1', goalId: 'goal-1', title: 'Test', status: 'ready' }] },
+      { id: 'goal-2', title: 'Other', tasks: [{ id: 'task-2', goalId: 'goal-2', title: 'Unrelated', status: 'ready' }] }
+    ] }),
     updateTask: (id, patch) => ({ id, ...patch })
   }
   const contextEngine = new ContextEngine({ store, goals })
-  const prepared = contextEngine.prepareSession({ provider: 'codex', providerSessionId: 'thread-1', cwd: '/tmp/project' })
+  const prepared = contextEngine.prepareSession({ provider: 'codex', providerSessionId: 'thread-1', cwd: '/tmp/project', goalId: 'goal-1', taskId: 'task-1' })
   const approvals = []
   const gateway = new CapabilityGateway({
     store,
@@ -40,6 +43,10 @@ test('gateway tokens scope native tools and mutations are audited', async () => 
     const context = await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_context_get' })
     assert.equal(context.providerSessionId, 'thread-1')
 
+    await assert.rejects(value.gateway.invoke({ token: value.session.token, tool: 'ambientic_task_update', arguments: { taskId: 'task-1', status: 'done' } }), /Read the latest linked goal/)
+    const goal = await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_goals', arguments: { action: 'get' } })
+    assert.equal(goal.id, 'goal-1')
+
     const updated = await value.gateway.invoke({
       token: value.session.token,
       tool: 'ambientic_task_update',
@@ -48,6 +55,11 @@ test('gateway tokens scope native tools and mutations are audited', async () => 
     assert.equal(updated.status, 'done')
     assert.equal(value.approvals.length, 1)
     assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_task_update'))
+
+    const closeout = await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_goals', arguments: { action: 'reconcile', note: 'Ticket status checked against acceptance criteria.' } })
+    assert.equal(closeout.reconciled, true)
+    assert.equal(value.store.listAudit({ eventType: 'goal.reconciliation.completed' }).length, 1)
+    await assert.rejects(value.gateway.invoke({ token: value.session.token, tool: 'ambientic_task_update', arguments: { taskId: 'task-2', status: 'done' } }), /only tickets in its linked goal/)
 
     value.gateway.revokeBinding(context.id)
     await assert.rejects(value.gateway.invoke({ token: value.session.token, tool: 'ambientic_context_get' }), /invalid, expired, or revoked/)
@@ -65,6 +77,7 @@ test('gateway enforces capability scopes and remembers only session-scoped appro
     requestApproval: async (request) => { approvals.push(request); return { allowed: true, remember: true } }
   })
   try {
+    await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_goals', arguments: { action: 'get' } })
     await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_task_update', arguments: { taskId: 'task-1', status: 'in_progress' } })
     await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_task_update', arguments: { taskId: 'task-1', status: 'review' } })
     assert.equal(approvals.length, 1)
@@ -94,6 +107,13 @@ socketTest('gateway Unix socket carries scoped native tool calls', async () => {
       params: { name: 'ambientic_context_get', arguments: {} }
     })
     assert.equal(context.providerSessionId, 'thread-1')
+
+    await callGatewaySocket({
+      socketPath: value.session.socketPath,
+      token: value.session.token,
+      method: 'tools/call',
+      params: { name: 'ambientic_goals', arguments: { action: 'get' } }
+    })
 
     const updated = await callGatewaySocket({
       socketPath: value.session.socketPath,

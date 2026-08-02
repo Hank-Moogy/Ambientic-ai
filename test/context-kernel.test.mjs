@@ -54,6 +54,9 @@ test('capsules bind inferred project, goal, and task and remain frozen after reb
   assert.equal(prepared.binding.taskId, 'task-1')
   assert.match(prepared.capsule.text, /User prefers concise/)
   assert.match(prepared.capsule.text, /Build context kernel/)
+  assert.match(prepared.capsule.text, /Goal closeout protocol/)
+  assert.match(prepared.capsule.text, /goalId "goal-1"/)
+  assert.match(prepared.capsule.text, /linked task is "task-1"/)
   assert.ok(estimateTokens(prepared.capsule.text) <= 1200)
 
   const original = prepared.binding.capsuleHash
@@ -61,6 +64,24 @@ test('capsules bind inferred project, goal, and task and remain frozen after reb
   assert.equal(rebound.capsuleHash, original)
   assert.equal(rebound.correctedByUser, true)
   store.close()
+})
+
+test('linked work turns require an explicit goal reconciliation and audit skipped closeout', () => {
+  const { store, engine } = fixture()
+  try {
+    engine.prepareSession({ provider: 'codex', providerSessionId: 'codex-closeout', cwd: '/tmp/ambientic' })
+    engine.beginGoalReconciliation('codex', 'codex-closeout')
+    assert.deepEqual(engine.finishGoalReconciliation('codex', 'codex-closeout'), { required: true, completed: false })
+    assert.equal(store.listAudit({ eventType: 'goal.reconciliation.missing' }).length, 1)
+
+    const binding = engine.bindingFor('codex', 'codex-closeout')
+    engine.beginGoalReconciliation('codex', 'codex-closeout')
+    assert.throws(() => engine.confirmGoalReconciliation(binding, 'Skipped the read.'), /Read the latest linked goal/)
+    engine.recordGoalRead(binding)
+    engine.confirmGoalReconciliation(binding, 'Acceptance criteria checked; ticket remains in review.')
+    assert.deepEqual(engine.finishGoalReconciliation('codex', 'codex-closeout'), { required: true, completed: true })
+    assert.equal(store.listAudit({ eventType: 'goal.reconciliation.completed' })[0].resultSummary, 'Acceptance criteria checked; ticket remains in review.')
+  } finally { store.close() }
 })
 
 test('explicit memories promote immediately while inferred constraints remain candidates', () => {

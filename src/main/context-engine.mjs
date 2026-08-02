@@ -172,6 +172,12 @@ export class ContextEngine extends EventEmitter {
       project ? `Project: ${project.name}${project.rootPath ? `\nRoot: ${project.rootPath}` : ''}${project.brief ? `\nBrief: ${project.brief}` : ''}` : '',
       goal ? `Active goal: ${goal.title}${goal.outcome ? `\nOutcome: ${goal.outcome}` : ''}${goal.why ? `\nWhy: ${goal.why}` : ''}${goal.successCriteria ? `\nSuccess criteria: ${goal.successCriteria}` : ''}` : '',
       task ? `Current task: ${task.title}${task.description ? `\nDescription: ${task.description}` : ''}${task.acceptanceCriteria ? `\nAcceptance criteria: ${task.acceptanceCriteria}` : ''}` : '',
+      goal && task ? `Goal closeout protocol (required before finishing a meaningful work turn):
+1. Call ambientic_goals with action "get" and goalId "${goal.id}" to read the latest goal and tickets.
+2. Compare the work actually completed with each affected ticket's acceptance criteria. Never infer completion from intent alone.
+3. Call ambientic_task_update for every affected ticket whose status should change. Use done only when its acceptance criteria are met; review when implementation is complete but verification or human review remains; blocked when progress cannot continue; otherwise keep it in_progress.
+4. Call ambientic_goals with action "reconcile", goalId "${goal.id}", and a short note, even when no ticket needed a change. The linked task is "${task.id}".
+Do this before the final user-facing response. Ambientic audits missing reconciliation but never guesses ticket status.` : '',
       projectMemory.length ? `Project memory:\n${projectMemory.slice(0, 10).map((item) => `- [${item.kind}] ${item.content}`).join('\n')}` : '',
       prioritized.length ? 'Do not repeat this context to the user unless it is directly relevant.' : '',
       '</ambientic-memory>'
@@ -340,7 +346,87 @@ export class ContextEngine extends EventEmitter {
   }
 
   finalizeSession (provider, providerSessionId, messages = []) {
-    return this.observeTurn({ provider, providerSessionId, messages })
+    const observed = this.observeTurn({ provider, providerSessionId, messages })
+    return { ...observed, goalReconciliation: this.finishGoalReconciliation(provider, providerSessionId, 'session ended') }
+  }
+
+  beginGoalReconciliation (provider, providerSessionId) {
+    const binding = this.store.bindingFor(provider, providerSessionId)
+    if (!binding?.goalId || !binding?.taskId) return null
+    const event = this.store.audit({
+      eventType: 'goal.reconciliation.required',
+      actor: 'ambientic',
+      provider,
+      providerSessionId,
+      bindingId: binding.id,
+      tool: 'ambientic_goals',
+      resultSummary: `Closeout required for linked goal ${binding.goalId} and task ${binding.taskId}`
+    })
+    this.emit('change', this.getState())
+    return event
+  }
+
+  confirmGoalReconciliation (binding, note = '') {
+    if (!binding?.goalId || !binding?.taskId) throw new Error('This session is not linked to both a goal and a task.')
+    if (!this.hasCurrentGoalRead(binding)) throw new Error('Read the latest linked goal before confirming reconciliation.')
+    const summary = cleanText(note, 1000) || 'Agent checked the linked goal; no additional closeout note was supplied.'
+    this.store.audit({
+      eventType: 'goal.reconciliation.completed',
+      actor: 'agent',
+      provider: binding.provider,
+      providerSessionId: binding.providerSessionId,
+      bindingId: binding.id,
+      tool: 'ambientic_goals',
+      resultSummary: summary
+    })
+    this.emit('change', this.getState())
+    return { reconciled: true, goalId: binding.goalId, taskId: binding.taskId, note: summary }
+  }
+
+  recordGoalRead (binding) {
+    if (!binding?.goalId || !binding?.taskId) return null
+    const event = this.store.audit({
+      eventType: 'goal.reconciliation.checked',
+      actor: 'agent',
+      provider: binding.provider,
+      providerSessionId: binding.providerSessionId,
+      bindingId: binding.id,
+      tool: 'ambientic_goals',
+      resultSummary: `Read latest linked goal ${binding.goalId}`
+    })
+    this.emit('change', this.getState())
+    return event
+  }
+
+  hasCurrentGoalRead (binding) {
+    if (!binding?.goalId || !binding?.taskId) return false
+    const events = this.store.listAudit({ bindingId: binding.id, limit: 200 })
+    const requiredIndex = events.findIndex((event) => event.eventType === 'goal.reconciliation.required')
+    const checkedIndex = events.findIndex((event) => event.eventType === 'goal.reconciliation.checked')
+    return checkedIndex >= 0 && (requiredIndex < 0 || checkedIndex < requiredIndex)
+  }
+
+  finishGoalReconciliation (provider, providerSessionId, reason = 'work turn finished') {
+    const binding = this.store.bindingFor(provider, providerSessionId)
+    if (!binding?.goalId || !binding?.taskId) return { required: false }
+    const events = this.store.listAudit({ bindingId: binding.id, limit: 200 })
+    const requiredIndex = events.findIndex((event) => event.eventType === 'goal.reconciliation.required')
+    if (requiredIndex < 0) return { required: false }
+    const afterRequirement = events.slice(0, requiredIndex)
+    if (afterRequirement.some((event) => event.eventType === 'goal.reconciliation.completed')) return { required: true, completed: true }
+    if (afterRequirement.some((event) => event.eventType === 'goal.reconciliation.missing')) return { required: true, completed: false }
+    this.store.audit({
+      eventType: 'goal.reconciliation.missing',
+      actor: 'ambientic',
+      provider,
+      providerSessionId,
+      bindingId: binding.id,
+      tool: 'ambientic_goals',
+      approval: 'attention',
+      resultSummary: `The ${reason} without a confirmed goal and ticket reconciliation.`
+    })
+    this.emit('change', this.getState())
+    return { required: true, completed: false }
   }
 
   forget (id) {

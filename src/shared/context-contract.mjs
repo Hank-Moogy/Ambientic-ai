@@ -41,12 +41,13 @@ export const AMBIENTIC_TOOL_SCHEMAS = Object.freeze([
   },
   {
     name: 'ambientic_goals',
-    description: 'List Ambientic goals or read one goal and its tasks.',
+    description: 'List Ambientic goals, read one goal and its tasks, or confirm that the linked goal was reconciled at the end of a work turn.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'get'] },
-        goalId: { type: 'string', maxLength: 120 }
+        action: { type: 'string', enum: ['list', 'get', 'reconcile'] },
+        goalId: { type: 'string', maxLength: 120 },
+        note: { type: 'string', maxLength: 1000 }
       },
       required: ['action'],
       additionalProperties: false

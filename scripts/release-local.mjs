@@ -161,6 +161,10 @@ async function main () {
 
     writeFileSync(manifestPath, `${JSON.stringify(buildInfo, null, 2)}\n`)
     console.log(`\nAmbientic ${buildInfo.version} · ${commit.slice(0, 8)} · ${branch}\n`)
+    // A previous package leaves better-sqlite3 compiled for Electron. Restore
+    // the system Node ABI for unit tests; `npm run pack` rebuilds it for the
+    // target Electron version immediately afterward.
+    run('npm', ['run', 'rebuild:sqlite:node'])
     if (process.env.AMBIENTIC_SKIP_CLAUDE_OAUTH_TEST === '1') {
       console.warn('⚠ Local release override: skipping only the simulated Claude OAuth callback lifecycle test.')
       run('npm', ['run', 'test:local-release'])

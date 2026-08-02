@@ -92,6 +92,8 @@ Neither lane rewrites or discards unrelated existing user changes. The working t
 
 **C4 — gateway.** One long-lived gateway plus the stdio shim. Per-session capability tokens passed only into the shim's environment, persisted as hashes, bound to provider, session, project, goal, task, permissions, and expiry, and revoked on removal, disconnect, permission change, or reauthorization. The six native tools, the authorization policy, approvals, audit, cancellation, and idempotency.
 
+Implemented follow-up: linked goal/task sessions now use a systematic closeout protocol on every meaningful work turn. Agents must read the current goal, update only tickets justified by evidence, and explicitly reconcile; missing reconciliation is audited, and cross-goal ticket writes are rejected.
+
 **C5 — provider wiring.** Claude receives the capsule through the append-system-prompt file flag and only the Ambientic shim through strict MCP config. Codex receives it through developer instructions and the shim through per-thread config on both start and resume. Hermes replaces its empty server array with the shim and takes the capsule once in a fenced first-message envelope until its protocol exposes session instructions. Provider-owned authentication and provider-native behavior are preserved.
 
 **C6 — connected tools.** Stdio and streamable HTTP servers, capability discovery and schema normalization, connect/test/disable/disconnect, health, timeout, dependency, and permission classification. Credentials stay in the tool's store or the system keychain. The gateway invokes on the agent's behalf so agents never receive raw connection configuration. External schemas reach models through capability search and invoke, never by injection into every request.

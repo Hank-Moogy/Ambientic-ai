@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
@@ -1251,10 +1251,20 @@ app.whenReady().then(() => {
     blocker: powerSaveBlocker,
     checkInMinutes: prefs.ambientModeCheckInMinutes
   })
+  // Persist from the change event rather than the IPC handler so the tray
+  // toggle and every future caller are covered by the same write.
   ambientMode.on('change', (state) => {
     sendToWindows('ambient-mode', state)
     tray?.setContextMenu(buildTrayMenu())
+    const current = loadPrefs()
+    if (current.ambientModeEnabled !== state.enabled || current.ambientModeCheckInMinutes !== state.checkInMinutes) {
+      savePrefs({ ...current, ambientModeEnabled: state.enabled, ambientModeCheckInMinutes: state.checkInMinutes })
+    }
   })
+  // Ambient mode is meant to survive a relaunch or auto-update; without this the
+  // toggle silently reads false on every start.
+  if (prefs.ambientModeEnabled) ambientMode.enable()
+  powerMonitor.on('resume', () => ambientMode?.reassert())
   store.hydrateTasks(loadTaskCache())
   if (app.dock) {
     const logoPath = app.isPackaged

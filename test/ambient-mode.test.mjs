@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  AMBIENT_BLOCKER_TYPE,
   AmbientModeService,
   DEFAULT_AMBIENT_CHECK_IN_MINUTES,
   normalizeAmbientCheckIn
@@ -26,18 +27,41 @@ function fixture (checkInMinutes = 60) {
   return {
     service,
     calls,
+    blocker,
     advance: (milliseconds) => { clock += milliseconds },
     fire: () => scheduled?.fn()
   }
 }
 
-test('Ambient mode uses one app-suspension blocker and releases it cleanly', () => {
+test('Ambient mode uses one display-sleep blocker and releases it cleanly', () => {
   const { service, calls } = fixture()
   assert.equal(service.enable().enabled, true)
   service.enable()
-  assert.deepEqual(calls, [['start', 'prevent-app-suspension']])
+  // 'prevent-app-suspension' would let the display sleep, which leaves the
+  // machine free to drop off once the screen goes dark.
+  assert.deepEqual(calls, [['start', AMBIENT_BLOCKER_TYPE]])
+  assert.equal(AMBIENT_BLOCKER_TYPE, 'prevent-display-sleep')
   assert.equal(service.disable().enabled, false)
   assert.deepEqual(calls.at(-1), ['stop', 7])
+})
+
+test('Ambient mode re-arms a blocker the system dropped across sleep/wake', () => {
+  const { service, calls, blocker } = fixture()
+  service.enable()
+  blocker.started.clear()
+  assert.equal(service.getState().enabled, false)
+  assert.equal(service.reassert().enabled, true)
+  assert.deepEqual(calls.at(-1), ['start', AMBIENT_BLOCKER_TYPE])
+})
+
+test('Ambient mode reassert is a no-op when disabled or already held', () => {
+  const { service, calls } = fixture()
+  service.reassert()
+  assert.deepEqual(calls, [], 'must not assert while ambient mode is off')
+  service.enable()
+  const afterEnable = calls.length
+  service.reassert()
+  assert.equal(calls.length, afterEnable, 'must not stack a second blocker')
 })
 
 test('Ambient mode asks after the configured interval without stopping agents', () => {

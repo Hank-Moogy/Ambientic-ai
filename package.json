@@ -9,6 +9,7 @@
     "test:local-release": "node --test --test-skip-pattern='keeps Claude OAuth callback alive until live auth verification succeeds' test/*.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "rebuild:sqlite:node": "node scripts/rebuild-sqlite-node.mjs",
     "rebuild:sqlite": "node scripts/rebuild-sqlite.mjs",
     "test:sqlite": "ELECTRON_RUN_AS_NODE=1 electron scripts/sqlite-smoke.mjs",
     "test:sqlite:packaged": "node scripts/sqlite-packaged-smoke.mjs",

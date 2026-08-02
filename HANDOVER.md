@@ -43,6 +43,11 @@ cross-provider continuity path.
   MCP discovery and proxying.
 - Wired Claude, Codex, and Hermes through their native instruction and MCP seams.
   Codex dynamic tools remain deliberately disabled.
+- Added systematic goal closeout for linked work. Before finishing a meaningful
+  turn, the agent must fetch the latest bound goal, compare evidence with ticket
+  acceptance criteria, request justified status updates, and explicitly confirm
+  reconciliation even when nothing changed. Missing closeout is audited, and
+  ticket writes outside the bound goal are rejected.
 - Added preload contracts plus the New Agent context selector, thread capsule and
   activity panel, Memory workspace, Apps & Tools, gateway approval metadata, and
   onboarding transcript-consent control. Visual QA passed at desktop and 720 px.
@@ -111,8 +116,53 @@ being written from one lane on `agent/workflow-studio`, not on the planned
 `feature/context-kernel-gateway` and `feature/context-memory-ui` branches. Split
 the branches before the next merge or the integration step will be painful.
 
-This session touched documentation only: `PRODUCT.md`, `NEXT_STEPS.md`,
-`README.md`, and this file. No source files were modified.
+Documentation updated this session: `PRODUCT.md`, `NEXT_STEPS.md`, `README.md`,
+and this file.
+
+## Ambient mode — two confirmed defects fixed 2026-08-02
+
+Reported symptom: the machine still went to sleep with ambient mode on. Both
+causes were confirmed against the running app, not inferred.
+
+1. **Wrong assertion type.** `enable()` started `prevent-app-suspension`, which
+   Electron documents as keeping the system active while *allowing the screen to
+   be turned off*. `pmset -g assertions` against the running app showed
+   `PreventUserIdleSystemSleep 1` but `PreventUserIdleDisplaySleep 0`. Because
+   macOS `powerd` already holds its own "prevent sleep while display is on"
+   assertion, the old type only began mattering once the screen went dark — and
+   did not hold from there. Now `prevent-display-sleep`, exported as
+   `AMBIENT_BLOCKER_TYPE`.
+2. **Enabled state was never persisted.** `set-ambient-mode` wrote nothing to
+   prefs while `set-ambient-mode-check-in` did, and construction restored only
+   `checkInMinutes`. Every relaunch, crash, or auto-update silently turned
+   ambient mode off while the tray checkbox correctly reported false. Persistence
+   now happens in the service's `change` handler so the tray toggle and all
+   future callers are covered by one write, and `prefs.ambientModeEnabled` is
+   restored at startup.
+
+Also added `reassert()` plus a `powerMonitor` `resume` hook, because a
+sleep/wake cycle can leave the process holding a blocker id the system no longer
+honours. It is a no-op when disabled or when the assertion still holds.
+
+No user-space assertion of any type prevents sleep when the lid is closed. That
+limitation is inherent, not a bug to chase.
+
+## Resolved — better-sqlite3 ABI transition in the release lane
+
+The Electron package and the system Node test runner require different native
+ABIs. After packaging, Node previously failed the SQLite-backed tests with
+`ERR_DLOPEN_FAILED`:
+
+```
+better_sqlite3.node was compiled against NODE_MODULE_VERSION 130,
+this version of Node.js requires NODE_MODULE_VERSION 131
+```
+
+130 is Electron 33's ABI and 131 is the system Node used by `npm test`.
+`scripts/rebuild-sqlite-node.mjs` now restores the Node ABI with the active SDK's
+libc++ headers before the release tests. The existing Electron rebuild then runs
+during packaging. The stable local-release suite passes 172 tests with only the
+two separately exercised socket tests skipped; the real socket suite passes 4/4.
 
 Previous objective, now landed: make Claude usage actually display (broken since
 the status-line payload dropped rate_limits), plus main-process diagnostic

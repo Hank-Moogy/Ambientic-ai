@@ -641,7 +641,7 @@ export class ContextStore {
     else if (category === 'promotions') clauses.push("event_type='memory.promoted'")
     else if (category === 'approvals') clauses.push("approval!='automatic'")
     else if (category === 'tools') clauses.push("event_type='gateway.call'")
-    return this.db.prepare(`SELECT * FROM gateway_audit ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY created_at DESC LIMIT ?`)
+    return this.db.prepare(`SELECT * FROM gateway_audit ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY created_at DESC, rowid DESC LIMIT ?`)
       .all(...args, Math.max(1, Math.min(1000, Number(limit) || 200))).map((row) => ({
         id: row.id, eventType: row.event_type, actor: row.actor, provider: row.provider, providerSessionId: row.provider_session_id,
         bindingId: row.binding_id || '', tool: row.tool, permission: row.permission, approval: row.approval,

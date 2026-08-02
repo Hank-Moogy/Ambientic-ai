@@ -967,6 +967,8 @@ export class WorkspaceService extends EventEmitter {
     const snapshot = await this.read(id)
     const promptOptions = normalizePromptOptions(options, session.agent)
     const context = this.ensureContext(session, { prompt: text, contextBinding: options.contextBinding || {} })
+    const startsTurn = !this.activeTurns.has(id)
+    if (startsTurn) this.contextEngine?.beginGoalReconciliation?.(session.agent, this.providerSessionId(session))
     const hasConversation = snapshot.messages.some((entry) => entry.role === 'user' || entry.role === 'assistant')
     const cwd = String(session.cwd || '')
     if (!promptOptions.projectContext && !hasConversation && !this.activeTurns.has(id) && cwd && canInspectProjectRoot(cwd) && cwd !== this.taskWorkspaceRoot && !cwd.startsWith(`${this.taskWorkspaceRoot}/`)) {
@@ -1332,6 +1334,7 @@ export class WorkspaceService extends EventEmitter {
         providerSessionId: session ? this.providerSessionId(session) : id,
         messages: snapshot.messages.filter((entry) => ['user', 'assistant'].includes(entry.role))
       })
+      this.contextEngine?.finishGoalReconciliation?.(session?.agent, session ? this.providerSessionId(session) : id)
       this.ingestLifecycle(id, this.hasPendingApproval(id) || awaitingReply ? 'notification' : 'stop_idle')
       this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true })
     }
