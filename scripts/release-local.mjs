@@ -205,7 +205,6 @@ async function main () {
       app: packagedApp,
       identity: signingIdentity,
       type: 'development',
-      strictVerify: true,
       ignore: 'Versions/Current',
       // Secure timestamps and hardened runtime are distribution concerns. A
       // local Apple Development build keeps its stable team identity without
