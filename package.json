@@ -5,7 +5,7 @@
   "author": "findmecreators",
   "main": "out/main/index.js",
   "scripts": {
-    "test": "node --test test/*.mjs",
+    "test": "node scripts/ensure-sqlite-node.mjs && node --test test/*.mjs",
     "test:local-release": "node --test --test-skip-pattern='keeps Claude OAuth callback alive until live auth verification succeeds' test/*.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",

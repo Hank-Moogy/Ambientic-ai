@@ -425,6 +425,11 @@ export class WorkspaceService extends EventEmitter {
     // Memory-export sessions are deliberately isolated from Ambientic's own
     // context so an import can never echo the local capsule back into itself.
     this.contextSuppressedSessions = new Set()
+    // Threads started by this app-server process. Codex only writes a thread's
+    // rollout file once its first turn runs, so 'thread/resume' fails with "no
+    // rollout found" until then. A thread we started is already in the running
+    // process's memory and needs no resume; cleared when that process exits.
+    this.codexStartedThreads = new Set()
   }
 
   connector (id) { return this.getConnectors().find((item) => item.id === id) }
@@ -714,6 +719,7 @@ export class WorkspaceService extends EventEmitter {
         this.codex = null
         this.codexReady = null
         this.codexCollaborationModes = undefined
+        this.codexStartedThreads.clear()
       })
       rpc.start()
       await rpc.request('initialize', { clientInfo: { name: 'ambientic', title: 'Ambientic', version: '0.8.1' } })
@@ -995,11 +1001,16 @@ export class WorkspaceService extends EventEmitter {
     if (session.agent === 'codex') {
       const rpc = await this.codexClient()
       const threadId = this.codexThreadId(session)
-      await rpc.request('thread/resume', {
-        threadId,
-        ...(context?.binding?.capsuleText ? { developerInstructions: context.binding.capsuleText } : {}),
-        ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
-      })
+      // A thread this process started already carries its instructions and MCP
+      // config from 'thread/start', and resuming it before its first turn fails
+      // because Codex has not written a rollout for it yet.
+      if (!this.codexStartedThreads.has(threadId)) {
+        await rpc.request('thread/resume', {
+          threadId,
+          ...(context?.binding?.capsuleText ? { developerInstructions: context.binding.capsuleText } : {}),
+          ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
+        })
+      }
       const activeTurnId = this.activeTurns.get(id)
       const collaborationMode = activeTurnId ? null : await this.codexCollaborationMode(rpc, promptOptions.mode, promptOptions.effort, promptOptions.model)
       const providerText = collaborationMode && promptOptions.mode !== 'ask'
@@ -1063,6 +1074,7 @@ export class WorkspaceService extends EventEmitter {
         ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
       })
       const thread = result.thread
+      this.codexStartedThreads.add(thread.id)
       if (skipAmbienticContext) this.contextSuppressedSessions.add(thread.id)
       if (context?.binding) this.contextFiles(this.contextEngine.bindProviderSession(context.binding.id, thread.id))
       this.store.ingest({ event: 'session_start', session_id: thread.id, agent: 'codex', project: basename(workingDirectory), cwd: workingDirectory, summary: thread.name || thread.preview || 'New Codex task' })

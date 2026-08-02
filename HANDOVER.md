@@ -147,6 +147,49 @@ honours. It is a no-op when disabled or when the assertion still holds.
 No user-space assertion of any type prevents sleep when the lid is closed. That
 limitation is inherent, not a bug to chase.
 
+## Codex "no rollout found" on new tasks — fixed 2026-08-02
+
+Reported symptom: creating a new managed Codex task failed with
+`no rollout found for thread id <uuid>`. Not caused by the context kernel work,
+despite landing at the same time.
+
+`create()` calls `thread/start`, then `send()` calls `thread/resume` before
+`turn/start`. That sequence predates the context kernel — it is unchanged since
+`d738435`. What changed is Codex itself: **it now writes a thread's rollout file
+lazily, on the first turn**, so resuming a just-started thread can never succeed.
+
+Verified by driving the installed app server directly. Three `thread/start`
+variants — plain, with `developerInstructions`, and with `config.mcp_servers` —
+all produced the identical failure on the immediately following `thread/resume`,
+including the plain one carrying none of the new parameters. That rules out the
+capsule and MCP wiring conclusively.
+
+Fixed by tracking threads started by the live app-server process in
+`codexStartedThreads` and skipping `thread/resume` for them; the set is cleared
+when that process exits. Such a thread is already in the running process's memory
+and already carries its instructions and MCP config from `thread/start`, so the
+resume was redundant as well as impossible. Resume still runs for threads this
+process did not start, which is the case it exists for.
+
+Verified end to end: `thread/start` followed directly by `turn/start` with no
+resume returns a real turn id.
+
+Not covered by a regression test — asserting it needs a Codex RPC fixture the
+suite does not currently have. Worth adding when one exists.
+
+## Test suite ABI ping-pong — made self-healing 2026-08-02
+
+Packaging rebuilds `better-sqlite3` against Electron's ABI, after which the
+system Node test runner cannot load it and 15 SQLite-backed tests fail with
+`ERR_DLOPEN_FAILED`. This bit twice in a single session, and the error looks
+unrelated to whatever is actually being tested.
+
+`scripts/rebuild-sqlite-node.mjs` already fixed it but rebuilds unconditionally,
+so nobody ran it preemptively. `scripts/ensure-sqlite-node.mjs` now probes the
+module first and only rebuilds on `ERR_DLOPEN_FAILED`, and `npm test` runs it.
+The fast path costs about a second; the healing path was verified by deliberately
+flipping the ABI to Electron and confirming `npm test` recovered to 184 passing.
+
 ## macOS permission prompts — root cause was ad-hoc signing, fixed 2026-08-02
 
 Reported symptom: Ambientic re-asking for Apple Music, Photos, and Documents
