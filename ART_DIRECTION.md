@@ -97,6 +97,17 @@ The Workflow Builder is an infinite spatial field where intent moves through cle
 - Inbox, calendar, web, and other consequential capabilities always expose their permission boundary before a real run.
 - Portable sharing is visible from the beginning, but the field stays private and local until the user explicitly exports it.
 
+## Memory: a quiet archive of continuity
+
+Memory should feel like a local field the user can inspect and prune, never like an invisible personality dossier. The Memory workspace keeps the same deep, cool atmosphere while making origin and control unusually explicit.
+
+- Active memories are calm, readable objects; candidates and conflicts change border temperature rather than adding motion or alarms.
+- Provenance, scope, confidence, and provider origin stay legible but secondary to the remembered statement.
+- Project/provider exclusions are small reversible controls close to the project they affect.
+- Forget, supersede, and destructive capability actions remain visually restrained but use plain language and confirmation; atmosphere never softens the permission boundary.
+- The session capsule is treated as a sealed object: its hash, age, and token size are quiet evidence of continuity, while recall activity appears as a small adjacent trail.
+- Compact layouts move the project/activity rail below the memory cards instead of squeezing the reading column. Reduced motion changes nothing essential because the workspace communicates through depth and hierarchy, not animation.
+
 ## First-run expression: Enter the field
 
 Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained four-step progress trace, floating symbols, and one unmistakable primary action.

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import Workspace from './Workspace.jsx'
 import { WorkflowBuilder } from './WorkflowBuilder.jsx'
+import { ContextPreview } from './ContextPreview.jsx'
 import './styles.css'
 
 class RendererRecoveryBoundary extends React.Component {
@@ -38,10 +39,13 @@ class RendererRecoveryBoundary extends React.Component {
 
 const surface = new URLSearchParams(window.location.search).get('surface')
 const developmentWorkflowPreview = import.meta.env.DEV && surface === 'workflow-preview'
+const developmentContextPreview = import.meta.env.DEV && surface === 'context-preview'
 createRoot(document.getElementById('root')).render(
   <RendererRecoveryBoundary>
     {surface === 'controller'
       ? <App />
+      : developmentContextPreview
+          ? <ContextPreview />
       : developmentWorkflowPreview
           ? <main className="workflow-preview-shell"><WorkflowBuilder /></main>
           : <Workspace />}

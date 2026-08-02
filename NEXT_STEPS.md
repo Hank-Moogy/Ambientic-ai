@@ -56,52 +56,71 @@ Exit condition: all three templates can complete, fail safely, and resume after 
 
 Exit condition: a user can choose Codex, Claude Code, or Hermes to draft a validated workflow, review it before saving, connect one real app, see its exact permissions and dependent workflows, and complete one confirmed app action through a provider-neutral capability.
 
-## Phase 1.6 — memory layer and tool gateway
+## Phase 1.6 — context kernel and tool gateway
 
-Specified in `PRODUCT.md` → **Memory layer and tool gateway**. This is the substrate the other phases assume: Goals context capsules, Coach evidence, cross-provider handover, and workflow capability resolution all read and write through it. It can be built alongside Phase 1.5 because it shares the connection and permission model, but it must not wait for the community phases.
+Specified in `PRODUCT.md` → **Context kernel and tool gateway**. This is the substrate the other phases assume: Goals context, Coach evidence, cross-provider continuity, and workflow capability resolution all read and write through it.
 
-Scope decisions for this increment:
+Status (2026-08-02): implemented in the working tree. Automated kernel, provider, gateway, renderer, compatibility, visual-responsive, Electron-native rebuild, and packaged-app SQLite/FTS5 checks pass. The remaining exit work is one live external MCP and cross-provider acceptance run.
 
-- Target the local provider CLIs. Keep the context assembler and gateway transport runtime-agnostic so an Ambientic-hosted agent runtime can drop in later without rework.
-- Harvest deterministic events plus local transcript mining. Model-assisted distillation is deferred to the backlog.
-- Ship Ambientic-native tools and proxied tool servers. Native app adapters are deferred to the backlog.
+Settled decisions for this phase:
 
-### 1.6a — context assembler seam
+- Ambientic reproduces Hermes's proven patterns in its own Electron/JavaScript architecture. Hermes stays an inspiration and a provider; it is not forked.
+- SQLite with FTS5 through a native binding is the canonical local store. Native packaging is a release gate, not a follow-up.
+- Goals and workflows stay in their existing JSON stores behind repository interfaces.
+- One Ambientic gateway serves Claude, Codex, and Hermes through a stdio shim.
+- Codex dynamic tools stay out of the acceptance path; they are a later transport optimization behind the same gateway contract.
+- The capsule targets ~900 tokens with a 1200 hard cap. Deeper context stays behind recall.
+- Harvesting is deterministic. Model-assisted distillation, embeddings, graphs, external memory providers, and a hosted raw-model runtime remain backlog.
 
-- Extract turn composition out of the hard-coded provider prompt string into a context assembler returning a provider-neutral system capsule and user text.
-- Keep output byte-identical at first so this lands as a pure refactor and unblocks the rest.
-- Add the three injection adapters: system-prompt flag for Claude Code, session parameters for Hermes ACP, and the verified mechanism for the Codex app server.
-- Confirm how the Codex app server accepts per-session tool servers before committing to per-session tokens for it; a global-config-only path needs a different token strategy and weaker session attribution.
+### Workstream split
 
-### 1.6b — memory store
+Two agents work in parallel against a shared contract, in separate branches, merging into an integration branch.
 
-- Define tiers T1 episodic, T2 project, T3 semantic, plus the candidate store with confidence, provenance, and expiry.
-- Implement ranked local retrieval over project, goal, tier, type, and recency-decay filters.
-- Harvest deterministically from goal and task transitions, approved tool calls, files written, commits, provider switches, and recurring errors.
-- Add local transcript and provider-snapshot mining as a distinct opt-in from event harvesting.
-- Backfill T1 and T2 from existing local conversation history and known project roots.
-- Enforce the capsule token budget in code and surface it in the UI.
+**Backend lane** owns `src/main/**`, preload APIs, package and build configuration, the MCP shim, database migrations, and backend tests.
 
-### 1.6c — gateway
+**Product lane** owns `src/renderer/**`, renderer tests, product documentation, UX copy, and visual and manual QA. It consumes the shared preload contract and does not edit backend services or provider launch code.
 
-- Run one long-lived local gateway with per-session tokens bound to session, provider, project root, goal, and permission scope.
-- Ship the native tool surface: recall, goal listing, project brief, remember-as-candidate, and task update as the first consequential write.
-- Add tool-server proxying so a server connected once in Ambientic is available to every agent on every provider under one permission policy and audit trail.
-- Route gateway permission requests through the existing approval boundary so provider-native and gateway approvals are indistinguishable to the user.
-- Journal every call and feed the journal to the harvester.
-- Stop passing an empty tool-server list on session creation.
+Neither lane rewrites or discards unrelated existing user changes. The working tree is checkpointed before branching.
 
-### 1.6d — memory review surface
+### Backend sequence
 
-- Candidate queue with accept, edit, reject, and forget.
-- Provenance and supersession history per record.
-- A per-project preview of exactly what an agent will see before a session starts.
+**C1 — integration boundary.** Checkpoint the working tree. Publish the shared context and gateway contract plus fixtures. Extract the hard-coded `<ambientic-context>` prompt assembly from the provider bridge behind a context assembler, with regression tests proving byte-identical output first. Expose stub preload APIs backed by fixtures so the product lane can start without waiting for the kernel.
 
-### 1.6e — continuity
+**C2 — storage.** Add the native SQLite binding, migrations, repositories, transactions, FTS5, migration backups, and project backfill. Add an Electron-version rebuild step, unpack the native binary from the application archive, and add an installed-app smoke command that creates, migrates, reads, searches, and closes the database. Wrap goals and workflows in repositories rather than migrating them.
 
-- Make a new session's capsule the handover mechanism; keep the generated handover file as a portable export rather than the transfer path.
+**C3 — context kernel.** Projects, session bindings, inference, frozen capsule generation, hashing, token budgeting, and provenance. Normalize visible provider turns after onboarding consent. Deterministic candidate creation, corroboration, promotion, expiry, conflicts, supersession, and forgetting. Completed-turn observation is the durability path; session-end and pre-compression events are enrichment only.
 
-Exit condition: a task started on any connected provider, in a known project, receives the active goal, its acceptance criteria, and the project card without transcript copying; recalls a decision it was never told; performs one approved consequential write through the gateway with an audit record; and a second provider resumes that task from memory alone. Capsule size stays inside budget and is identical across turns of a session.
+**C4 — gateway.** One long-lived gateway plus the stdio shim. Per-session capability tokens passed only into the shim's environment, persisted as hashes, bound to provider, session, project, goal, task, permissions, and expiry, and revoked on removal, disconnect, permission change, or reauthorization. The six native tools, the authorization policy, approvals, audit, cancellation, and idempotency.
+
+**C5 — provider wiring.** Claude receives the capsule through the append-system-prompt file flag and only the Ambientic shim through strict MCP config. Codex receives it through developer instructions and the shim through per-thread config on both start and resume. Hermes replaces its empty server array with the shim and takes the capsule once in a fenced first-message envelope until its protocol exposes session instructions. Provider-owned authentication and provider-native behavior are preserved.
+
+**C6 — connected tools.** Stdio and streamable HTTP servers, capability discovery and schema normalization, connect/test/disable/disconnect, health, timeout, dependency, and permission classification. Credentials stay in the tool's store or the system keychain. The gateway invokes on the agent's behalf so agents never receive raw connection configuration. External schemas reach models through capability search and invoke, never by injection into every request.
+
+### Product sequence
+
+**H1 — launch context.** A compact inferred-context section in the New Agent flow: inferred project, goal, and task with the inference source in secondary text, without blocking launch. Change project or task, link an existing goal, create a project, goal, or task inline. Support projects without folders. Surface exclusions and consent state. Present no-context and low-confidence as normal states, not errors.
+
+**H2 — thread context panel.** Current binding, frozen capsule preview and token usage, creation timestamp and hash indicator, why the context was selected, available recall scopes, a rebind action, and the session's recent recalls and memory writes. State plainly that rebinding emits a context-update event and does not rewrite what the agent was already told.
+
+**H3 — memory workspace.** User profile, projects and briefs, active and candidate memories, provenance linking back to source, conflicts needing attention, search across memories and consented history, per-provider and per-project exclusions, and edit, promote, supersede, reject, and forget controls. A quiet activity feed with an unread badge. Empty, loading, indexing, error, and recovery states. The interface must keep explicit user memory, deterministically learned memory, agent-inferred candidates, conflicted or sensitive candidates, and unpromoted episodic search results visually distinguishable.
+
+**H4 — apps and tools settings.** Separate from AI Providers: connected server list and health, add stdio or streamable HTTP server, connect/test/disable/reconnect/disconnect, capability inventory, read/write/destructive classification, per-capability permission controls, dependent workflows and sessions before disconnecting, a clear statement of where credentials live, and broken, slow, unauthenticated, and incompatible states.
+
+**H5 — approval and audit.** Extend the existing approval presentation for gateway calls with provider, project, goal or task, tool, connection, argument summary, and risk classification. Approve once, session-scoped approval where allowed, reject, and cancel — never blanket remembered approval for destructive calls. Show completion, failure, timeout, retry, and duplicate suppression. Add activity filters for capsules, recalls, promotions, approvals, and external tool calls.
+
+**H6 — documentation and QA.** Keep `README.md`, `PRODUCT.md`, `NEXT_STEPS.md`, and `HANDOVER.md` describing the context kernel and gateway, push/pull context, memory consent and exclusions, tool authorization and approval behavior, Hermes as inspiration and provider rather than foundation, and the handover file as a portable export. Renderer tests and manual QA for compact and windowed layouts, keyboard navigation, empty states, long memory content, accessibility labels, and existing hardware workflows.
+
+### Merge sequence
+
+The backend lane publishes the checkpoint, contract, fixtures, and byte-identical assembler extraction first. The product lane then builds against committed fixtures while storage, kernel, and gateway land. Contract changes arrive as dedicated contract commits; the product lane rebases only after those and updates fixture-driven tests. The product lane switches from fixtures to live preload calls without changing backend contracts. Both lanes merge into the integration branch, backend resolving main, preload, and package conflicts. Backend owns backend and packaging failures; product owns renderer and UX failures.
+
+### Acceptance
+
+Backend: migrations idempotent and preserving goals, workflows, aliases, and sessions; installed macOS builds loading the correct native binary and executing FTS5 queries; capsule composition respecting priority and the hard cap; capsule bytes and hash identical throughout a session; project scoping preventing cross-project leakage; deterministic promotion, corroboration, conflict handling, expiry, supersession, and hard forgetting; transcript ingestion respecting consent and exclusions; secret-shaped content neither promoted nor indexed; invalid, expired, revoked, and cross-session tokens unable to invoke tools; broken or slow external servers never blocking provider launch; and safe rejection, timeout, cancellation, retry, and idempotency.
+
+Renderer: inferred context understandable and never blocking launch; bindings correctable and capsules inspectable; memory origin, confidence, status, and provenance distinguishable; forget and destructive operations appropriately confirmed; connection and approval states accurate after restart or failure; and existing Goals, Workflows, Threads, Settings, and hardware behavior intact.
+
+Exit condition: a decision learned in a Claude session becomes project memory with provenance; a fresh Codex session in that project receives the inferred goal and task capsule and recalls that decision; Hermes reads the same goal, invokes one user-connected capability, and requests approval for a consequential task update; the user switches provider without creating or reading a handover file; every capsule, recall, promotion, approval, and tool result appears in the local audit trail; and the whole scenario passes in an installed macOS build, not only in development.
 
 ## Phase 2 — portable workflow library
 

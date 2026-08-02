@@ -1,6 +1,6 @@
 # Ambientic product specification
 
-Last updated: 2026-07-30
+Last updated: 2026-08-02
 
 ## Product purpose
 
@@ -20,9 +20,9 @@ The first user is a technically curious builder running several agent conversati
 
 ## Product pillars
 
-### 0. Context and capability substrate
+### 0. Context kernel and tool gateway
 
-Underpins every other pillar. Ambientic owns a durable local memory of the user, their projects, and their decisions, and a single gateway through which any agent on any provider reaches tools. An agent started from Ambientic knows what the user is trying to achieve and can act through connections the user authorized once, without Ambientic handing credentials to the provider or copying whole transcripts into every model. Specified in **Memory layer and tool gateway** below.
+Underpins every other pillar. Ambientic owns a durable local memory of the user, their projects, and their decisions, and a single gateway through which any agent on any provider reaches tools. An agent started from Ambientic knows what the user is trying to achieve and can act through connections the user authorized once, without Ambientic handing credentials to the provider or copying whole transcripts into every model. Specified in **Context kernel and tool gateway** below.
 
 ### 1. Unified agent cockpit
 
@@ -127,9 +127,13 @@ User / MIDI / Keyboard / Schedule / Coach suggestion
 
 An action definition declares its identifier, schema, required capabilities, permission level, idempotency behavior, result shape, and compatibility version. Provider adapters translate that stable contract into the provider's supported local protocol. Unsupported capabilities are explicit and never silently emulated with brittle UI automation.
 
-## Memory layer and tool gateway
+## Context kernel and tool gateway
 
-This is the provider-agnostic substrate. Everything else in the product — Goals, workflows, Coach, handover — reads and writes through it.
+This is the provider-agnostic substrate. Everything else in the product — Goals, workflows, Coach, continuity — reads and writes through it.
+
+Implementation status: the local SQLite/FTS5 kernel, frozen capsules, deterministic turn observation, scoped gateway tokens, native tools, generic MCP proxying, Claude/Codex/Hermes injection, Memory workspace, launch/thread context UX, Apps & Tools, and approval/audit presentation are implemented. The Electron 33 native rebuild, archive unpacking, and packaged-app SQLite/FTS5 smoke pass. Release validation still requires one real external MCP server and the full three-provider scenario.
+
+Ambientic remains the operating layer above provider-native agents. It does not become an agent runtime of its own in this release.
 
 ### Principles
 
@@ -137,106 +141,133 @@ This is the provider-agnostic substrate. Everything else in the product — Goal
 - Treat provider/model choice as runtime policy; a workflow step requests capabilities and constraints, then Ambientic resolves an eligible connected provider.
 - Preserve deterministic execution state locally so a different provider can resume without replaying unrelated conversation history.
 - Never hand a provider a third-party credential. An agent receives a capability, not a token.
+- Bound every channel that consumes model context, including tool schemas.
 
 ### Two context channels
 
 Context reaches an agent through two channels with deliberately different budgets. Pushing more is not the goal; making the right thing reachable is.
 
-| | Push — session capsule | Pull — gateway tools |
+| | Push — frozen capsule | Pull — gateway tools |
 | --- | --- | --- |
-| Budget | Hard cap, 600–1200 tokens | Unbounded, agent-paced |
-| Carries | Identity, active goal, current task and acceptance criteria, project card, standing constraints, and an index of what else exists | Transcript history, past decisions, artifacts, prior sessions, entity facts |
+| Budget | ~900 tokens target, 1200 hard cap | Unbounded, agent-paced |
+| Carries | Compact user profile, project brief, goal/task and acceptance criteria, standing constraints, recent decisions, and trigger-shaped instructions for when to recall | Session episodes, older decisions, outcomes, transcript history, connected capabilities |
 | Written | Once per session, byte-stable | On demand |
 | Cost | Every turn | Only when used |
 
 The capsule's most valuable content is the index, not the facts: it tells the agent what Ambientic holds and under which conditions to ask for it. Capsule instructions must be trigger-shaped ("before assuming a project convention, recall it") rather than capability-shaped ("you have a recall tool"), because agents do not reliably use a tool they are merely told exists.
 
-The capsule must be stable for the life of a session. Rebuilding it per turn breaks provider prompt caching and multiplies cost for no gain. Material mid-session changes — goal status, task switch, a revoked connection — are delivered as an explicit bounded context update, never by rewriting the capsule.
+The exact capsule bytes and their hash are persisted when a session starts and reused unchanged for the session's lifetime. Rebuilding the capsule per turn breaks provider prompt caching and multiplies cost for no gain. Mid-session change is delivered through recall tools; rebinding a session emits an explicit context-update event rather than silently rewriting what the agent was already told.
 
-The capsule budget is enforced in code, surfaced in the UI, and rank-dropped when exceeded.
+The budget is enforced in code, surfaced in the UI, and rank-dropped when exceeded.
 
-### Memory tiers
+### Canonical local store
 
-| Tier | Horizon | Contents | Key |
-| --- | --- | --- | --- |
-| T0 working | Current turn | The provider's own context window | Session |
-| T1 episodic | 30–90 days, decaying | Session objective, what changed, decisions taken, files touched, outcome | Session |
-| T2 project | Weeks to months | Stack, conventions, entry points, current objective, open threads, known gotchas | Project root |
-| T3 semantic | Durable, curated, small | User profile, working preferences, standing constraints, entity facts | User |
+A local SQLite database with an FTS5 index is the canonical store for projects, session bindings, memory records and their provenance, normalized session messages, connections and capabilities, gateway sessions, and the audit journal.
 
-T2 is keyed by project root, which every session already carries, and is the highest-leverage tier: it is what makes a fresh session on any provider immediately useful in a known repository. T3 stays small and is superseded rather than mutated, so provenance survives.
+Goals and workflows remain in their existing JSON stores for this release, reached through repository interfaces so they can migrate later without changing callers.
 
-### Write path
+Operational requirements: write-ahead logging, foreign keys, a bounded busy timeout, transactional state changes, ordered and idempotent migrations, and backups taken before migration. A corrupt database is never silently reset — the file is preserved and recovery instructions are surfaced.
 
-The write path is deterministic first and inferential second. Structured signals Ambientic already emits are harvested with no model call: goal and task transitions, approved tool calls, files written, commits, provider switches, recurring errors. Session transcripts and provider snapshots are additionally mined locally for decisions and rationale.
+Because the store is a native module, native packaging is a release gate: the build must rebuild against the app's Electron version, unpack the binary from the application archive, and pass an installed-app smoke test that creates, migrates, reads, searches, and closes the database. Development-mode success is not evidence.
 
-Anything derived, inferred, or asserted by an agent enters a **candidate** store with confidence, provenance, and expiry. Candidates are not visible to the capsule. A candidate is promoted to T2 or T3 when it recurs, when the user accepts it, or when an agent uses it without correction. Agents write only candidates; an agent can never silently mutate durable memory.
+### Projects and session binding
+
+A project is a stable identity with an optional root path, so work that is not code still gets a brief and a memory scope. Every managed session is bound to a project and, where confidence allows, a goal and task. The binding records what inferred it and whether the user corrected it.
+
+Launch context is inferred in this order:
+
+1. Explicit user selection.
+2. An existing binding for the session.
+3. A project matching the working directory.
+4. The most recently used in-progress or review task in that project.
+5. The most recently updated active goal in that project.
+6. A lexical match between the initial prompt and goal or task titles.
+7. Project-only fallback.
+
+Inference must never block task creation, and it is only safe because it is visible: the launch flow shows what was inferred and why, and the thread context panel allows correction after the fact. Low confidence is a normal state presented plainly, not an error.
+
+### Memory records and promotion
+
+Records are scoped to user, project, goal, task, or session, and typed as preference, constraint, fact, decision, outcome, or gotcha. Each carries confidence, status, provenance, sensitivity, expiry, and supersession.
+
+The write path is deterministic in this release. Completed-turn observation is the primary durability path; session-end and pre-compression hooks are enrichment only and are never relied on to persist memory that would otherwise be lost.
+
+Promotion rules:
+
+- Explicit user preferences and corrections, manual goal edits, confirmed tool results, project manifests, and commits promote immediately.
+- Agent-inferred facts enter as candidates and are invisible to the capsule.
+- An inferred candidate promotes only after two independent corroborating sessions, with no conflict and no sensitivity flag.
+- Secret-shaped content is rejected from durable memory outright, and high-confidence credentials are redacted before any transcript message is stored or indexed.
+- Conflicts and sensitive personal assertions require review rather than auto-resolution.
+- Candidates expire after 30 days; episodic relevance decays after 90 days unless reinforced. User and project records persist until superseded or forgotten.
+- Forgetting removes content and its search rows, retaining only a content-free audit tombstone.
+
+Ordinary learning appears in a quiet activity feed with an unread badge. Only conflicts and sensitive candidates interrupt the user.
 
 Promotion, Coach evidence, and recommendation ranking are the same mechanism and must not be built twice.
 
-### Retrieval
-
-Ranked local retrieval over structured filters — project, goal, tier, type, recency decay — with lexical search doing the scoring. For a single user's own memory this is sufficient and, unlike vector similarity, it is inspectable when a recall returns the wrong thing. Retrieval sits behind an interface so semantic search can be added later without changing callers.
-
 ### Tool gateway
 
-Ambientic runs one long-lived local gateway that speaks the tool protocol the provider CLIs already support. Each session Ambientic starts is issued a session token bound to its session, provider, project root, goal, and permission scope.
+One long-lived gateway runs inside the Electron main process. Providers reach it through a small stdio shim, which is the transport all supported CLIs handle natively; the shim forwards to the gateway over a permission-restricted local socket rather than a locally reachable network port.
 
-```text
-             agent (any provider, any runtime)
-                          │  tool protocol + session token
-                          ▼
-   ┌───────────────────────────────────────────────────┐
-   │  Ambientic gateway                                │
-   │    token          → session identity              │
-   │    tool call      → semantic capability resolver  │
-   │    capability     → permission policy             │
-   │                     (read / draft / consequential)│
-   │    consequential  → approval boundary             │
-   │    dispatch       → adapter                       │
-   │    result         → audit journal ──▶ harvester   │
-   └────────┬──────────────────────────────────────────┘
-            │
-   ┌────────┼─────────────┬──────────────────────┐
-   ▼        ▼             ▼                      ▼
- memory   goals /      connected tool         app adapters
- tools    workflow     servers (proxied)      (deferred)
-          tools
-```
+Each managed session receives a random capability token passed only into its shim's environment. Ambientic persists only the token's hash, bound to provider, session, project, goal, task, permissions, and expiry, and revokes it on session removal, disconnect, permission change, or reauthorization. Tokens and credentials are redacted from logs.
 
-Requirements:
+The native tool surface is deliberately narrow and stable:
 
-- A single gateway instance, not one per session, so identity, permission, audit, and cache are shared and every call is attributable to a session, project, and goal.
-- Third-party credentials remain in Ambientic's own credential store. The agent holds only a session token. Revoking a session revokes its reach immediately.
-- Gateway permission requests surface through the same approval boundary as provider-native tool approvals. The user should not have to know which layer asked.
-- Every call is journaled locally, and the journal is an input to the memory harvester.
-- Tools are requested as semantic capabilities resolved to an eligible connection at validation or runtime, never as a hard-coded vendor.
+`ambientic_context_get`, `ambientic_recall`, `ambientic_remember`, `ambientic_goals` (list/get), `ambientic_task_update`, and `ambientic_capability` (search/invoke).
 
-Ambientic also acts as a proxy for tool servers the user connects once: a server configured in Ambientic becomes available to every agent on every provider, under one permission policy and one audit trail, without per-provider configuration.
+Authorization policy:
+
+- Context reads, recall, goal reads, and capability search run automatically.
+- Memory writes and ordinary task updates are audited and may use session-scoped remembered approval.
+- Consequential external writes enter the existing approval boundary and block until resolved.
+- Destructive external calls always require explicit approval and can never receive blanket remembered approval.
+- Rejection, cancellation, timeout, retry, and duplicate calls produce deterministic terminal results, and every mutation carries an idempotency key.
+
+Gateway permission requests surface through the same approval presentation as provider-native tool approvals. The user should not have to know which layer asked.
+
+### Connected tools and schema budget
+
+Ambientic connects to external tool servers itself and proxies their calls, so provider agents receive neither credentials nor raw connection configuration. Credentials stay in the tool's own store or the system keychain, never in the local database.
+
+External schemas are imported into a capability registry but are **not** exposed directly to models. Every connected server's schemas injected into every request would consume the same context budget the capsule is carefully bounding. External capabilities are therefore reached through `ambientic_capability` search and invoke, while the narrow native tools stay directly visible because models call a visible tool far more reliably than they execute a search-then-invoke sequence.
+
+Capabilities are requested semantically and resolved to an eligible connection at validation or runtime, never hard-coded to a vendor.
 
 ### Cross-provider continuity
 
-Once T1 and T2 exist, a new session's capsule *is* the handover. Provider switching stops being a distinct feature with its own document and becomes the default behavior of the memory layer. The generated handover file remains as a portable export format, not as the transfer mechanism.
+A new session's capsule is the handover. Provider switching stops being a distinct feature with its own document and becomes the default behavior of the context kernel: the new provider receives the same binding, a fresh capsule, and recall access. The generated handover file remains as an explicit portable export, not as the transfer mechanism.
+
+### Relationship to Hermes
+
+Hermes is an inspiration and a supported provider, not the foundation. Its bounded frozen memory, push/pull split, per-turn harvesting, session-end and pre-compression hooks, searchable transcripts, and tool exposure are proven patterns worth reproducing, and they are reproduced here in Ambientic's own architecture. Forking it would mean maintaining a second agent runtime and would leave the other providers without any of this, which is the opposite of the product's purpose.
 
 ### Trust boundaries specific to this layer
 
 - An agent that reads untrusted content can attempt to write memory. Candidate-only agent writes, retained provenance, and user review are the mitigation and are not optional.
-- Transcript mining stays local and is a distinct opt-in from goal and event harvesting.
-- The user can inspect exactly what any agent will see for a given project before starting it, and can edit, reject, or forget any memory record.
+- Indexing locally visible sessions requires one explicit onboarding consent, with per-provider and per-project exclusions.
+- Project scoping must prevent one project's memory from reaching another's sessions.
+- The user can inspect exactly what any agent will see for a given project before starting it, and can edit, supersede, or forget any record.
 
-## Deferred — memory and gateway backlog
+## Deferred — context kernel and gateway backlog
 
-These are specified now so the substrate is designed for them, and deliberately excluded from the first implementation.
+These are specified now so the substrate is designed for them, and deliberately excluded from this release.
 
 ### Model-assisted memory distillation
 
-Session tails are sent to a user-selected provider to distill decisions and rationale into higher-quality episodic and project memory, beyond what deterministic harvesting and local transcript mining produce.
+Session tails are sent to a user-selected provider to distill decisions and rationale into higher-quality memory, beyond what deterministic harvesting produces.
 
-Requirements before implementation: candidate queue and provenance proven in production; explicit opt-in separate from transcript mining; user-chosen distillation provider with visible token cost per session; distilled records marked as model-derived and never auto-promoted to T3; a local-only mode that disables it entirely.
+Requirements before implementation: candidate queue and provenance proven in production; explicit opt-in separate from transcript indexing; user-chosen provider with visible token cost per session; distilled records marked as model-derived and never auto-promoted to user scope; a local-only mode that disables it entirely.
+
+### Codex dynamic tools
+
+The Codex app server accepts per-thread `dynamicTools` with client-side callbacks carrying thread, turn, and call identifiers, which would let Ambientic answer tool calls on the connection it already holds rather than through a shim process.
+
+Excluded from this release because the surface is experimental and because a second dispatch path would have to be maintained alongside the shim. Reconsider as a transport optimization behind the unchanged gateway contract, not as a separate tool model.
 
 ### Native app adapters
 
-Direct adapters for Mail, Calendar, Files, and Communication behind semantic capabilities such as `calendar.event.create`, with their own OAuth flows owned by Ambientic.
+Direct adapters for Mail, Calendar, Files, and Communication behind semantic capabilities, with their own authorization flows owned by Ambientic.
 
 Requirements before implementation: capability resolver, permission policy, approval boundary, and audit journal proven with native and proxied tools; read, draft, and consequential-write permission levels enforced independently; dependent-workflow disclosure before disconnect; no success ever reported from an agent's assertion without adapter confirmation.
 
@@ -244,7 +275,11 @@ Requirements before implementation: capability resolver, permission policy, appr
 
 A native turn loop against model APIs for providers that ship no local CLI, making the capsule and gateway reachable by any model rather than any CLI.
 
-Requirements before implementation: the context assembler and gateway transport must stay runtime-agnostic from the outset, so this drops in behind the same interfaces. Adds ownership of streaming, tool-call parsing, retry, and per-provider cost accounting, plus direct API key custody — a materially different trust posture from the current model where each provider owns its own credentials.
+Requirements before implementation: the context engine and gateway contract must stay runtime-agnostic, so this drops in behind the same interfaces. Adds ownership of streaming, tool-call parsing, retry, and per-provider cost accounting, plus direct API key custody — a materially different trust posture from the current model where each provider owns its own credentials. Reconsider a Hermes sidecar only at this point, and only if no capable native runtime exists for the target models.
+
+### Further deferred
+
+Embeddings, knowledge graphs, external memory providers, remote sync, and non-macOS gateway transport.
 
 ## Trust and privacy
 

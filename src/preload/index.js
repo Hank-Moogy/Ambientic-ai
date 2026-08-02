@@ -170,3 +170,34 @@ contextBridge.exposeInMainWorld('controller', {
   },
   requestAccessibility: () => ipcRenderer.invoke('request-accessibility')
 })
+
+// Provider-neutral context and capability contract. Keep it separate from the
+// legacy controller surface so future agent runtimes can consume the same
+// narrow API without inheriting unrelated window-management commands.
+contextBridge.exposeInMainWorld('ambientic', {
+  context: {
+    listProjects: () => ipcRenderer.invoke('context-list-projects'),
+    upsertProject: (input = {}) => ipcRenderer.invoke('context-upsert-project', input),
+    inferLaunch: (input = {}) => ipcRenderer.invoke('context-infer-launch', input),
+    getBinding: (sessionId) => ipcRenderer.invoke('context-get-binding', sessionId),
+    rebind: (sessionId, patch = {}) => ipcRenderer.invoke('context-rebind', sessionId, patch)
+  },
+  memory: {
+    list: (options = {}) => ipcRenderer.invoke('memory-list', options),
+    search: (options = {}) => ipcRenderer.invoke('memory-search', options),
+    remember: (command = {}) => ipcRenderer.invoke('memory-remember', command),
+    forget: (id) => ipcRenderer.invoke('memory-forget', id),
+    resolveConflict: (id, resolution = {}) => ipcRenderer.invoke('memory-resolve-conflict', id, resolution)
+  },
+  tools: {
+    listConnections: () => ipcRenderer.invoke('tools-list-connections'),
+    upsert: (connection = {}) => ipcRenderer.invoke('tools-upsert-connection', connection),
+    test: (id) => ipcRenderer.invoke('tools-test-connection', id),
+    disable: (id, options = {}) => ipcRenderer.invoke('tools-disable-connection', id, options),
+    disconnect: (id) => ipcRenderer.invoke('tools-disconnect', id),
+    listCapabilities: (connectionId = '') => ipcRenderer.invoke('tools-list-capabilities', connectionId)
+  },
+  audit: {
+    list: (options = {}) => ipcRenderer.invoke('audit-list', options)
+  }
+})

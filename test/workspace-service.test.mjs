@@ -129,6 +129,74 @@ test('reconciles a partial Hermes ACP stream with the completed database transcr
   assert.equal(ingested.at(-1).event, 'stop_idle')
 })
 
+test('a Codex turn that ends by asking the user a question surfaces as needing you', async () => {
+  const session = { id: 'codex-question', agent: 'codex', cwd: '/tmp/project', state: 'running' }
+  const ingested = []
+  const service = new WorkspaceService({
+    list: () => [session],
+    ingest: (event) => ingested.push(event)
+  }, () => [])
+  service.snapshots.set(session.id, {
+    id: session.id, provider: 'codex', messages: [], artifacts: [], approvals: [], running: true, state: 'running'
+  })
+  service.codexClient = async () => ({
+    request: async () => ({
+      thread: {
+        id: 'thread-question',
+        turns: [{
+          id: 'turn-1',
+          status: 'completed',
+          items: [
+            { id: 'user-1', type: 'userMessage', content: [{ type: 'text', text: 'Rename the button.' }] },
+            { id: 'agent-1', type: 'agentMessage', text: 'Should the new label be "Submit" or "Continue"?' }
+          ]
+        }]
+      }
+    })
+  })
+  const events = []
+  service.on('change', (snapshot) => events.push(snapshot))
+
+  await service.finish(session.id)
+
+  assert.equal(events.at(-1).state, 'attention')
+  assert.equal(ingested.at(-1).event, 'notification')
+})
+
+test('a Codex turn that finishes ordinary work without a question stays idle', async () => {
+  const session = { id: 'codex-done', agent: 'codex', cwd: '/tmp/project', state: 'running' }
+  const ingested = []
+  const service = new WorkspaceService({
+    list: () => [session],
+    ingest: (event) => ingested.push(event)
+  }, () => [])
+  service.snapshots.set(session.id, {
+    id: session.id, provider: 'codex', messages: [], artifacts: [], approvals: [], running: true, state: 'running'
+  })
+  service.codexClient = async () => ({
+    request: async () => ({
+      thread: {
+        id: 'thread-done',
+        turns: [{
+          id: 'turn-1',
+          status: 'completed',
+          items: [
+            { id: 'user-1', type: 'userMessage', content: [{ type: 'text', text: 'Rename the button.' }] },
+            { id: 'agent-1', type: 'agentMessage', text: 'Done — renamed the button to "Submit".' }
+          ]
+        }]
+      }
+    })
+  })
+  const events = []
+  service.on('change', (snapshot) => events.push(snapshot))
+
+  await service.finish(session.id)
+
+  assert.equal(events.at(-1).state, 'idle')
+  assert.equal(ingested.at(-1).event, 'stop_idle')
+})
+
 test('a completed turn blocked on a pending approval stays "attention"', async () => {
   const session = { id: 'claude-blocked', agent: 'claude', cwd: '/tmp/project', state: 'running' }
   const ingested = []

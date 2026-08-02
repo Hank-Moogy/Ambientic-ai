@@ -18,6 +18,10 @@ function cleanDate (value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : ''
 }
 
+function cleanId (value) {
+  return cleanText(value, 120).replace(/[^a-zA-Z0-9._:-]/g, '')
+}
+
 function emptyState () {
   return { version: VERSION, goals: [], tasks: [], events: [], updatedAt: null }
 }
@@ -116,6 +120,7 @@ export class GoalsService extends EventEmitter {
     const now = this.now()
     const goal = {
       id: this.id(),
+      projectId: cleanId(input.projectId),
       title,
       outcome: cleanText(input.outcome, 600),
       why: cleanText(input.why, 1000),
@@ -145,6 +150,7 @@ export class GoalsService extends EventEmitter {
     if ('status' in patch && GOAL_STATUSES.has(patch.status)) allowed.status = patch.status
     if ('priority' in patch && ['low', 'normal', 'high'].includes(patch.priority)) allowed.priority = patch.priority
     if ('targetDate' in patch) allowed.targetDate = cleanDate(patch.targetDate)
+    if ('projectId' in patch) allowed.projectId = cleanId(patch.projectId)
     Object.assign(goal, allowed, { updatedAt: this.now() })
     this.record('goal', goal.id, 'updated', allowed)
     return copy(goal)
@@ -160,6 +166,7 @@ export class GoalsService extends EventEmitter {
     const task = {
       id: this.id(),
       goalId,
+      projectId: cleanId(input.projectId) || goal.projectId || '',
       title,
       description: cleanText(input.description, 1600),
       milestone: cleanText(input.milestone, 120),
@@ -195,6 +202,7 @@ export class GoalsService extends EventEmitter {
     }
     if ('ownerType' in patch && OWNER_TYPES.has(patch.ownerType)) allowed.ownerType = patch.ownerType
     if ('ownerName' in patch) allowed.ownerName = cleanText(patch.ownerName, 80)
+    if ('projectId' in patch) allowed.projectId = cleanId(patch.projectId)
     Object.assign(task, allowed, { updatedAt: this.now() })
     if (goal) goal.updatedAt = task.updatedAt
     this.record('task', task.id, 'updated', allowed)

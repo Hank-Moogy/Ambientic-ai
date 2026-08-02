@@ -1,12 +1,13 @@
 import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
 import { canInspectProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
+import { assembleProviderPrompt } from './context-assembler.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -211,22 +212,6 @@ function normalizePromptOptions (options = {}, provider = '') {
   return { mode, attachments, model, effort, projectContext }
 }
 
-function providerPrompt (text, { mode, attachments, projectContext }) {
-  const guidance = mode === 'plan'
-    ? 'Planning mode: inspect and reason, but do not modify files or run destructive commands. Return a concise implementation plan.'
-    : mode === 'ask'
-        ? 'Ask mode: answer and explain only. Do not modify files or run destructive commands.'
-        : ''
-  const project = projectContext
-    ? `Project context: you are working on ${projectContext.name || 'this project'} at ${projectContext.cwd}. Treat that directory as the project root. Before changing files, orient yourself by reading the nearest AGENTS.md and relevant README or project manifests, then inspect the current working tree. Do not treat this as an empty scratch workspace.`
-    : ''
-  if (!guidance && !attachments.length && !project) return text
-  const paths = attachments.length
-    ? `\nAttached local context:\n${attachments.map((item) => `- ${item.kind}: ${item.path}`).join('\n')}`
-    : ''
-  return `<ambientic-context mode="${mode}">\n${[guidance, project].filter(Boolean).join('\n')}${paths}\n</ambientic-context>\n${text}`
-}
-
 function codexInputs (text, attachments) {
   const input = [{ type: 'text', text, text_elements: [] }]
   for (const item of attachments) {
@@ -259,6 +244,18 @@ function codexThreadMessages (thread) {
 
 function codexActiveTurnId (thread) {
   return [...(thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id || ''
+}
+
+// Codex has no distinct protocol signal for "the agent is asking the user
+// something and stopped to wait for a reply" — a clarifying question ends the
+// turn exactly like a completed task does. When the turn's last item is an
+// agent message ending in a question, this is that case, and the thread
+// should surface as needing you rather than going quietly idle.
+function codexAwaitsReply (thread) {
+  const last = thread?.turns?.at(-1)?.items?.at(-1)
+  if (last?.type !== 'agentMessage') return false
+  const text = String(last.text || '').replace(/[\s*_"'`)\]]+$/, '')
+  return /\?$/.test(text)
 }
 
 function codexEventTurnId (event) {
@@ -389,7 +386,13 @@ export class WorkspaceService extends EventEmitter {
   constructor (store, getConnectors, {
     aliases = {},
     onAliasesChange,
-    taskWorkspaceRoot = join(homedir(), '.ambientic', 'workspaces')
+    taskWorkspaceRoot = join(homedir(), '.ambientic', 'workspaces'),
+    contextEngine = null,
+    capabilityGateway = null,
+    gatewayExecutable = process.execPath,
+    gatewayShimPath = '',
+    contextArtifactRoot = join(homedir(), '.ambientic', 'context-sessions'),
+    spawnProcess = spawn
   } = {}) {
     super()
     this.store = store
@@ -412,6 +415,13 @@ export class WorkspaceService extends EventEmitter {
     this.aliases = new Map(Object.entries(aliases || {}).filter(([, title]) => String(title || '').trim()))
     this.onAliasesChange = onAliasesChange
     this.taskWorkspaceRoot = taskWorkspaceRoot
+    this.contextEngine = contextEngine
+    this.capabilityGateway = capabilityGateway
+    this.gatewayExecutable = gatewayExecutable
+    this.gatewayShimPath = gatewayShimPath
+    this.contextArtifactRoot = contextArtifactRoot
+    this.spawnProcess = spawnProcess
+    this.gatewayRuntime = new Map()
   }
 
   connector (id) { return this.getConnectors().find((item) => item.id === id) }
@@ -428,6 +438,57 @@ export class WorkspaceService extends EventEmitter {
   }
 
   sessionFor (id) { return this.store.list().find((item) => item.id === id) || this.history.get(id) }
+
+  providerSessionId (session) {
+    if (session.agent === 'codex') return this.codexThreadId(session)
+    if (session.agent === 'claude') return this.claudeSessionId(session)
+    return session.id
+  }
+
+  prepareContext ({ provider, providerSessionId, cwd = '', prompt = '', contextBinding = {} }) {
+    if (!this.contextEngine) return null
+    const prepared = this.contextEngine.prepareSession({
+      provider,
+      providerSessionId,
+      cwd,
+      prompt,
+      projectId: contextBinding.projectId,
+      goalId: contextBinding.goalId,
+      taskId: contextBinding.taskId
+    })
+    return this.contextFiles(prepared.binding)
+  }
+
+  ensureContext (session, { prompt = '', contextBinding = {} } = {}) {
+    if (!this.contextEngine) return null
+    const providerSessionId = this.providerSessionId(session)
+    const existing = this.contextEngine.bindingFor(session.agent, providerSessionId)
+    if (existing) return this.contextFiles(existing)
+    return this.prepareContext({ provider: session.agent, providerSessionId, cwd: session.cwd || '', prompt, contextBinding })
+  }
+
+  contextFiles (binding) {
+    if (!binding || !this.capabilityGateway || !this.gatewayShimPath) return binding ? { binding, capsule: binding.capsuleText, mcp: null } : null
+    let runtime = this.gatewayRuntime.get(binding.id)
+    if (!runtime) {
+      // Starting a fresh shim runtime reauthorizes this binding. Revoke any
+      // token left by an earlier app process before issuing the replacement.
+      this.capabilityGateway.revokeBinding(binding.id)
+      const session = this.capabilityGateway.issueSession(binding.id)
+      const mcp = this.capabilityGateway.configurationFor(session, { executable: this.gatewayExecutable, shimPath: this.gatewayShimPath })
+      mkdirSync(this.contextArtifactRoot, { recursive: true, mode: 0o700 })
+      const safeId = String(binding.id).replace(/[^a-zA-Z0-9._-]/g, '_')
+      const capsulePath = join(this.contextArtifactRoot, `${safeId}.md`)
+      const mcpConfigPath = join(this.contextArtifactRoot, `${safeId}.mcp.json`)
+      // The provider must receive the exact bytes represented by capsuleHash.
+      // Adding even a trailing newline makes the audit hash misleading.
+      writeFileSync(capsulePath, binding.capsuleText, { mode: 0o600 })
+      writeFileSync(mcpConfigPath, `${JSON.stringify({ mcpServers: { ambientic: mcp } }, null, 2)}\n`, { mode: 0o600 })
+      runtime = { binding, session, mcp, capsulePath, mcpConfigPath }
+      this.gatewayRuntime.set(binding.id, runtime)
+    } else runtime.binding = binding
+    return { ...runtime, capsule: binding.capsuleText }
+  }
 
   recentProjects (limit = 4) {
     const projects = new Map()
@@ -484,10 +545,15 @@ export class WorkspaceService extends EventEmitter {
         updatedAt: Math.max(Number(session.updatedAt || session.lastSeen || 0), Number(snapshot.updatedAt || 0))
       })
     }
-    return [...merged.values()].map((session) => {
+    const sessions = [...merged.values()].map((session) => {
       const alias = this.aliases.get(session.id)
       return alias ? { ...session, task: alias, taskSource: 'user' } : session
     }).sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))
+    this.contextEngine?.backfillProjects(sessions.filter((session) => {
+      const cwd = String(session.cwd || '').trim()
+      return cwd && canInspectProjectRoot(cwd) && cwd !== this.taskWorkspaceRoot && !cwd.startsWith(`${this.taskWorkspaceRoot}/`)
+    }))
+    return sessions
   }
 
   baseSnapshot (session) {
@@ -540,6 +606,7 @@ export class WorkspaceService extends EventEmitter {
     const id = session?.id ?? snapshot?.id
     if (snapshot?.error) return 'attention'
     if (this.hasPendingApproval(id)) return 'attention'
+    if (snapshot?.awaitingReply) return 'attention'
     if (session?.state === 'attention' || session?.state === 'waiting') return session.state
     // Codex Desktop and hook-backed terminals own their provider process in a
     // different runtime from Ambientic's passive transcript reader. A
@@ -596,15 +663,20 @@ export class WorkspaceService extends EventEmitter {
         snapshot.messages = codexThreadMessages(result.thread)
         snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
         snapshot.running = codexStatusIsRunning(result.thread?.status)
+        snapshot.awaitingReply = !snapshot.running && codexAwaitsReply(result.thread)
         snapshot.turnStateKnown = true
         const activeTurnId = codexActiveTurnId(result.thread)
         if (snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
         else if (!snapshot.running) this.activeTurns.delete(id)
         // Reading dormant history must not promote it onto the live hardware
         // surface. A genuinely active provider turn is promoted immediately;
-        // existing live sessions are also corrected back to idle.
+        // existing live sessions are also corrected back to idle — unless
+        // Codex ended its last turn by asking the user a question, which
+        // still needs a reply to move forward.
         if (snapshot.running) this.ingestLifecycle(id, 'tool')
-        else if (!session.history && !session.tty && session.externalSource !== 'codex-desktop') this.ingestLifecycle(id, 'stop_idle')
+        else if (!session.history && !session.tty && session.externalSource !== 'codex-desktop') {
+          this.ingestLifecycle(id, snapshot.awaitingReply ? 'notification' : 'stop_idle')
+        }
       } else if (session.agent === 'claude') {
         snapshot.transcriptPath = this.claudeTranscriptFor(session)
         const disk = claudeMessages(snapshot.transcriptPath).filter((entry) => !isCompactionSeed(entry))
@@ -612,6 +684,13 @@ export class WorkspaceService extends EventEmitter {
       } else if (session.agent === 'hermes') {
         snapshot.messages = await this.hermesMessages(session.id)
       }
+      const context = this.ensureContext(session)
+      if (context?.binding) snapshot.contextBinding = context.binding
+      this.contextEngine?.observeTurn({
+        provider: session.agent,
+        providerSessionId: this.providerSessionId(session),
+        messages: snapshot.messages.filter((entry) => ['user', 'assistant'].includes(entry.role))
+      })
       snapshot.error = ''
     } catch (error) {
       snapshot.error = error.message
@@ -790,10 +869,63 @@ export class WorkspaceService extends EventEmitter {
     })
   }
 
+  requestGatewayApproval ({ binding, tool, connection, permission = 'write', arguments: args = {}, title = '' }) {
+    const sessionId = this.uiSessionId(binding.provider, binding.providerSessionId)
+    const session = this.sessionFor(sessionId)
+    if (!session) return Promise.resolve(false)
+    const id = `ambientic:${randomUUID()}`
+    const approval = {
+      id,
+      provider: 'ambientic',
+      providerLabel: binding.provider,
+      sessionId,
+      method: 'GatewayToolCall',
+      title: title || `${connection?.name || 'Ambientic'}: ${tool}`,
+      tool,
+      connection: connection?.name || 'Ambientic',
+      project: binding.project?.name || '',
+      goal: binding.goal?.title || '',
+      task: binding.task?.title || '',
+      permission,
+      destructive: permission === 'destructive',
+      detail: args,
+      options: [],
+      canRemember: permission !== 'destructive'
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.pendingApprovals.has(id)) return
+        this.pendingApprovals.delete(id)
+        const current = this.snapshots.get(sessionId)
+        if (current) this.emitSnapshot({ ...current })
+        resolve({ allowed: false, remember: false, outcome: 'timed out' })
+      }, 9 * 60 * 1000)
+      timer.unref?.()
+      this.pendingApprovals.set(id, { ...approval, resolve, timer })
+      const snapshot = this.snapshots.get(sessionId) || this.baseSnapshot(session)
+      this.emitSnapshot({ ...snapshot })
+    })
+  }
+
+  cancelGatewayApprovals (sessionId, outcome = 'cancelled') {
+    let cancelled = 0
+    for (const [approvalId, approval] of this.pendingApprovals) {
+      if (approval.provider !== 'ambientic' || approval.sessionId !== sessionId) continue
+      if (approval.timer) clearTimeout(approval.timer)
+      approval.resolve({ allowed: false, remember: false, outcome })
+      this.pendingApprovals.delete(approvalId)
+      cancelled += 1
+    }
+    return cancelled
+  }
+
   async resolveApproval (approvalId, allow, remember = false) {
     const approval = this.pendingApprovals.get(approvalId)
     if (!approval) return false
-    if (approval.provider === 'hermes') {
+    if (approval.provider === 'ambientic') {
+      if (approval.timer) clearTimeout(approval.timer)
+      approval.resolve({ allowed: Boolean(allow), remember: Boolean(allow && remember && !approval.destructive), outcome: allow ? 'approved' : 'rejected' })
+    } else if (approval.provider === 'hermes') {
       const option = approval.options.find((item) => allow ? /allow|approve/i.test(`${item.kind} ${item.name}`) : /reject|deny/i.test(`${item.kind} ${item.name}`)) || approval.options[allow ? 0 : approval.options.length - 1]
       approval.rpc.respond(approval.requestId, { outcome: option ? { outcome: 'selected', optionId: option.optionId } : { outcome: 'cancelled' } })
     } else if (approval.provider === 'claude') {
@@ -822,7 +954,7 @@ export class WorkspaceService extends EventEmitter {
       approval.rpc.respond(approval.requestId, { decision: allow ? (remember ? 'acceptForSession' : 'accept') : 'decline' })
     }
     this.pendingApprovals.delete(approvalId)
-    this.ingestLifecycle(approval.sessionId, (approval.provider === 'claude' && allow) || this.activeTurns.has(approval.sessionId) ? 'tool' : 'stop_idle')
+    this.ingestLifecycle(approval.sessionId, ((approval.provider === 'claude' || approval.provider === 'ambientic') && allow) || this.activeTurns.has(approval.sessionId) ? 'tool' : 'stop_idle')
     const snapshot = this.snapshots.get(approval.sessionId)
     if (snapshot) this.emitSnapshot({ ...snapshot })
     return true
@@ -834,6 +966,7 @@ export class WorkspaceService extends EventEmitter {
     if (!session) throw new Error('This session is no longer available.')
     const snapshot = await this.read(id)
     const promptOptions = normalizePromptOptions(options, session.agent)
+    const context = this.ensureContext(session, { prompt: text, contextBinding: options.contextBinding || {} })
     const hasConversation = snapshot.messages.some((entry) => entry.role === 'user' || entry.role === 'assistant')
     const cwd = String(session.cwd || '')
     if (!promptOptions.projectContext && !hasConversation && !this.activeTurns.has(id) && cwd && canInspectProjectRoot(cwd) && cwd !== this.taskWorkspaceRoot && !cwd.startsWith(`${this.taskWorkspaceRoot}/`)) {
@@ -853,12 +986,16 @@ export class WorkspaceService extends EventEmitter {
     if (session.agent === 'codex') {
       const rpc = await this.codexClient()
       const threadId = this.codexThreadId(session)
-      await rpc.request('thread/resume', { threadId })
+      await rpc.request('thread/resume', {
+        threadId,
+        ...(context?.binding?.capsuleText ? { developerInstructions: context.binding.capsuleText } : {}),
+        ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
+      })
       const activeTurnId = this.activeTurns.get(id)
       const collaborationMode = activeTurnId ? null : await this.codexCollaborationMode(rpc, promptOptions.mode, promptOptions.effort, promptOptions.model)
       const providerText = collaborationMode && promptOptions.mode !== 'ask'
-        ? (promptOptions.projectContext ? providerPrompt(text, { ...promptOptions, mode: 'build', attachments: [] }) : text)
-        : providerPrompt(text, promptOptions)
+        ? (promptOptions.projectContext ? assembleProviderPrompt(text, { ...promptOptions, mode: 'build', attachments: [] }) : text)
+        : assembleProviderPrompt(text, promptOptions)
       const input = codexInputs(providerText, promptOptions.attachments)
       if (activeTurnId) {
         await rpc.request('turn/steer', {
@@ -882,16 +1019,19 @@ export class WorkspaceService extends EventEmitter {
       }
     } else if (session.agent === 'hermes') {
       const rpc = await this.hermesClient()
-      await rpc.request('session/resume', { sessionId: id, cwd: session.cwd || homedir(), mcpServers: [] })
+      await rpc.request('session/resume', { sessionId: id, cwd: session.cwd || homedir(), mcpServers: context?.mcp ? [{ name: 'ambientic', ...context.mcp }] : [] })
       this.activeTurns.set(id, id)
-      void rpc.request('session/prompt', { sessionId: id, prompt: [{ type: 'text', text: providerPrompt(text, promptOptions) }] }, 60 * 60 * 1000).then(() => this.finish(id)).catch((error) => this.fail(id, error))
+      const hermesText = hasConversation || !context?.binding?.capsuleText
+        ? assembleProviderPrompt(text, promptOptions)
+        : `${context.binding.capsuleText}\n\n${assembleProviderPrompt(text, promptOptions)}`
+      void rpc.request('session/prompt', { sessionId: id, prompt: [{ type: 'text', text: hermesText }] }, 60 * 60 * 1000).then(() => this.finish(id)).catch((error) => this.fail(id, error))
     } else if (session.agent === 'claude') {
-      this.runClaude(session, providerPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort })
+      this.runClaude(session, assembleProviderPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort, context })
     } else throw new Error(`Managed prompts are not supported for ${session.agent}.`)
     return this.emitSnapshot(snapshot)
   }
 
-  async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build' }) {
+  async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build', contextBinding = {} }) {
     const requestedDirectory = String(cwd || '').trim()
     const workingDirectory = requestedDirectory || createPrivateTaskWorkspace(this.taskWorkspaceRoot, prompt)
     if (!isAbsolute(workingDirectory)) throw new Error('The selected project folder is not available.')
@@ -906,32 +1046,42 @@ export class WorkspaceService extends EventEmitter {
     if (provider === 'codex') {
       const rpc = await this.codexClient()
       const normalized = normalizePromptOptions({ model, effort, mode }, provider)
-      const result = await rpc.request('thread/start', { cwd: workingDirectory, ...(normalized.model ? { model: normalized.model } : {}) })
+      const context = this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
+      const result = await rpc.request('thread/start', {
+        cwd: workingDirectory,
+        ...(normalized.model ? { model: normalized.model } : {}),
+        ...(context?.binding?.capsuleText ? { developerInstructions: context.binding.capsuleText } : {}),
+        ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
+      })
       const thread = result.thread
+      if (context?.binding) this.contextFiles(this.contextEngine.bindProviderSession(context.binding.id, thread.id))
       this.store.ingest({ event: 'session_start', session_id: thread.id, agent: 'codex', project: basename(workingDirectory), cwd: workingDirectory, summary: thread.name || thread.preview || 'New Codex task' })
-      if (prompt) await this.send(thread.id, prompt, { ...normalized, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
+      if (prompt) await this.send(thread.id, prompt, { ...normalized, contextBinding, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       else if (normalized.effort) await rpc.request('thread/settings/update', { threadId: thread.id, effort: normalized.effort })
       return thread.id
     }
     if (provider === 'hermes') {
       const rpc = await this.hermesClient()
-      const result = await rpc.request('session/new', { cwd: workingDirectory, mcpServers: [] })
+      const context = this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
+      const result = await rpc.request('session/new', { cwd: workingDirectory, mcpServers: context?.mcp ? [{ name: 'ambientic', ...context.mcp }] : [] })
       const id = result.sessionId
+      if (context?.binding) this.contextFiles(this.contextEngine.bindProviderSession(context.binding.id, id))
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'hermes', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Hermes task' })
-      if (prompt) await this.send(id, prompt, { mode, model, effort, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
+      if (prompt) await this.send(id, prompt, { mode, model, effort, contextBinding, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       return id
     }
     if (provider === 'claude') {
       if (this.connector('claude')?.manageable === false) throw new Error('Claude Code is not logged in. Run `claude /login` in a terminal, then refresh Ambientic connectors.')
       const id = randomUUID()
+      this.prepareContext({ provider, providerSessionId: id, cwd: workingDirectory, prompt, contextBinding })
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'claude', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Claude task' })
-      if (prompt) await this.send(id, prompt, { mode, model, effort, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
+      if (prompt) await this.send(id, prompt, { mode, model, effort, contextBinding, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       return id
     }
     throw new Error('Choose Codex, Claude Code, or Hermes.')
   }
 
-  runClaude (session, prompt, { compacted = false, mode = 'build', model = '', effort = '' } = {}) {
+  runClaude (session, prompt, { compacted = false, mode = 'build', model = '', effort = '', context = null } = {}) {
     const path = this.connector('claude')?.path || 'claude'
     // Resume only once Claude has actually persisted this session's transcript.
     // A brand-new managed task carries a fresh UUID that Claude has never seen,
@@ -942,13 +1092,16 @@ export class WorkspaceService extends EventEmitter {
     const started = Boolean(this.claudeTranscriptFor(session))
     const permissionMode = mode === 'build' ? 'acceptEdits' : 'plan'
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', permissionMode]
+    context ||= this.ensureContext(session, { prompt })
+    if (context?.capsulePath) args.push('--append-system-prompt-file', context.capsulePath)
+    if (context?.mcpConfigPath) args.push('--mcp-config', context.mcpConfigPath, '--strict-mcp-config')
     // Only forward these when the user picked something; omitting them lets
     // Claude Code apply its own configured defaults.
     if (model) args.push('--model', model)
     if (effort) args.push('--effort', effort)
     args.push(started ? '--resume' : '--session-id', claudeId)
     this.claudeAttempts.set(session.id, { prompt, compacted, mode, model, effort, resultError: '' })
-    const child = spawn(path, args, { cwd: session.cwd || homedir(), env: providerSpawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = this.spawnProcess(path, args, { cwd: session.cwd || homedir(), env: providerSpawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
     child.stdout.on('data', (chunk) => {
@@ -1021,7 +1174,11 @@ export class WorkspaceService extends EventEmitter {
     const session = this.sessionFor(id)
     if (!session) { this.claudeAttempts.delete(id); return this.fail(id, new Error('This conversation is no longer available to compact.')) }
     const summary = this.compactClaudeContext(session)
-    this.claudeRemap.set(id, randomUUID())
+    const previousProviderId = this.claudeSessionId(session)
+    const nextProviderId = randomUUID()
+    this.claudeRemap.set(id, nextProviderId)
+    const binding = this.contextEngine?.bindingFor('claude', previousProviderId)
+    if (binding) this.contextFiles(this.contextEngine.bindProviderSession(binding.id, nextProviderId))
     const snapshot = this.snapshots.get(id)
     if (snapshot) {
       snapshot.messages.push(message('activity', 'This conversation grew past the model context window. Ambientic compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
@@ -1127,7 +1284,8 @@ export class WorkspaceService extends EventEmitter {
 
   interrupt (id) {
     const active = this.activeTurns.get(id)
-    if (!active) return false
+    const cancelledApprovals = this.cancelGatewayApprovals(id)
+    if (!active) return cancelledApprovals > 0
     const session = this.sessionFor(id)
     if (session?.agent === 'codex') this.codex?.request('turn/interrupt', { threadId: this.codexThreadId(session), turnId: active }).catch(() => {})
     else if (session?.agent === 'hermes') this.hermes?.request('session/cancel', { sessionId: id }).catch(() => {})
@@ -1154,23 +1312,32 @@ export class WorkspaceService extends EventEmitter {
           console.error('[ambientic] Hermes transcript reconciliation failed:', error.message)
         }
       }
+      let awaitingReply = false
       if (session?.agent === 'codex') {
         try {
           const rpc = await this.codexClient()
           const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
           snapshot.messages = codexThreadMessages(result.thread)
           snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
+          awaitingReply = codexAwaitsReply(result.thread)
+          snapshot.awaitingReply = awaitingReply
         } catch (error) {
           console.error('[ambientic] Codex transcript reconciliation failed:', error.message)
         }
       }
       for (const entry of snapshot.messages) delete entry.streaming
       snapshot.updatedAt = Date.now()
-      this.ingestLifecycle(id, this.hasPendingApproval(id) ? 'notification' : 'stop_idle')
+      this.contextEngine?.observeTurn({
+        provider: session?.agent,
+        providerSessionId: session ? this.providerSessionId(session) : id,
+        messages: snapshot.messages.filter((entry) => ['user', 'assistant'].includes(entry.role))
+      })
+      this.ingestLifecycle(id, this.hasPendingApproval(id) || awaitingReply ? 'notification' : 'stop_idle')
       this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true })
     }
     // A finished turn is only "needs you" when the agent is actually blocked on
-    // a pending approval; otherwise it is simply idle/done, not red.
+    // a pending approval, or Codex ended the turn by asking a clarifying
+    // question; otherwise it is simply idle/done, not red.
     return true
   }
 
@@ -1182,6 +1349,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   stop () {
+    for (const session of new Set([...this.pendingApprovals.values()].filter((item) => item.provider === 'ambientic').map((item) => item.sessionId))) this.cancelGatewayApprovals(session, 'cancelled because Ambientic stopped')
     this.codex?.stop()
     this.hermes?.stop()
     for (const active of this.activeTurns.values()) if (typeof active.kill === 'function') active.kill('SIGTERM')

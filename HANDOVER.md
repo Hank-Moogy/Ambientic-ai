@@ -26,10 +26,93 @@ The product should own the user experience and normalized session model, not pro
 
 ## Current objective
 
-Memory layer and tool gateway — the provider-agnostic substrate. Specified
-2026-08-01 in `PRODUCT.md` (pillar 0 + the *Memory layer and tool gateway*
-section) and sequenced in `NEXT_STEPS.md` Phase 1.6. No code has been written
-for it yet; the next session starts at Phase 1.6a.
+Finish release validation for the implemented context kernel and tool gateway.
+The code and renderer work for C1–C6 and H1–H5 are in the working tree; the
+Electron-native package smoke passes, leaving one live three-provider/external-
+MCP acceptance pass. `HANDOVER.md` remains a portable export, not the normal
+cross-provider continuity path.
+
+## Session log — 2026-08-02 (context platform implemented)
+
+- Added the canonical SQLite/FTS5 store, ordered migrations and backups, project
+  backfill, session bindings, frozen capsules, deterministic memory observation,
+  redaction, exclusions, corroboration, conflicts, supersession, and forgetting.
+- Added one permission-restricted local gateway and stdio MCP shim with hashed,
+  scoped, expiring session capabilities; native Ambientic tools; approval,
+  cancellation, audit, namespaced idempotency; and generic stdio/Streamable HTTP
+  MCP discovery and proxying.
+- Wired Claude, Codex, and Hermes through their native instruction and MCP seams.
+  Codex dynamic tools remain deliberately disabled.
+- Added preload contracts plus the New Agent context selector, thread capsule and
+  activity panel, Memory workspace, Apps & Tools, gateway approval metadata, and
+  onboarding transcript-consent control. Visual QA passed at desktop and 720 px.
+- Extracted the legacy prompt wrapper behind a byte-regression-tested assembler;
+  kept Goals and Workflows JSON-backed behind repository interfaces.
+- Automated local-release tests, production renderer build, real Unix-socket
+  gateway transport, Electron 33 native rebuild, and packaged-app SQLite/FTS5
+  smoke pass. Do not reset a broken database; the startup error intentionally
+  preserves it for recovery.
+
+## Session log — 2026-08-02 (architecture settled, docs aligned)
+
+Second design session. The plan from 2026-08-01 was challenged against a
+competing proposal and merged. Three positions from the first design were
+overturned and are now settled:
+
+1. **Gateway transport.** A localhost HTTP gateway was wrong — a TCP port is
+   reachable by any local process. Replaced by one long-lived gateway plus a
+   small stdio MCP shim per session, forwarding over a permission-restricted
+   local socket, with the capability token passed only through the shim's
+   environment and persisted as a hash.
+2. **Tool schema budget.** The first design bounded the capsule to ~1200 tokens
+   and would then have injected every proxied server's schemas into every
+   request. External capabilities now go behind `ambientic_capability`
+   search/invoke; only the narrow native tools stay directly visible.
+3. **Goal inference.** Titles-only degradation was replaced by a seven-step
+   inference ladder, made safe by showing the inferred binding before launch and
+   allowing correction afterwards. Inference is acceptable when visible, not
+   when silent.
+
+**Settled technical choices:** SQLite/FTS5 via `better-sqlite3` as the canonical
+store with native packaging as a release gate; goals and workflows stay JSON
+behind repository interfaces; ~900-token frozen capsule with a 1200 hard cap,
+bytes and hash persisted per session; deterministic harvesting only; Hermes
+reproduced, not forked.
+
+**Verified against the installed toolchain this session, not assumed:**
+
+- `claude --help` confirms `--append-system-prompt-file`, `--mcp-config`, and
+  `--strict-mcp-config` all exist. C5's Claude path is sound as written.
+- `codex app-server generate-json-schema --out DIR` dumps the full protocol.
+  `ThreadStartParams` accepts `developerInstructions`, a free-form `config`
+  object, and `dynamicTools`. C5's Codex path is sound. Dynamic tools are
+  deliberately deferred: experimental, and a second dispatch path is not worth
+  maintaining alongside the shim.
+- Hermes is `NousResearch/hermes-agent`, MIT, Python, source at
+  `~/.hermes/hermes-agent`. Its `agent/memory_provider.py` defines the lifecycle
+  worth copying (`system_prompt_block`, `prefetch`, `sync_turn`,
+  `get_tool_schemas`, `handle_tool_call`, `on_session_end`, `on_pre_compress`).
+  Its built-in memory store is a single markdown file at
+  `~/.hermes/memories/USER.md`; external providers are third-party services.
+  There is no retrieval engine in there to harvest — the value is the interface.
+
+**Baseline checkpoint:** commit `906f21a` preserves the working tree, including
+pre-existing uncommitted work and the in-flight context contract, store, and UI
+scaffolding. The stray bundled `index.js` at the repo root is excluded from it —
+that is electron-vite output that landed outside the gitignored `out/`, and it
+should be deleted or moved rather than committed.
+
+**Lane discipline — active risk.** Two agents are working this repo
+concurrently. The backend lane owns `src/main/**`, preload, package/build config,
+the shim, migrations, and backend tests. The product lane owns
+`src/renderer/**`, renderer tests, and product documentation. As of this session
+that split was not being observed: renderer files and `package.json` were both
+being written from one lane on `agent/workflow-studio`, not on the planned
+`feature/context-kernel-gateway` and `feature/context-memory-ui` branches. Split
+the branches before the next merge or the integration step will be painful.
+
+This session touched documentation only: `PRODUCT.md`, `NEXT_STEPS.md`,
+`README.md`, and this file. No source files were modified.
 
 Previous objective, now landed: make Claude usage actually display (broken since
 the status-line payload dropped rate_limits), plus main-process diagnostic

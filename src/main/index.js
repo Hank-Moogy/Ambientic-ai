@@ -25,8 +25,10 @@ import { ensureEnhancedPath } from './env-path.mjs'
 import { initFileLogging, logFilePath } from './logging.mjs'
 import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-mode.mjs'
 import { readBuildInfo } from './build-info.mjs'
-import { createGoalsService } from './goals-service.mjs'
-import { createWorkflowService } from './workflow-service.mjs'
+import { createGoalsRepository, createWorkflowsRepository } from './repositories.mjs'
+import { createContextStore } from './context-store.mjs'
+import { createContextEngine } from './context-engine.mjs'
+import { createCapabilityGateway } from './capability-gateway.mjs'
 
 // Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
 // Finder-launched app otherwise only has launchd's minimal PATH, which lacks
@@ -100,6 +102,10 @@ let claudeAuth = null
 let ambientMode = null
 let goals = null
 let workflows = null
+let contextStore = null
+let contextEngine = null
+let capabilityGateway = null
+let contextStartupError = ''
 let pendingWorkspaceSessionId = ''
 let workspaceListTimer = null
 let workspaceRendererFailures = []
@@ -108,6 +114,12 @@ function sendToWindows (channel, payload) {
   for (const target of [win, workspaceWin]) {
     if (target && !target.isDestroyed()) target.webContents.send(channel, payload)
   }
+}
+
+function requireContextService (service, label = 'context service') {
+  if (contextStartupError) throw new Error(`Ambientic preserved the local context database but could not open it: ${contextStartupError}. Open the Ambientic data folder to recover or restore the database.`)
+  if (!service) throw new Error(`Ambientic ${label} is not ready yet.`)
+  return service
 }
 
 function stopPointerResize () {
@@ -675,6 +687,42 @@ ipcMain.handle('set-workflow-enabled', (_event, workflowId, enabled) => workflow
 ipcMain.handle('run-workflow', (_event, workflowId) => workflows.startRun(workflowId))
 ipcMain.handle('approve-workflow-run', (_event, runId, allow) => workflows.approve(runId, allow))
 ipcMain.handle('cancel-workflow-run', (_event, runId) => workflows.cancel(runId))
+ipcMain.handle('context-list-projects', () => requireContextService(contextStore).listProjects())
+ipcMain.handle('context-upsert-project', (_event, input = {}) => requireContextService(contextStore).upsertProject(input))
+ipcMain.handle('context-infer-launch', (_event, input = {}) => requireContextService(contextEngine).inferLaunch(input))
+ipcMain.handle('context-get-binding', (_event, sessionId) => {
+  const session = workspace?.sessionFor(String(sessionId || ''))
+  if (!session) return null
+  const providerId = workspace.providerSessionId(session)
+  return contextEngine?.bindingFor(session.agent, providerId) || null
+})
+ipcMain.handle('context-rebind', (_event, sessionId, patch = {}) => {
+  const session = workspace?.sessionFor(String(sessionId || ''))
+  if (!session) throw new Error('This session is no longer available.')
+  const providerId = workspace.providerSessionId(session)
+  const binding = contextEngine?.bindingFor(session.agent, providerId)
+  if (!binding) throw new Error('This session does not have an Ambientic context binding yet.')
+  return contextEngine.rebind(binding.id, patch)
+})
+ipcMain.handle('memory-list', (_event, options = {}) => ({ memories: requireContextService(contextStore).listMemory(options) }))
+ipcMain.handle('memory-search', (_event, options = {}) => ({ memories: requireContextService(contextEngine).searchAll({ query: options.query || '', limit: options.limit || 50 }) }))
+ipcMain.handle('memory-remember', (_event, command = {}) => {
+  if (command.id && !command.supersedesId) {
+    const current = contextStore?.getMemory(command.id)
+    if (current && command.content !== current.content) return contextEngine.supersede(command.id, command)
+    if (current && command.status === 'active') return contextStore.updateMemoryStatus(command.id, 'active')
+  }
+  return contextEngine.remember(command)
+})
+ipcMain.handle('memory-forget', (_event, id) => contextEngine?.forget(String(id || '')) || false)
+ipcMain.handle('memory-resolve-conflict', (_event, id, resolution = {}) => contextEngine?.resolveConflict(String(id || ''), resolution))
+ipcMain.handle('tools-list-connections', () => ({ connections: requireContextService(capabilityGateway).listConnections() }))
+ipcMain.handle('tools-upsert-connection', (_event, connection = {}) => requireContextService(capabilityGateway).upsertConnection(connection))
+ipcMain.handle('tools-test-connection', (_event, id) => requireContextService(capabilityGateway).testConnection(String(id || '')))
+ipcMain.handle('tools-disable-connection', (_event, id, options = {}) => requireContextService(capabilityGateway).disableConnection(String(id || ''), Boolean(options.disabled)))
+ipcMain.handle('tools-disconnect', (_event, id) => requireContextService(capabilityGateway).disconnect(String(id || '')))
+ipcMain.handle('tools-list-capabilities', (_event, connectionId = '') => ({ capabilities: contextStore?.listCapabilities({ connectionId: String(connectionId || '') }) || [] }))
+ipcMain.handle('audit-list', (_event, options = {}) => ({ events: requireContextService(contextStore).listAudit({ limit: options.limit || 200, bindingId: options.bindingId || '', category: options.category || '' }).map((item) => ({ ...item, type: item.eventType, title: item.eventType.replaceAll('.', ' ') })) }))
 ipcMain.handle('get-usage', () => usage.getState())
 ipcMain.handle('get-consumption-ledger', () => consumptionLedger?.getState() || null)
 ipcMain.handle('get-ambient-mode', () => ambientMode?.getState() || {
@@ -699,8 +747,8 @@ ipcMain.handle('dismiss-provider-auth', (_event, provider) => providerAuthState.
 ipcMain.handle('get-onboarding', () => {
   const value = loadPrefs().onboarding
   return value && typeof value === 'object'
-    ? { completed: false, step: 0, name: '', ...value }
-    : { completed: false, step: 0, name: '' }
+    ? { completed: false, step: 0, name: '', memoryConsent: false, ...value }
+    : { completed: false, step: 0, name: '', memoryConsent: false }
 })
 ipcMain.handle('save-onboarding', (_event, patch = {}) => {
   const prefs = loadPrefs()
@@ -709,6 +757,7 @@ ipcMain.handle('save-onboarding', (_event, patch = {}) => {
     completed: Boolean(patch.completed ?? current.completed),
     step: Math.max(0, Math.min(3, Number(patch.step ?? current.step) || 0)),
     name: String(patch.name ?? current.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 48),
+    memoryConsent: Boolean(patch.memoryConsent ?? current.memoryConsent),
     completedAt: patch.completed ? Date.now() : (current.completedAt || null)
   }
   savePrefs({ ...prefs, onboarding })
@@ -716,7 +765,7 @@ ipcMain.handle('save-onboarding', (_event, patch = {}) => {
 })
 ipcMain.handle('reset-onboarding', () => {
   const prefs = loadPrefs()
-  const onboarding = { completed: false, step: 0, name: '' }
+  const onboarding = { completed: false, step: 0, name: '', memoryConsent: false }
   savePrefs({ ...prefs, onboarding })
   return onboarding
 })
@@ -1215,13 +1264,37 @@ app.whenReady().then(() => {
     app.dock.show()
   }
   const loginItem = ensureLaunchAtLoginPreference()
+  goals = createGoalsRepository({ file: join(app.getPath('userData'), 'goals.json') })
+  goals.on('change', (snapshot) => sendToWindows('goals', snapshot))
+  try {
+    contextStore = createContextStore({ file: join(app.getPath('userData'), 'ambientic-context.db') })
+    contextEngine = createContextEngine({
+      store: contextStore,
+      goals,
+      consent: () => Boolean(loadPrefs().onboarding?.memoryConsent)
+    })
+    capabilityGateway = createCapabilityGateway({
+      store: contextStore,
+      contextEngine,
+      goals,
+      workflows: () => workflows?.list(),
+      socketPath: join(app.getPath('userData'), 'ambientic-gateway.sock'),
+      requestApproval: (request) => workspace?.requestGatewayApproval(request) || false
+    })
+    capabilityGateway.start()
+  } catch (error) {
+    contextStartupError = error.message
+    console.error(`[ambientic] context database unavailable; preserved for recovery: ${error.message}`)
+  }
   workspace = new WorkspaceService(store, () => connectors, {
     aliases: prefs.threadAliases,
-    onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases })
+    onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases }),
+    contextEngine,
+    capabilityGateway,
+    gatewayExecutable: process.execPath,
+    gatewayShimPath: app.isPackaged ? join(process.resourcesPath, 'ambientic-mcp-shim.mjs') : join(app.getAppPath(), 'resources', 'ambientic-mcp-shim.mjs')
   })
-  goals = createGoalsService({ file: join(app.getPath('userData'), 'goals.json') })
-  goals.on('change', (snapshot) => sendToWindows('goals', snapshot))
-  workflows = createWorkflowService({
+  workflows = createWorkflowsRepository({
     file: join(app.getPath('userData'), 'workflows.json'),
     connectors: () => connectors,
     executeAgentStep: async ({ provider, prompt }) => ({
@@ -1308,4 +1381,4 @@ app.on('second-instance', () => {
 })
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); workflows?.stopScheduler(); claudeAuth?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); capabilityGateway?.stop(); contextStore?.close(); workflows?.stopScheduler(); claudeAuth?.stop(); companions.stop(); usage.stop() })

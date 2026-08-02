@@ -26,7 +26,7 @@ The product should own the user experience and normalized session model, not pro
 
 The next product phase has three major user-facing systems built on one shared, versioned semantic action layer, over one provider-agnostic substrate:
 
-0. **Memory layer and tool gateway** — the substrate the rest assumes. Ambientic keeps a durable local memory of the user, their projects, and their decisions, pushes a small stable capsule into any provider's session, and lets the agent pull the rest through a single local gateway that also owns tool authentication, permissions, and audit. Specified in `PRODUCT.md` → *Memory layer and tool gateway*; sequenced in `NEXT_STEPS.md` → Phase 1.6.
+0. **Context kernel and tool gateway** — the substrate the rest assumes. Ambientic keeps a durable local memory of the user, their projects, and their decisions in a local SQLite/FTS5 store, freezes a small capsule into any provider's session, and lets the agent pull the rest through a single local gateway that also owns tool authorization, permissions, and audit. Hermes's memory and tooling patterns are reproduced here rather than forked, so Claude and Codex benefit equally. Specified in `PRODUCT.md` → *Context kernel and tool gateway*; sequenced in `NEXT_STEPS.md` → Phase 1.6.
 
 1. **Workflow Builder** — turn repetitive requests into inspectable, resumable sequences across agents, humans, Goals, artifacts, rate limits, and hardware. The first increment is a deterministic local runner and compact ordered-step editor with approvals, cancellation, idempotency, history, and restart recovery.
 2. **Universal Hardware Mapping** — configure arbitrary MIDI and keyboard devices through discovery, learn, layers, banks, modifiers, conditions, and output feedback while preserving native APC40 MKII behavior.
@@ -89,7 +89,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Read-only import of the eight most recently active Codex desktop tasks from Codex's local index.
 - Direct `codex://threads/<id>` navigation back to imported Codex desktop tasks.
 - Session cards named from the active task, provider surface, or meaningful project instead of the macOS account folder.
-- Lifecycle events normalized into running, waiting, attention, idle, and ended states. A completed managed turn is idle/done, not red. The provider-neutral resolver is shared by workspace cards, transcript headers, compact controller, and APC LEDs: explicit approval/user-input signals override a still-live provider process; real Codex Desktop and terminal-hook lifecycles cannot be demoted by a passive transcript reader running in another provider process; managed notifications can still promote work immediately; lifecycle changes synchronize before rendering and resolving an approval immediately clears the signal.
+- Lifecycle events normalized into running, waiting, attention, idle, and ended states. A completed managed turn is idle/done, not red — except when Codex ends its turn by asking the user a clarifying question, which still needs a reply, so it surfaces as "Needs input" like a pending approval instead of going quietly idle. The provider-neutral resolver is shared by workspace cards, transcript headers, compact controller, and APC LEDs: explicit approval/user-input signals override a still-live provider process; real Codex Desktop and terminal-hook lifecycles cannot be demoted by a passive transcript reader running in another provider process; managed notifications can still promote work immediately; lifecycle changes synchronize before rendering and resolving an approval immediately clears the signal.
 - Explicit terminal focus for supported terminal applications; Ambientic performs no background window automation.
 - Localhost and simulator companion previews.
 - APC40 task activation is a complete context switch: exact thread selection, immediate preview rescan, automatic presentation on the configured preview display, and a right-side single-display fallback.
@@ -102,9 +102,13 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Push-to-talk voice prompts from the eight APC40 MKII per-track Record Arm buttons using the Mac microphone and installed Whisper `base` model.
 - APC40 MKII MIDI Learn mappings stored locally.
 - Local connector status and guided provider setup.
+- Local SQLite/FTS5 context kernel with projects, scoped memories and provenance, consented/redacted transcript search, deterministic promotion/conflict/expiry rules, frozen per-session capsules, and hard forgetting.
+- One capability-token-scoped Ambientic MCP gateway shared by Claude, Codex, and Hermes, exposing context, recall, remember, Goals, task updates, and capability search/invoke without giving agents external credentials.
+- Provider-native context injection: Claude append-system-prompt files plus strict MCP config, Codex developer instructions plus per-thread MCP configuration, and Hermes MCP session configuration plus a first-message capsule envelope.
+- Top-level Memory workspace, inferred context in New Agent, inspectable and correctable thread bindings, audit filters, onboarding consent, and per-project/provider transcript exclusions.
 - [ ] Agent-assisted workflow authoring with an explicit connected-provider selector, validated structured manifests, preview-before-save, and the existing deterministic parser retained as an offline fallback.
 - [ ] Agent-facing workflow tools for permission-scoped create, inspect, update, validate, and run operations.
-- [ ] Settings → Apps & Tools, separate from AI Providers, with capability-grouped connections, permission and health visibility, dependent-workflow warnings, and Connect/Test/Reconnect/Disable/Disconnect controls.
+- [x] Settings → Apps & Tools, separate from AI Providers, with generic stdio/Streamable HTTP MCP connections, capability permissions, health, dependents, and Connect/Test/Reconnect/Disable/Disconnect controls.
 - [ ] Direct provider-neutral inbox and calendar adapters whose consequential actions require confirmation and tool evidence rather than trusting an agent's success claim.
 - Cross-provider handover surfaced directly on the thread: a **Hand off →** action in the thread header moves the task's full context to another connected agent, and an inline banner offers one-click handover to the least-loaded provider when the current one nears its rate limit. (The standalone Improve → Continuity page has been retired in favor of this in-context flow.)
 - Automatic project-level `HANDOVER.md` preparation when a managed provider reaches 85% of an available quota window, plus manual handover at any time.
@@ -123,7 +127,6 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Generic MIDI-controller output profiles.
 - Public auto-update infrastructure.
 - OpenClaw integration.
-- Agent-facing Goals tools or MCP server; this first increment establishes the canonical local model and human interface before agents receive scoped read/write access.
 - Linking an existing provider thread or artifact to a goal task, assignment leases, approval-gated agent mutations, or automated next-action reviews.
 - Agent-powered natural-language workflow authoring and native inbox/calendar connectors. The current prompt uses a deterministic local parser; live workflow steps run through managed AI providers, while direct app actions still require normalized adapters and confirmed tool evidence.
 
@@ -175,25 +178,31 @@ Hermes ACP ───────┘                                      │
 Provider quota adapters ──> current capacity ──> local consumption ledger ──> Overview history
 Provider billing APIs (future, optional) ────────────────────────────────────> currency spend
 
-Planned — memory layer and tool gateway (PRODUCT.md, NEXT_STEPS.md Phase 1.6):
+Implemented — context kernel and tool gateway (PRODUCT.md, NEXT_STEPS.md Phase 1.6):
 
 goal + task events ─┐
-approved tool calls ┼──> harvester ──> candidates ──> promotion ──> memory tiers
-local transcripts ──┘                                                  │
-                                                                       ▼
-                                                            context assembler
-                                                                       │
-                                        ┌──────────────────────────────┴──────┐
-                                   session capsule                    recall on demand
-                                        │                                     │
-      Claude system prompt ─┐           │                                     │
-      Hermes ACP session ───┼───────────┘                                     │
-      Codex app server ─────┘                                                 │
-                                                                              │
-      agent tool call ──> local gateway ──> policy ──> approval ──> adapter ──┘
-                              │                                        │
-                              └──> audit journal ──> harvester    proxied tool servers
+approved tool calls ┼─> turn observer ─> candidates ─> corroboration ─> memory records
+normalized turns ───┘                                                        │
+                                                                             ▼
+   projects + session binding (inference: selection > binding > cwd >    context kernel
+   recent task > active goal > lexical > project-only)                        │
+                                              ┌──────────────────────────────┴────┐
+                                     frozen capsule (~900 tok, 1200 cap)   recall on demand
+                                              │                                   │
+    Claude  --append-system-prompt-file ─┐    │                                   │
+    Codex   developerInstructions ───────┼────┘                                   │
+    Hermes  first-message envelope ──────┘                                        │
+                                                                                  │
+    agent tool call ──> stdio shim ──> local socket ──> gateway ──> policy ────────┘
+                        (capability                        │          │
+                         token in env)                     │          └─> approval boundary
+                                                           ▼
+                                      SQLite + FTS5 ──> audit journal ──> turn observer
+                                                           │
+                                            capability search/invoke ──> connected servers
 ```
+
+External tool schemas are never injected into every request; they are reached through capability search and invoke so the gateway cannot quietly consume the context budget the capsule is bounding.
 
 The Electron main process owns local system access, session state, connectors, previews, and MIDI. The renderer receives a narrow IPC surface through the preload script. Provider credentials remain in provider-owned local stores.
 
@@ -409,22 +418,30 @@ Last updated: 2026-07-30
 - [ ] Add the universal mapping foundation for arbitrary MIDI and keyboard devices: capability discovery, semantic actions, layers/banks/modifiers, input monitoring, feedback profiles, conflict detection, and portable setup bundles.
 - [ ] Build Ambientic Coach as an opt-in local signal and recommendation system with bounded evidence, source provenance, user feedback, and one-click draft workflows/mappings/goal tasks.
 - [ ] Add privacy-safe local template/profile import and export, then validate clean-profile sharing before designing community accounts, public discovery, ratings, or moderation.
-- [ ] Extract turn composition into a provider-neutral context assembler, then inject a byte-stable session capsule through the Claude system prompt, Hermes ACP session parameters, and the verified Codex app-server mechanism.
-- [ ] Build the local memory store: episodic, project, and semantic tiers plus a candidate store with confidence, provenance, and expiry; ranked retrieval filtered by project, goal, tier, type, and recency.
-- [ ] Harvest memory from goal and task transitions, approved tool calls, files written, commits, and provider switches, with local transcript mining as a separate opt-in; backfill from existing local conversation history.
-- [ ] Run one long-lived local gateway with per-session tokens: provider-neutral recall, goal listing, project brief, remember-as-candidate, and task update through the existing approval boundary, with every call journaled and fed back to the harvester.
-- [ ] Proxy user-connected tool servers through the gateway so one connection reaches every agent on every provider under a single permission policy and audit trail.
-- [ ] Add the memory review surface: candidate queue, provenance and supersession history, and a per-project preview of what an agent will see before a session starts.
-- [ ] Link threads, runs, and artifacts to goal tasks without copying whole transcripts; add bounded task context capsules, execution evidence, provider/model metadata, and handover continuity.
-- [ ] Make the session capsule the cross-provider handover mechanism and keep the generated handover file as a portable export rather than the transfer path.
+- [x] **C1** Shared contract and fixtures, byte-stable prompt assembler regression, and preload boundary.
+- [x] **C2** SQLite/FTS5 migrations, repositories, transactions, backups, project backfill, Electron-native rebuild/unpack, and database smoke command.
+- [x] **C3** Projects, inference, frozen capsule hashing/budgeting, consented turn observation, deterministic promotion/conflict/expiry/supersession/forgetting, and provenance.
+- [x] **C4** Long-lived gateway, stdio shim, hashed scoped tokens, native tools, session approvals, cancellation, audit, and namespaced idempotency.
+- [x] **C5** Claude, Codex, and Hermes native capsule/MCP wiring on start and resume.
+- [x] **C6** Generic stdio and Streamable HTTP MCP proxying, discovery, schema normalization, health/risk policy, dependents, and capability search/invoke.
+- [x] **H1** Non-blocking inferred launch context with correction and inline folderless project/goal/task creation.
+- [x] **H2** Thread binding, capsule/hash/token preview, recall scopes, correction, and context activity.
+- [x] **H3** Memory profile/projects, provenance, candidates/conflicts, consented search, exclusions, controls, and quiet audit feed.
+- [x] **H4** Apps & Tools connection, health, capability permission, dependent, and credential-boundary UX.
+- [x] **H5** Gateway approval metadata, session-only remembered approval, destructive safeguards, terminal outcomes, and audit filters.
+- [ ] Run one installed-app live acceptance pass across Claude, Codex, Hermes, and a real external MCP server.
+- [ ] Link threads, runs, and artifacts to goal tasks without copying whole transcripts; add execution evidence, provider/model metadata, and continuity.
+- [ ] Make the frozen capsule the cross-provider continuity mechanism and keep the generated handover file as a portable export rather than the transfer path.
 
-### Deferred — memory and gateway backlog
+### Deferred — context kernel and gateway backlog
 
-Specified in `PRODUCT.md` → *Deferred — memory and gateway backlog*. Designed for now, excluded from the first implementation.
+Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*. Designed for now, excluded from this release.
 
-- [ ] Model-assisted memory distillation: opt-in, user-chosen provider, visible per-session token cost, model-derived records marked and never auto-promoted to durable memory, with a local-only mode that disables it.
-- [ ] Native app adapters for Mail, Calendar, Files, and Communication behind semantic capabilities, with Ambientic-owned OAuth, independent read/draft/consequential-write permission levels, and no success claimed without adapter confirmation.
-- [ ] Ambientic-hosted agent runtime for providers with no local CLI, behind the same context assembler and gateway interfaces, accepting direct API key custody and per-provider cost accounting.
+- [ ] Model-assisted memory distillation: opt-in, user-chosen provider, visible per-session token cost, model-derived records marked and never auto-promoted to user scope, with a local-only mode that disables it.
+- [ ] Codex dynamic tools as a transport optimization behind the unchanged gateway contract, once the surface is no longer experimental and a second dispatch path is worth maintaining.
+- [ ] Native app adapters for Mail, Calendar, Files, and Communication behind semantic capabilities, with Ambientic-owned authorization, independent read/draft/consequential-write levels, and no success claimed without adapter confirmation.
+- [ ] Ambientic-hosted agent runtime for providers with no local CLI, behind the same context engine and gateway contract, accepting direct API key custody and per-provider cost accounting.
+- [ ] Embeddings, knowledge graphs, external memory providers, remote sync, and non-macOS gateway transport.
 - [ ] Add agent task claims with expiring leases, idempotency keys, optimistic concurrency, and review-before-done defaults so multiple providers cannot silently duplicate or overwrite work.
 - [ ] Add explainable goal health and next-action reviews based on blockers, inactivity, target dates, and acceptance evidence rather than raw task-count gamification.
 - [ ] Replace terminal-owned Hermes and Kimi setup with guided provider-native browser/device-code ceremonies where their supported local protocols expose reliable completion callbacks.
@@ -533,6 +550,10 @@ Replay onboarding without changing any provider account or conversation data:
 ## Local data and permissions
 
 - Ambientic preferences and mappings live in Electron's local `userData` directory.
+- The context kernel's SQLite database also lives in `userData`. It holds projects, session bindings, memory records and provenance, normalized session messages and their search index, connection and capability metadata, hashed gateway tokens, and the audit journal. It never holds third-party access or refresh tokens; those stay in the tool's own store or the system keychain.
+- Indexing locally visible provider sessions requires one explicit onboarding consent and honors per-provider and per-project exclusions. Secret-shaped content is rejected from durable memory, and high-confidence credentials are redacted before any message is stored or indexed.
+- Forgetting a memory removes its content and search rows, leaving only a content-free audit tombstone.
+- A corrupt database is never silently reset. The file is preserved and recovery instructions are surfaced.
 - The provider integration bridge lives under `~/.ambientic/`. Existing `~/.agentbase/` and `~/.claude-controller/` references are migrated or accepted only for compatibility.
 - Claude, Codex, and Hermes keep ownership of their authentication data.
 - Ambientic does not need Music or Photos access. Automatic project inspection refuses `/`, `/Users`, and the user's home directory so a broad Git repository cannot sweep macOS-protected personal collections.

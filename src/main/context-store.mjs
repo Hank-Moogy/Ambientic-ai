@@ -1,7 +1,9 @@
-import Database from 'better-sqlite3'
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
 
 const VALID_SCOPES = new Set(['user', 'project', 'goal', 'task', 'session'])
 const VALID_KINDS = new Set(['preference', 'constraint', 'fact', 'decision', 'outcome', 'gotcha'])
@@ -159,7 +161,8 @@ const MIGRATIONS = [
     CREATE INDEX memory_scope_status ON memory_records(scope, scope_id, status);
     CREATE INDEX messages_session ON session_messages(provider, provider_session_id, created_at);
     CREATE INDEX audit_created ON gateway_audit(created_at DESC);
-  `
+  `,
+  `ALTER TABLE capabilities ADD COLUMN policy TEXT NOT NULL DEFAULT 'ask';`
 ]
 
 function json (value, fallback) {
@@ -168,6 +171,13 @@ function json (value, fallback) {
 
 function cleanText (value, max = 4000) {
   return String(value ?? '').replace(/\r\n/g, '\n').trim().slice(0, max)
+}
+
+function claimShape (value) {
+  const text = cleanText(value, 2000).toLocaleLowerCase()
+  const negative = /\b(?:not|never|no|don't|do not|avoid)\b/.test(text)
+  const shape = text.replace(/\b(?:not|never|no|don't|do not|avoid)\b/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  return { negative, shape }
 }
 
 function rowProject (row) {
@@ -244,6 +254,7 @@ function rowCapability (row) {
     description: row.description,
     inputSchema: json(row.input_schema_json, {}),
     permission: row.permission,
+    permissionMode: row.policy || 'ask',
     enabled: Boolean(row.enabled),
     dependencies: json(row.dependencies_json, []),
     createdAt: row.created_at,
@@ -252,13 +263,17 @@ function rowCapability (row) {
 }
 
 export class ContextStore {
-  constructor ({ file, now = () => Date.now(), id = () => randomUUID(), databaseFactory = (path) => new Database(path) }) {
+  constructor ({ file, now = () => Date.now(), id = () => randomUUID(), databaseFactory = null }) {
     if (!file) throw new Error('Context database path is required.')
     this.file = file
     this.now = now
     this.id = id
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-    this.db = databaseFactory(file)
+    const factory = databaseFactory || ((path) => {
+      const Database = require('better-sqlite3')
+      return new Database(path)
+    })
+    this.db = factory(file)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.db.pragma('busy_timeout = 5000')
@@ -273,7 +288,11 @@ export class ContextStore {
     const pending = MIGRATIONS.map((_, index) => index + 1).filter((version) => !applied.has(version))
     if (!pending.length) return
     if (existsSync(this.file) && this.file !== ':memory:') {
-      try { copyFileSync(this.file, `${this.file}.pre-migration`) } catch {}
+      try {
+        const backup = `${this.file}.pre-migration`
+        if (existsSync(backup)) unlinkSync(backup)
+        this.db.exec(`VACUUM INTO '${backup.replaceAll("'", "''")}'`)
+      } catch {}
     }
     this.db.transaction(() => {
       for (const version of pending) {
@@ -377,13 +396,29 @@ export class ContextStore {
     const normalized = content.toLocaleLowerCase()
     const duplicate = this.db.prepare(`SELECT * FROM memory_records WHERE scope=? AND coalesce(scope_id,'')=? AND lower(content)=? AND status != 'superseded'`).get(scope, cleanText(input.scopeId, 120), normalized)
     if (duplicate) {
-      const corroboration = duplicate.corroboration_count + (input.independent ? 1 : 0)
-      const promoted = duplicate.status === 'candidate' && corroboration >= 2 && Number(input.confidence ?? duplicate.confidence) >= 0.85 && !duplicate.sensitive
+      const providerSessionId = cleanText(input.provenance?.providerSessionId, 200)
+      const alreadyObserved = providerSessionId
+        ? this.db.prepare('SELECT 1 FROM memory_provenance WHERE memory_id=? AND provider_session_id=?').get(duplicate.id, providerSessionId)
+        : null
+      const independent = Boolean(input.independent && providerSessionId && !alreadyObserved)
+      const corroboration = duplicate.corroboration_count + (independent ? 1 : 0)
+      const confidence = Math.max(duplicate.confidence, Number(input.confidence ?? duplicate.confidence), independent ? 0.9 : 0)
+      const promoted = duplicate.status === 'candidate' && corroboration >= 2 && confidence >= 0.85 && !duplicate.sensitive
       this.db.prepare('UPDATE memory_records SET corroboration_count=?, confidence=max(confidence, ?), status=?, updated_at=? WHERE id=?')
-        .run(corroboration, Number(input.confidence ?? duplicate.confidence), promoted ? 'active' : duplicate.status, now, duplicate.id)
-      if (input.provenance) this.addProvenance(duplicate.id, input.provenance)
+        .run(corroboration, confidence, promoted ? 'active' : duplicate.status, now, duplicate.id)
+      if (input.provenance && !alreadyObserved) this.addProvenance(duplicate.id, input.provenance)
+      if (promoted) this.audit({ eventType: 'memory.promoted', actor: 'ambientic', provider: input.provenance?.provider, providerSessionId: input.provenance?.providerSessionId, resultSummary: `Promoted ${duplicate.scope}/${duplicate.kind} after independent corroboration` })
       return this.getMemory(duplicate.id)
     }
+    const incomingClaim = claimShape(content)
+    const conflict = incomingClaim.shape
+      ? this.db.prepare(`SELECT * FROM memory_records WHERE scope=? AND coalesce(scope_id,'')=? AND kind=? AND status IN ('active','candidate')`).all(scope, cleanText(input.scopeId, 120), kind)
+        .find((row) => {
+          const current = claimShape(row.content)
+          return current.shape === incomingClaim.shape && current.negative !== incomingClaim.negative
+        })
+      : null
+    if (conflict) this.db.prepare("UPDATE memory_records SET status='conflicted', updated_at=? WHERE id=?").run(now, conflict.id)
     const record = {
       id: cleanText(input.id, 120) || this.id(),
       scope,
@@ -391,7 +426,7 @@ export class ContextStore {
       kind,
       content,
       confidence: Math.max(0, Math.min(1, Number(input.confidence ?? 1))),
-      status,
+      status: conflict ? 'conflicted' : status,
       sensitive: input.sensitive ? 1 : 0,
       expiresAt: input.expiresAt ? Number(input.expiresAt) : null,
       supersedesId: cleanText(input.supersedesId, 120) || null,
@@ -445,6 +480,13 @@ export class ContextStore {
     const replacement = this.remember({ ...current, ...input, id: undefined, status: 'active', supersedesId: id })
     this.db.prepare("UPDATE memory_records SET status='superseded', updated_at=? WHERE id=?").run(this.now(), id)
     return replacement
+  }
+
+  updateMemoryStatus (id, status) {
+    if (!VALID_STATUSES.has(status)) throw new Error('Invalid memory status.')
+    const changed = this.db.prepare('UPDATE memory_records SET status=?, updated_at=? WHERE id=?').run(status, this.now(), id).changes
+    if (!changed) throw new Error('Memory not found.')
+    return this.getMemory(id)
   }
 
   forgetMemory (id) {
@@ -511,12 +553,12 @@ export class ContextStore {
     const now = this.now()
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM capabilities WHERE connection_id=?').run(connectionId)
-      const insert = this.db.prepare(`INSERT INTO capabilities(id,connection_id,name,description,input_schema_json,permission,enabled,dependencies_json,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      const insert = this.db.prepare(`INSERT INTO capabilities(id,connection_id,name,description,input_schema_json,permission,enabled,dependencies_json,created_at,updated_at,policy)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       for (const item of capabilities.slice(0, 500)) {
         const name = cleanText(item.name, 160)
         if (!name) continue
-        insert.run(`${connectionId}:${name}`, connectionId, name, cleanText(item.description, 1000), JSON.stringify(item.inputSchema || {}), VALID_PERMISSIONS.has(item.permission) ? item.permission : 'read', 1, JSON.stringify(item.dependencies || []), now, now)
+        insert.run(`${connectionId}:${name}`, connectionId, name, cleanText(item.description, 1000), JSON.stringify(item.inputSchema || {}), VALID_PERMISSIONS.has(item.permission) ? item.permission : 'read', 1, JSON.stringify(item.dependencies || []), now, now, item.permission === 'read' ? 'auto' : 'ask')
       }
     })()
     return this.listCapabilities({ connectionId })
@@ -531,6 +573,22 @@ export class ContextStore {
 
   getCapability (id) { return rowCapability(this.db.prepare('SELECT * FROM capabilities WHERE id=?').get(id)) }
 
+  updateCapabilityPermission (id, permission) {
+    if (!VALID_PERMISSIONS.has(permission)) throw new Error('Invalid capability permission.')
+    const changed = this.db.prepare('UPDATE capabilities SET permission=?, updated_at=? WHERE id=?').run(permission, this.now(), id).changes
+    if (!changed) throw new Error('Capability not found.')
+    return this.getCapability(id)
+  }
+
+  updateCapabilityPolicy (id, policy) {
+    if (!['auto', 'ask', 'deny'].includes(policy)) throw new Error('Invalid capability policy.')
+    const capability = this.getCapability(id)
+    if (!capability) throw new Error('Capability not found.')
+    if (policy === 'auto' && capability.permission !== 'read') throw new Error('Only read-only capabilities can run automatically.')
+    this.db.prepare('UPDATE capabilities SET policy=?, updated_at=? WHERE id=?').run(policy, this.now(), id)
+    return this.getCapability(id)
+  }
+
   createGatewaySession ({ id = this.id(), tokenHash, bindingId, scopes = [], expiresAt }) {
     this.db.prepare('INSERT INTO gateway_sessions(id,token_hash,binding_id,scopes_json,expires_at,created_at) VALUES (?,?,?,?,?,?)')
       .run(id, tokenHash, bindingId, JSON.stringify(scopes), Number(expiresAt), this.now())
@@ -544,6 +602,11 @@ export class ContextStore {
   }
 
   revokeGatewaySessions (bindingId) { return this.db.prepare('UPDATE gateway_sessions SET revoked_at=? WHERE binding_id=? AND revoked_at IS NULL').run(this.now(), bindingId).changes }
+
+  listActiveGatewaySessions () {
+    return this.db.prepare(`SELECT g.binding_id,b.provider,b.provider_session_id FROM gateway_sessions g
+      JOIN session_bindings b ON b.id=g.binding_id WHERE g.revoked_at IS NULL AND g.expires_at>?`).all(this.now()).map((row) => ({ bindingId: row.binding_id, provider: row.provider, providerSessionId: row.provider_session_id }))
+  }
 
   audit (input = {}) {
     const id = cleanText(input.id, 120) || this.id()
@@ -562,9 +625,24 @@ export class ContextStore {
     return this.db.prepare('SELECT * FROM gateway_audit WHERE id=?').get(id)
   }
 
-  listAudit ({ limit = 200, eventType = '' } = {}) {
-    return this.db.prepare(`SELECT * FROM gateway_audit WHERE (?='' OR event_type=?) ORDER BY created_at DESC LIMIT ?`)
-      .all(eventType, eventType, Math.max(1, Math.min(1000, Number(limit) || 200))).map((row) => ({
+  auditByIdempotency (idempotencyKey) {
+    const key = cleanText(idempotencyKey, 160)
+    if (!key) return null
+    return this.db.prepare('SELECT * FROM gateway_audit WHERE idempotency_key=?').get(key) || null
+  }
+
+  listAudit ({ limit = 200, eventType = '', bindingId = '', category = '' } = {}) {
+    const clauses = []
+    const args = []
+    if (eventType) { clauses.push('event_type=?'); args.push(cleanText(eventType, 80)) }
+    if (bindingId) { clauses.push('binding_id=?'); args.push(cleanText(bindingId, 120)) }
+    if (category === 'capsules') clauses.push("event_type LIKE 'context.capsule.%'")
+    else if (category === 'recalls') clauses.push("event_type='memory.recalled'")
+    else if (category === 'promotions') clauses.push("event_type='memory.promoted'")
+    else if (category === 'approvals') clauses.push("approval!='automatic'")
+    else if (category === 'tools') clauses.push("event_type='gateway.call'")
+    return this.db.prepare(`SELECT * FROM gateway_audit ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''} ORDER BY created_at DESC LIMIT ?`)
+      .all(...args, Math.max(1, Math.min(1000, Number(limit) || 200))).map((row) => ({
         id: row.id, eventType: row.event_type, actor: row.actor, provider: row.provider, providerSessionId: row.provider_session_id,
         bindingId: row.binding_id || '', tool: row.tool, permission: row.permission, approval: row.approval,
         resultSummary: row.result_summary, durationMs: row.duration_ms, idempotencyKey: row.idempotency_key || '', createdAt: row.created_at

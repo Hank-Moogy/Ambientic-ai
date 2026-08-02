@@ -47,6 +47,10 @@ export function looksSecret (value) {
   return redactSecrets(value).sensitive
 }
 
+function looksSensitivePersonal (value) {
+  return /\b(?:medical|diagnos(?:is|ed)|disability|religion|religious|politic(?:s|al)|sexual orientation|ethnicity|race|pregnan(?:t|cy)|mental health|therapy|bankruptcy|criminal record)\b/i.test(String(value || ''))
+}
+
 function truncateCapsule (sections, maxTokens = CAPSULE_MAX_TOKENS) {
   const maxChars = maxTokens * 4
   const output = []
@@ -143,6 +147,17 @@ export class ContextEngine extends EventEmitter {
     }
   }
 
+  backfillProjects (sessions = []) {
+    const projects = []
+    for (const session of sessions) {
+      const rootPath = cleanText(session?.cwd, 2000)
+      if (!rootPath) continue
+      const existing = this.store.projectByRoot(rootPath)
+      projects.push(existing || this.store.upsertProject({ rootPath, name: cleanText(session?.project, 120) || basename(rootPath) || 'Local project' }))
+    }
+    return projects
+  }
+
   buildCapsule ({ project, goal, task } = {}) {
     const userMemory = this.store.listMemory({ scope: 'user', status: 'active', limit: 20 })
     const projectMemory = project ? this.store.listMemory({ scope: 'project', scopeId: project.id, status: 'active', limit: 20 }) : []
@@ -220,12 +235,27 @@ export class ContextEngine extends EventEmitter {
     if (looksSecret(content)) throw new Error('Ambientic will not save content that looks like a credential or secret.')
     const scope = input.scope || (binding?.projectId ? 'project' : 'user')
     const scopeId = input.scopeId || (scope === 'project' ? binding?.projectId : scope === 'goal' ? binding?.goalId : scope === 'task' ? binding?.taskId : scope === 'session' ? binding?.id : '')
+    if (input.supersedesId) {
+      const record = this.store.supersedeMemory(input.supersedesId, {
+        content,
+        kind: input.kind,
+        scope,
+        scopeId,
+        confidence: input.confidence ?? 1,
+        provenance: input.provenance || (binding ? { provider: binding.provider, providerSessionId: binding.providerSessionId, sourceType: 'agent_tool' } : { sourceType: 'manual' })
+      })
+      this.store.audit({ eventType: 'memory.superseded', actor: input.actor || 'human', provider: binding?.provider, providerSessionId: binding?.providerSessionId, bindingId: binding?.id, tool: 'ambientic_remember', permission: 'write', resultSummary: `Superseded ${record.scope}/${record.kind}` })
+      this.emit('change', this.getState())
+      return record
+    }
+    const sensitive = Boolean(input.sensitive || looksSensitivePersonal(content))
     const record = this.store.remember({
       content,
       kind: input.kind,
       scope,
       scopeId,
-      status: input.status || 'active',
+      status: sensitive ? 'candidate' : (input.status || 'active'),
+      sensitive,
       confidence: input.confidence ?? 1,
       independent: Boolean(input.independent),
       expiresAt: input.expiresAt,
@@ -240,7 +270,7 @@ export class ContextEngine extends EventEmitter {
     const text = cleanText(query, 500)
     if (!text) throw new Error('Recall query is required.')
     const memories = this.store.searchMemory(text, { projectId: binding?.projectId || '', limit })
-      .filter((item) => !scope || item.scope === scope)
+      .filter((item) => item.status === 'active' && !item.sensitive && (!scope || item.scope === scope))
       .map((item) => ({ ...item, type: 'memory' }))
     const messages = this.store.searchMessages(text, { projectId: binding?.projectId || '', limit })
     const hits = [...memories, ...messages].slice(0, Math.max(1, Math.min(20, Number(limit) || 12)))
@@ -249,9 +279,28 @@ export class ContextEngine extends EventEmitter {
     return hits
   }
 
+  searchAll ({ query, limit = 50 } = {}) {
+    const memories = this.store.searchMemory(query, { limit }).map((item) => ({ ...item, type: 'memory' }))
+    const episodes = this.store.searchMessages(query, { limit }).map((item) => ({
+      ...item,
+      scope: 'session',
+      scopeId: item.providerSessionId,
+      kind: 'episode',
+      status: 'episodic',
+      confidence: 1,
+      provenance: [{ provider: item.provider, providerSessionId: item.providerSessionId, sourceType: 'turn', createdAt: item.createdAt }]
+    }))
+    return [...memories, ...episodes].slice(0, Math.max(1, Math.min(100, Number(limit) || 50)))
+  }
+
   observeTurn ({ provider, providerSessionId, messages = [] } = {}) {
     if (!this.consent()) return { observed: 0, learned: 0, skipped: 'consent' }
     const binding = this.store.bindingFor(provider, providerSessionId)
+    const project = binding?.projectId ? this.store.getProject(binding.projectId) : null
+    const exclusions = new Set(project?.exclusions || [])
+    if (exclusions.has('all') || exclusions.has('transcripts') || exclusions.has(provider) || exclusions.has(`provider:${provider}`)) {
+      return { observed: 0, learned: 0, skipped: 'project_exclusion' }
+    }
     let observed = 0
     let learned = 0
     for (const item of messages) {
@@ -276,6 +325,7 @@ export class ContextEngine extends EventEmitter {
               kind: candidate.kind,
               status: candidate.explicit ? 'active' : 'candidate',
               confidence: candidate.explicit ? 1 : 0.7,
+              independent: !candidate.explicit,
               expiresAt: candidate.explicit ? null : this.now() + 30 * 24 * 60 * 60 * 1000,
               provenance: { provider, providerSessionId, sourceType: 'turn', sourceId: item.id || '' },
               actor: candidate.explicit ? 'human' : 'ambientic'
@@ -304,6 +354,14 @@ export class ContextEngine extends EventEmitter {
     const result = this.store.supersedeMemory(id, input)
     this.emit('change', this.getState())
     return result
+  }
+
+  resolveConflict (id, { action = 'keep' } = {}) {
+    if (action === 'forget' || action === 'reject') return this.forget(id)
+    const record = this.store.updateMemoryStatus(id, 'active')
+    this.store.audit({ eventType: 'memory.conflict.resolved', actor: 'human', resultSummary: `Kept ${record.scope}/${record.kind}` })
+    this.emit('change', this.getState())
+    return record
   }
 
   getState ({ query = '' } = {}) {

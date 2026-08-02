@@ -9,13 +9,17 @@
     "test:local-release": "node --test --test-skip-pattern='keeps Claude OAuth callback alive until live auth verification succeeds' test/*.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "rebuild:sqlite": "node scripts/rebuild-sqlite.mjs",
+    "test:sqlite": "ELECTRON_RUN_AS_NODE=1 electron scripts/sqlite-smoke.mjs",
+    "test:sqlite:packaged": "node scripts/sqlite-packaged-smoke.mjs",
     "preview": "electron-vite preview",
     "release:local": "node scripts/release-local.mjs",
     "install-hooks": "sh hook/install.sh",
-    "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder"
+    "pack": "npm run rebuild:sqlite && npm run test:sqlite && electron-vite build && electron-builder --dir",
+    "dist": "npm run rebuild:sqlite && npm run test:sqlite && electron-vite build && electron-builder"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
@@ -40,6 +44,9 @@
     "files": [
       "out/**/*"
     ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/build/Release/*.node"
+    ],
     "extraResources": [
       {
         "from": "hook",
@@ -60,6 +67,10 @@
       {
         "from": "resources/build-info.json",
         "to": "build-info.json"
+      },
+      {
+        "from": "resources/ambientic-mcp-shim.mjs",
+        "to": "ambientic-mcp-shim.mjs"
       }
     ],
     "mac": {

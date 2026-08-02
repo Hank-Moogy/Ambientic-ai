@@ -1,0 +1,146 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { spawn } from 'node:child_process'
+import { createInterface } from 'node:readline'
+import { ContextStore } from '../src/main/context-store.mjs'
+import { ContextEngine } from '../src/main/context-engine.mjs'
+import { CapabilityGateway, callGatewaySocket } from '../src/main/capability-gateway.mjs'
+
+function fixture ({ start = true, requestApproval } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-gateway-'))
+  const store = new ContextStore({ file: join(directory, 'context.db') })
+  const goals = {
+    list: () => ({ goals: [{ id: 'goal-1', title: 'Ship', tasks: [{ id: 'task-1', goalId: 'goal-1', title: 'Test', status: 'ready' }] }] }),
+    updateTask: (id, patch) => ({ id, ...patch })
+  }
+  const contextEngine = new ContextEngine({ store, goals })
+  const prepared = contextEngine.prepareSession({ provider: 'codex', providerSessionId: 'thread-1', cwd: '/tmp/project' })
+  const approvals = []
+  const gateway = new CapabilityGateway({
+    store,
+    contextEngine,
+    goals,
+    socketPath: join(directory, 'gateway.sock'),
+    requestApproval: requestApproval || (async (request) => { approvals.push(request); return true })
+  })
+  if (start) gateway.start()
+  const session = gateway.issueSession(prepared.binding.id)
+  return { directory, store, contextEngine, gateway, session, approvals }
+}
+
+test('gateway tokens scope native tools and mutations are audited', async () => {
+  const value = fixture({ start: false })
+  try {
+    const listed = await value.gateway.handleRequest({ token: value.session.token, method: 'tools/list' })
+    assert.ok(listed.tools.some((tool) => tool.name === 'ambientic_recall'))
+
+    const context = await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_context_get' })
+    assert.equal(context.providerSessionId, 'thread-1')
+
+    const updated = await value.gateway.invoke({
+      token: value.session.token,
+      tool: 'ambientic_task_update',
+      arguments: { taskId: 'task-1', status: 'done', idempotencyKey: 'task-update-1' }
+    })
+    assert.equal(updated.status, 'done')
+    assert.equal(value.approvals.length, 1)
+    assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_task_update'))
+
+    value.gateway.revokeBinding(context.id)
+    await assert.rejects(value.gateway.invoke({ token: value.session.token, tool: 'ambientic_context_get' }), /invalid, expired, or revoked/)
+  } finally {
+    value.gateway.stop()
+    value.store.close()
+    rmSync(value.directory, { recursive: true, force: true })
+  }
+})
+
+test('gateway enforces capability scopes and remembers only session-scoped approvals', async () => {
+  const approvals = []
+  const value = fixture({
+    start: false,
+    requestApproval: async (request) => { approvals.push(request); return { allowed: true, remember: true } }
+  })
+  try {
+    await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_task_update', arguments: { taskId: 'task-1', status: 'in_progress' } })
+    await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_task_update', arguments: { taskId: 'task-1', status: 'review' } })
+    assert.equal(approvals.length, 1)
+
+    const restricted = value.gateway.issueSession(value.session.bindingId, { scopes: ['context:read'] })
+    await assert.rejects(value.gateway.invoke({ token: restricted.token, tool: 'ambientic_recall', arguments: { query: 'test' } }), /not authorized for memory:read/)
+    assert.equal((await value.gateway.handleRequest({ token: restricted.token, method: 'tools/list' })).tools.length, 1)
+  } finally {
+    value.gateway.stop()
+    value.store.close()
+    rmSync(value.directory, { recursive: true, force: true })
+  }
+})
+
+const socketTest = process.env.AMBIENTIC_SOCKET_TESTS === '1' ? test : test.skip
+
+socketTest('gateway Unix socket carries scoped native tool calls', async () => {
+  const value = fixture()
+  try {
+    const listed = await callGatewaySocket({ socketPath: value.session.socketPath, token: value.session.token, method: 'tools/list' })
+    assert.ok(listed.tools.some((tool) => tool.name === 'ambientic_recall'))
+
+    const context = await callGatewaySocket({
+      socketPath: value.session.socketPath,
+      token: value.session.token,
+      method: 'tools/call',
+      params: { name: 'ambientic_context_get', arguments: {} }
+    })
+    assert.equal(context.providerSessionId, 'thread-1')
+
+    const updated = await callGatewaySocket({
+      socketPath: value.session.socketPath,
+      token: value.session.token,
+      method: 'tools/call',
+      params: { name: 'ambientic_task_update', arguments: { taskId: 'task-1', status: 'done', idempotencyKey: 'task-update-1' } }
+    })
+    assert.equal(updated.status, 'done')
+    assert.equal(value.approvals.length, 1)
+    assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_task_update'))
+
+    value.gateway.revokeBinding(context.id)
+    await assert.rejects(callGatewaySocket({ socketPath: value.session.socketPath, token: value.session.token, method: 'tools/call', params: { name: 'ambientic_context_get', arguments: {} } }), /invalid, expired, or revoked/)
+  } finally {
+    value.gateway.stop()
+    value.store.close()
+    rmSync(value.directory, { recursive: true, force: true })
+  }
+})
+
+socketTest('stdio MCP shim exposes the gateway tools without credentials in the protocol', async () => {
+  const value = fixture()
+  try {
+    const child = spawn(process.execPath, ['resources/ambientic-mcp-shim.mjs'], {
+      cwd: process.cwd(),
+      env: { ...process.env, AMBIENTIC_GATEWAY_SOCKET: value.session.socketPath, AMBIENTIC_GATEWAY_TOKEN: value.session.token },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    const lines = createInterface({ input: child.stdout })
+    const responses = []
+    lines.on('line', (line) => responses.push(JSON.parse(line)))
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } })}\n`)
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`)
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('shim timed out')), 5000)
+      const poll = setInterval(() => {
+        if (responses.some((item) => item.id === 2)) {
+          clearInterval(poll); clearTimeout(timeout); resolve()
+        }
+      }, 10)
+    })
+    assert.equal(responses.find((item) => item.id === 1).result.serverInfo.name, 'ambientic')
+    assert.ok(responses.find((item) => item.id === 2).result.tools.length >= 6)
+    child.kill('SIGTERM')
+  } finally {
+    value.gateway.stop()
+    value.store.close()
+    rmSync(value.directory, { recursive: true, force: true })
+  }
+})

@@ -305,11 +305,12 @@ function ThreadPreview ({ state, onPresent }) {
 
 function Approval ({ approval, onResolve }) {
   const destructive = approval.risk === 'destructive' || approval.permission === 'destructive'
+  const context = [approval.providerLabel || approval.provider, approval.projectName || approval.project, approval.goalName || approval.goal, approval.taskName || approval.task, approval.connectionName || approval.connection, approval.tool].filter(Boolean)
   return (
     <section className="approval" data-risk={destructive ? 'destructive' : approval.risk || approval.permission || 'write'}>
       {/* Lead with what is being requested — the user decides yes/no from this
           line — and keep the tool name as secondary context. */}
-      <div><b>{approval.title || 'Permission requested'}</b><span>{[approval.provider, approval.projectName, approval.taskName, approval.connectionName, approval.tool].filter(Boolean).join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
+      <div><b>{approval.title || 'Permission requested'}</b><span>{context.join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
       <div className="approval__actions">
         <button type="button" onClick={() => onResolve(approval.id, false)}>Deny</button>
         <button type="button" className="primary" onClick={() => onResolve(approval.id, true)}>Allow once</button>
@@ -319,7 +320,7 @@ function Approval ({ approval, onResolve }) {
   )
 }
 
-function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreate, onCreateGoal }) {
+function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreate, onCreateGoal, onCreateTask }) {
   const taskConnectors = connectors.filter((item) => item.taskCapable !== false && providerCatalog.some((provider) => provider.id === item.id))
   const [provider, setProvider] = useState(initialProvider || taskConnectors.find((item) => item.manageable !== false)?.id || 'codex')
   const [cwd, setCwd] = useState('')
@@ -430,7 +431,7 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
         </section>
         {recentProjects.length > 0 && <div className="new-task-recents"><span>Recent projects</span>{recentProjects.map((project) => <button type="button" key={project.cwd} data-selected={cwd === project.cwd} title={project.cwd} onClick={() => { projectChoiceMade.current = true; setCwd(project.cwd); setError('') }}>{project.name}</button>)}</div>}
         {cwd && <button className="new-task-private" type="button" onClick={() => { projectChoiceMade.current = true; setCwd(''); setError('') }}>Start in an empty scratch workspace</button>}
-        <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} goalsSnapshot={goalsSnapshot} onChange={setContextBinding} onCreateGoal={onCreateGoal} />
+        <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} goalsSnapshot={goalsSnapshot} onChange={setContextBinding} onCreateGoal={onCreateGoal} onCreateTask={onCreateTask} />
         <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={cwd ? `What should the agent do in ${selectedProjectName}? (optional)` : 'What should this agent create? (optional)'} autoFocus /></label>
         {error && <div className="new-task__error" role="alert"><span>!</span><p>{error}</p></div>}
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !providerReady} type="submit">{busy ? 'Starting…' : providerReady ? 'Start task' : 'Connect a provider first'}</button></footer>
@@ -821,6 +822,7 @@ function UsageSettings ({ sessions, usage, ledger, onRefresh }) {
 
 function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect, onRefresh, onInstallHooks, onCreate, onFinish }) {
   const [name, setName] = useState(state.name || '')
+  const [memoryConsent, setMemoryConsent] = useState(Boolean(state.memoryConsent))
   const [busyProvider, setBusyProvider] = useState('')
   const [notice, setNotice] = useState('')
   const step = Math.max(0, Math.min(3, Number(state.step) || 0))
@@ -889,8 +891,9 @@ function Onboarding ({ state, connectors, providerAuth, midi, onSave, onConnect,
       {step === 1 && <section className="onboarding-stage onboarding-name">
         <div className="onboarding-symbol" aria-hidden="true"><span>⌁</span></div>
         <div className="onboarding-copy"><span className="eyebrow">First, an introduction</span><h1>How should I<br /><em>call you?</em></h1><p>This stays on this Mac and is used only to make Ambientic feel like your space.</p></div>
-        <form onSubmit={(event) => { event.preventDefault(); if (name.trim()) advance(2, { name }) }}>
+        <form onSubmit={(event) => { event.preventDefault(); if (name.trim()) advance(2, { name, memoryConsent }) }}>
           <input value={name} autoFocus maxLength={48} autoComplete="name" onChange={(event) => setName(event.target.value)} placeholder="Your name" aria-label="Your name" />
+          <label className="onboarding-memory-consent"><input type="checkbox" checked={memoryConsent} onChange={(event) => setMemoryConsent(event.target.checked)} /><span><b>Build local memory from my Ambientic sessions</b><small>Ambientic may index redacted messages on this Mac to carry useful context between providers. You can exclude projects and forget memories later.</small></span></label>
           <button className="onboarding-primary" type="submit" disabled={!name.trim()}>Continue <span>→</span></button>
         </form>
       </section>}
@@ -1297,7 +1300,7 @@ export default function Workspace () {
       <>
         <Onboarding state={onboarding} connectors={connectors} providerAuth={providerAuth} midi={midi} onSave={saveOnboarding} onConnect={(id) => window.controller.connectProvider(id)} onRefresh={() => window.controller.refreshConnectors()} onInstallHooks={() => window.controller.installHooks()} onCreate={() => setNewTask(true)} onFinish={finishOnboarding} />
         {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
-        {newTask && <NewTask connectors={connectors} goalsSnapshot={goalsSnapshot} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} onCreateGoal={(input) => window.controller.createGoal(input)} />}
+        {newTask && <NewTask connectors={connectors} goalsSnapshot={goalsSnapshot} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} onCreateGoal={(input) => window.controller.createGoal(input)} onCreateTask={(goalId, input) => window.controller.createGoalTask(goalId, input)} />}
       </>
     )
   }
@@ -1392,7 +1395,7 @@ export default function Workspace () {
         <section><h3>Artifacts <span>{thread?.artifacts?.length || 0}</span></h3>{thread?.artifacts?.length ? <div className="artifacts">{thread.artifacts.map((artifact) => <button key={artifact.path} type="button" title={artifact.path} onClick={() => window.controller.openArtifact(artifact.path)}><span>⌘</span><div><b>{artifact.name}</b><small>{artifact.path}</small></div></button>)}</div> : <div className="no-artifacts">Files touched by the agent appear here.</div>}</section>
         <section className="capabilities"><h3>Connection</h3><p>Provider credentials stay in the provider’s own local store. Ambientic never asks for or copies your API keys.</p></section>
       </aside></>}
-      {newTask && <NewTask key={newTaskProvider || 'any'} connectors={connectors} goalsSnapshot={goalsSnapshot} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} onCreateGoal={createGoal} />}
+      {newTask && <NewTask key={newTaskProvider || 'any'} connectors={connectors} goalsSnapshot={goalsSnapshot} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} onCreateGoal={createGoal} onCreateTask={createGoalTask} />}
       <AmbientModeCheckIn ambientMode={ambientMode} onContinue={() => window.controller.continueAmbientMode()} onTurnOff={() => window.controller.setAmbientMode(false)} />
     </main>
   )
