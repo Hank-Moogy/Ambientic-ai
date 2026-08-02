@@ -2,8 +2,9 @@ import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
-import { writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { cpSync, existsSync, readdirSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { SessionStore, STATE } from './sessions.js'
 import { startServer } from './server.js'
 import { focusSession, pasteClipboardImage, pasteClipboardText, submitTerminalPrompt } from './focus.js'
@@ -30,6 +31,30 @@ import { createContextStore } from './context-store.mjs'
 import { createContextEngine } from './context-engine.mjs'
 import { createCapabilityGateway } from './capability-gateway.mjs'
 import { createMemoryBootstrapService } from './memory-bootstrap-service.mjs'
+import { createHardwareProfileService } from './hardware-profile-service.mjs'
+
+// Apply disposable state before logging and before Electron derives the
+// single-instance lock. This lets a clean-profile developer smoke coexist with
+// the installed app without sharing logs, preferences, mappings, or lock state.
+// Keep the old variable as a compatibility alias.
+const explicitStateDirectory = process.env.AMBIENTIC_STATE_DIR || process.env.AGENTBASE_STATE_DIR
+if (explicitStateDirectory) {
+  app.setPath('userData', explicitStateDirectory)
+} else if (process.platform === 'darwin') {
+  // The product rename changes Electron's default userData directory. Copy the
+  // existing local state once so provider aliases, onboarding, mappings, and
+  // consumption history survive the move from AgentBase to Ambientic.
+  const ambienticState = app.getPath('userData')
+  const legacyState = join(dirname(ambienticState), 'AgentBase')
+  try {
+    const ambienticIsEmpty = !existsSync(ambienticState) || readdirSync(ambienticState).length === 0
+    if (ambienticState !== legacyState && ambienticIsEmpty && existsSync(legacyState)) {
+      cpSync(legacyState, ambienticState, { recursive: true, force: false })
+    }
+  } catch (error) {
+    console.error(`[ambientic] legacy state migration skipped: ${error.message}`)
+  }
+}
 
 // Widen PATH before any provider CLI (or its node-based hooks) is spawned. A
 // Finder-launched app otherwise only has launchd's minimal PATH, which lacks
@@ -54,27 +79,6 @@ const buildInfo = readBuildInfo({
   version: app.getVersion()
 })
 
-// A disposable state directory makes first-run replayable without touching the
-// user's real data. Keep the old variable as a compatibility alias.
-const explicitStateDirectory = process.env.AMBIENTIC_STATE_DIR || process.env.AGENTBASE_STATE_DIR
-if (explicitStateDirectory) {
-  app.setPath('userData', explicitStateDirectory)
-} else if (process.platform === 'darwin') {
-  // The product rename changes Electron's default userData directory. Copy the
-  // existing local state once so provider aliases, onboarding, mappings, and
-  // consumption history survive the move from AgentBase to Ambientic.
-  const ambienticState = app.getPath('userData')
-  const legacyState = join(dirname(ambienticState), 'AgentBase')
-  try {
-    const ambienticIsEmpty = !existsSync(ambienticState) || readdirSync(ambienticState).length === 0
-    if (ambienticState !== legacyState && ambienticIsEmpty && existsSync(legacyState)) {
-      cpSync(legacyState, ambienticState, { recursive: true, force: false })
-    }
-  } catch (error) {
-    console.error(`[ambientic] legacy state migration skipped: ${error.message}`)
-  }
-}
-
 const DEFAULT_WIDTH = 232
 const MIN_WIDTH = 232
 const MIN_HEIGHT = 220
@@ -84,6 +88,11 @@ const store = new SessionStore()
 const summarizer = createTaskSummarizer(store)
 const usage = createUsageService()
 const companions = createCompanionService(store)
+
+function cleanKeyboardBinding (code, modifiers = []) {
+  const ordered = ['Meta', 'Control', 'Alt', 'Shift'].filter((modifier) => Array.isArray(modifiers) && modifiers.includes(modifier))
+  return [...ordered, String(code || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)].filter(Boolean).join('+')
+}
 
 let win = null
 let workspaceWin = null
@@ -103,10 +112,13 @@ let claudeAuth = null
 let ambientMode = null
 let goals = null
 let workflows = null
+let hardwareProfiles = null
 let contextStore = null
 let contextEngine = null
 let capabilityGateway = null
 let memoryBootstrap = null
+let pendingHardwareAction = null
+let pendingHardwareActionTimer = null
 let contextStartupError = ''
 let pendingWorkspaceSessionId = ''
 let workspaceListTimer = null
@@ -486,6 +498,10 @@ function pushMidi () {
   sendToWindows('midi', midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
 }
 
+function pushHardware () {
+  if (hardwareProfiles) sendToWindows('hardware-profiles', hardwareProfiles.snapshot())
+}
+
 function pushConnectors () {
   sendToWindows('connectors', connectors)
 }
@@ -596,13 +612,14 @@ async function presentWorkspacePreview (id, { refresh = true } = {}) {
 }
 
 async function selectWorkspaceSession (id) {
-  const session = store.list().find((candidate) => candidate.id === id)
+  const liveSession = store.list().find((candidate) => candidate.id === id)
+  const session = liveSession || workspace?.sessionFor(id)
   if (!session) return { ok: false, reason: 'not-found' }
-  store.acknowledge(id)
+  if (liveSession) store.acknowledge(id)
   lastFocusedSessionId = id
-  midiController?.select(id)
+  midiController?.select(liveSession ? id : null)
   showWorkspace(id)
-  const preview = await presentWorkspacePreview(id)
+  const preview = liveSession ? await presentWorkspacePreview(id) : { ok: false, reason: 'history-session' }
   return { ok: true, sessionId: id, preview }
 }
 
@@ -689,6 +706,65 @@ ipcMain.handle('set-workflow-enabled', (_event, workflowId, enabled) => workflow
 ipcMain.handle('run-workflow', (_event, workflowId) => workflows.startRun(workflowId))
 ipcMain.handle('approve-workflow-run', (_event, runId, allow) => workflows.approve(runId, allow))
 ipcMain.handle('cancel-workflow-run', (_event, runId) => workflows.cancel(runId))
+ipcMain.handle('get-hardware-profiles', () => hardwareProfiles?.snapshot() || { version: 1, templates: [], activeTemplateId: '', activeViewId: '', mode: 'play', actions: [] })
+ipcMain.handle('hardware-create-template', (_event, input = {}) => hardwareProfiles.create(input))
+ipcMain.handle('hardware-update-template', (_event, templateId, patch = {}) => hardwareProfiles.update(String(templateId || ''), patch))
+ipcMain.handle('hardware-duplicate-template', (_event, templateId) => hardwareProfiles.duplicate(String(templateId || '')))
+ipcMain.handle('hardware-delete-template', (_event, templateId) => hardwareProfiles.remove(String(templateId || '')))
+ipcMain.handle('hardware-activate-template', (_event, templateId) => hardwareProfiles.activate(String(templateId || '')))
+ipcMain.handle('hardware-set-mode', (_event, mode) => hardwareProfiles.setMode(mode))
+ipcMain.handle('hardware-add-view', (_event, templateId, input = {}) => hardwareProfiles.addView(String(templateId || ''), input))
+ipcMain.handle('hardware-rename-view', (_event, templateId, viewId, name) => hardwareProfiles.renameView(String(templateId || ''), String(viewId || ''), name))
+ipcMain.handle('hardware-delete-view', (_event, templateId, viewId) => hardwareProfiles.removeView(String(templateId || ''), String(viewId || '')))
+ipcMain.handle('hardware-assign-pad', (_event, templateId, viewId, slot, assignment = {}) => hardwareProfiles.assign(String(templateId || ''), String(viewId || ''), String(slot || ''), assignment))
+ipcMain.handle('hardware-trigger-pad', (_event, slot) => hardwareProfiles.triggerSlot(String(slot || ''), 'screen'))
+ipcMain.handle('hardware-open-view', (_event, viewId) => hardwareProfiles.openView(String(viewId || '')))
+ipcMain.handle('hardware-learn-pad', (_event, templateId, slot) => hardwareProfiles.learn(String(templateId || ''), String(slot || '')))
+ipcMain.handle('hardware-cancel-learn', () => hardwareProfiles.cancelLearn())
+ipcMain.handle('hardware-clear-binding', (_event, templateId, slot) => hardwareProfiles.clearBinding(String(templateId || ''), String(slot || '')))
+ipcMain.handle('hardware-key-input', (_event, code, modifiers = [], pressed = true) => hardwareProfiles.handleInput({ key: `key:${cleanKeyboardBinding(code, modifiers)}`, type: 'key', code: String(code || ''), modifiers, pressed: Boolean(pressed) }))
+ipcMain.handle('hardware-confirm-action', async (_event, id, allow) => {
+  if (!pendingHardwareAction || pendingHardwareAction.id !== id) return false
+  const invocation = pendingHardwareAction
+  pendingHardwareAction = null
+  if (pendingHardwareActionTimer) clearTimeout(pendingHardwareActionTimer)
+  pendingHardwareActionTimer = null
+  if (!allow) {
+    hardwareProfiles.resolveConfirmation(invocation.slot, false)
+    return false
+  }
+  try {
+    const result = await executeHardwareAssignment(invocation)
+    hardwareProfiles.resolveConfirmation(invocation.slot, true, result, result === false ? 'Action unavailable' : `${invocation.assignment.label} confirmed`)
+    return result
+  } catch (error) {
+    hardwareProfiles.resolveConfirmation(invocation.slot, true, false, error.message)
+    throw error
+  }
+})
+ipcMain.handle('hardware-export-template', async (_event, templateId) => {
+  const manifest = hardwareProfiles.exportTemplate(String(templateId || ''))
+  const result = await dialog.showSaveDialog(workspaceWin || win, {
+    title: 'Export Ambientic hardware template',
+    defaultPath: `${String(manifest.name || 'hardware-template').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'hardware-template'}.ambientic-hardware.json`,
+    filters: [{ name: 'Ambientic hardware template', extensions: ['json'] }]
+  })
+  if (result.canceled || !result.filePath) return { exported: false }
+  await writeFile(result.filePath, `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 })
+  return { exported: true, path: result.filePath }
+})
+ipcMain.handle('hardware-import-template', async () => {
+  const result = await dialog.showOpenDialog(workspaceWin || win, {
+    title: 'Import Ambientic hardware template',
+    properties: ['openFile'],
+    filters: [{ name: 'Ambientic hardware template', extensions: ['json'] }]
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+  const details = await stat(result.filePaths[0])
+  if (details.size > 2 * 1024 * 1024) throw new Error('Hardware templates must be smaller than 2 MB.')
+  const manifest = JSON.parse(await readFile(result.filePaths[0], 'utf8'))
+  return hardwareProfiles.importTemplate(manifest)
+})
 ipcMain.handle('context-list-projects', () => requireContextService(contextStore).listProjects())
 ipcMain.handle('context-upsert-project', (_event, input = {}) => requireContextService(contextStore).upsertProject(input))
 ipcMain.handle('context-infer-launch', (_event, input = {}) => requireContextService(contextEngine).inferLaunch(input))
@@ -1147,6 +1223,95 @@ async function handleMidiAction (actionId) {
   return false
 }
 
+function selectedHardwareSession (targetId = '') {
+  return workspace?.sessionFor(targetId) || workspace?.sessionFor(lastFocusedSessionId) || null
+}
+
+async function executeHardwareAssignment ({ assignment }) {
+  const actionId = assignment.actionId
+  if (actionId === 'ambientic.overview') { showWorkspace(); sendToWindows('hardware-navigate', { view: 'overview' }); return true }
+  if (actionId === 'ambientic.hardware') { showWorkspace(); sendToWindows('hardware-navigate', { view: 'hardware' }); return true }
+  if (actionId === 'ambientic.toggle-window') {
+    if (!workspaceWin || workspaceWin.isDestroyed()) return showWorkspace()
+    if (workspaceWin.isVisible()) workspaceWin.hide()
+    else showWorkspace()
+    return true
+  }
+  if (actionId === 'ambientic.vibe') return midiController?.triggerVibe() || false
+  if (actionId === 'session.focus-next') return handleMidiAction('focus-next')
+  if (actionId === 'session.focus-previous') return handleMidiAction('focus-previous')
+  if (actionId === 'session.capture-selected') return handleMidiAction('capture-selected')
+  if (actionId === 'thread.open-next-attention') {
+    const session = relativeSession(1, (candidate) => ['waiting', 'attention'].includes(candidate.state))
+    return session ? selectWorkspaceSession(session.id) : false
+  }
+  if (actionId === 'thread.open-latest-provider') {
+    const session = (await workspace.list()).find((candidate) => candidate.agent === assignment.targetId)
+    return session ? selectWorkspaceSession(session.id) : false
+  }
+  if (actionId === 'thread.open') return assignment.targetId ? selectWorkspaceSession(assignment.targetId) : false
+  if (actionId === 'thread.send-prompt') {
+    const session = selectedHardwareSession(assignment.targetId)
+    if (!session || !assignment.prompt) return false
+    await workspace.send(session.id, assignment.prompt)
+    return true
+  }
+  if (actionId === 'thread.interrupt') {
+    const session = selectedHardwareSession(assignment.targetId)
+    return session ? workspace.interrupt(session.id) : false
+  }
+  if (['thread.approve-pending', 'thread.deny-pending'].includes(actionId)) {
+    const session = selectedHardwareSession(assignment.targetId)
+    if (!session) return false
+    const snapshot = await workspace.read(session.id)
+    const approval = snapshot?.approvals?.find((item) => item.status === 'pending') || snapshot?.approvals?.[0]
+    if (!approval) return false
+    return workspace.resolveApproval(approval.id, actionId === 'thread.approve-pending', false)
+  }
+  if (actionId === 'provider.start-thread') {
+    const sessionId = await workspace.create({ provider: assignment.targetId || assignment.provider, prompt: assignment.prompt || '' })
+    return selectWorkspaceSession(sessionId)
+  }
+  if (actionId === 'skill.start-thread') {
+    const provider = assignment.provider || 'codex'
+    const skill = assignment.targetLabel || assignment.targetId
+    const prompt = [`Use the ${skill} skill for this task.`, assignment.prompt].filter(Boolean).join('\n\n')
+    const sessionId = await workspace.create({ provider, prompt })
+    return selectWorkspaceSession(sessionId)
+  }
+  if (actionId === 'goal.open') { showWorkspace(); sendToWindows('hardware-navigate', { view: 'goals', targetId: assignment.targetId }); return true }
+  if (actionId === 'workflow.open') { showWorkspace(); sendToWindows('hardware-navigate', { view: 'workflows', targetId: assignment.targetId }); return true }
+  if (actionId === 'workflow.run') return workflows?.startRun(assignment.targetId, { source: 'hardware' }) || false
+  return false
+}
+
+async function invokeHardwareAssignment (invocation) {
+  if (invocation.definition?.permission === 'confirm') {
+    if (pendingHardwareAction) throw new Error('Finish the current hardware confirmation before triggering another action.')
+    pendingHardwareAction = { id: randomUUID(), ...invocation, createdAt: Date.now() }
+    const confirmationId = pendingHardwareAction.id
+    pendingHardwareActionTimer = setTimeout(() => {
+      if (pendingHardwareAction?.id !== confirmationId) return
+      const expired = pendingHardwareAction
+      pendingHardwareAction = null
+      pendingHardwareActionTimer = null
+      hardwareProfiles?.resolveConfirmation(expired.slot, false, false, 'Confirmation expired')
+      sendToWindows('hardware-confirmation-expired', { id: confirmationId })
+    }, 30_000)
+    if (pendingHardwareActionTimer.unref) pendingHardwareActionTimer.unref()
+    showWorkspace()
+    sendToWindows('hardware-confirmation', {
+      id: pendingHardwareAction.id,
+      label: invocation.assignment.label,
+      actionId: invocation.assignment.actionId,
+      targetLabel: invocation.assignment.targetLabel,
+      source: invocation.source
+    })
+    return { pending: true }
+  }
+  return executeHardwareAssignment(invocation)
+}
+
 ipcMain.handle('focus', (_e, id) => queueFocus(id))
 ipcMain.handle('select-session', (_event, id) => {
   const session = store.list().find((candidate) => candidate.id === id)
@@ -1325,6 +1490,11 @@ app.whenReady().then(() => {
     })
   })
   workflows.on('change', (snapshot) => sendToWindows('workflows', snapshot))
+  hardwareProfiles = createHardwareProfileService({
+    file: join(app.getPath('userData'), 'hardware-profiles.json'),
+    invoke: invokeHardwareAssignment
+  })
+  hardwareProfiles.on('change', (snapshot) => { sendToWindows('hardware-profiles', snapshot); midiController?.render() })
   consumptionLedger = createConsumptionLedger({ file: join(app.getPath('userData'), 'consumption-ledger.json') })
   consumptionLedger.on('change', (state) => sendToWindows('consumption-ledger', state))
   handovers = new HandoverService({ workspace, usage })
@@ -1353,6 +1523,8 @@ app.whenReady().then(() => {
   midiController = createMidiController(store, {
     onPadPress: selectWorkspaceSession,
     onAction: handleMidiAction,
+    onControl: (control) => hardwareProfiles?.handleInput(control) || false,
+    getFeedback: () => hardwareProfiles?.feedback() || null,
     onRecordStart: startVoicePrompt,
     onRecordStop: stopVoicePrompt,
     onRecordUnavailable: ({ column }) => {
@@ -1376,6 +1548,10 @@ app.whenReady().then(() => {
   pushVoice()
   void refreshConnectors().then(() => workflows?.startScheduler())
   startServer(store, {
+    // An isolated profile is a parallel developer smoke, not the provider-hook
+    // endpoint. Give it an ephemeral loopback port so the installed app keeps
+    // ownership of the canonical 47600 bridge.
+    port: explicitStateDirectory ? 0 : undefined,
     focusById: queueFocus,
     onApprovalRequest: (event, sessionId) => workspace.requestExternalApproval('claude', event, sessionId),
     onTaskText: (id, text) => {

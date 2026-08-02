@@ -26,11 +26,95 @@ The product should own the user experience and normalized session model, not pro
 
 ## Current objective
 
-Finish release validation for the implemented context kernel and tool gateway.
-The code and renderer work for C1–C6 and H1–H5 are in the working tree; the
-Electron-native package smoke passes, leaving one live three-provider/external-
-MCP acceptance pass. `HANDOVER.md` remains a portable export, not the normal
-cross-provider continuity path.
+Finish installed-app and physical validation of the implemented Universal
+Hardware Mapping V1, then continue the existing context-platform live acceptance
+gate. The Hardware workspace, profile service, multi-view runtime, generic input,
+keyboard/MIDI Learn, permission confirmation, and portable bundles are in the
+working tree. Do not replace them with the old compact-controller MIDI Learn
+panel or weaken the protected APC40 MKII/APC mini native mode.
+
+## Session log — 2026-08-02 (Universal Hardware Mapping V1)
+
+- Added Hardware as a first-class primary workspace with a local template
+  library and Play, Edit, Map MIDI, and Test modes. The center surface is an
+  arbitrary 1–12 by 1–12 low-motion virtual deck with an action inspector,
+  per-view tabs, deck/view rename, secondary-view deletion with link cleanup,
+  live input truth, and compact-height scaling.
+- Added `src/shared/semantic-actions.mjs`: versioned actions carry category,
+  target type, permission, feedback, and input metadata. Implemented actions
+  cover view navigation, providers, exact/smart threads, prompts and interrupts,
+  Goals, workflows, skills, Overview/Hardware navigation, Vibe, and existing
+  session movement/capture.
+- Added `src/main/hardware-profile-service.mjs`: atomic `0600`
+  `hardware-profiles.json` persistence, protected built-in live-session profile,
+  saved/forked templates, arbitrary grids, multiple views, logical slots,
+  template-wide physical bindings, bounded Back history, linked-view creation,
+  press/release/650 ms hold/value triggers, execution results, and import/export.
+- The key invariant is physical-control → logical slot → active-view assignment.
+  A control is learned once and keeps its position while views change meaning.
+  Creating a linked view assigns the parent pad and seeds Back in the child.
+- Expanded MIDI discovery so Automatic still prefers APC40 MKII/APC mini native
+  behavior, then falls back to a generic input-only port. Every discovered input
+  is selectable. Note/CC press and release events reach the new runtime while
+  legacy native actions, task-state LEDs, voice buttons, Vibe, and process-wide
+  CoreMIDI client reuse remain intact.
+- Custom templates on an APC now project the active view's mapped assignment
+  tones onto learned grid controls and clear stale live-session colors. Returning
+  to the protected Ambientic Live Sessions template restores its native session
+  state feedback; arbitrary-controller LED/SysEx profile authoring is still
+  deliberately deferred.
+- Added focused computer-key learning while the Hardware surface is active.
+  Generic output is deliberately input-only; controller-specific LED/SysEx
+  authoring remains after V1 rather than guessing unsafe protocols.
+- Consequential assignments never execute silently from hardware. The main
+  process emits one pending confirmation and the renderer names the action and
+  target before executing or cancelling it.
+- Export produces `ambientic.hardware-template` JSON and removes physical
+  bindings, exact private thread/goal/workflow targets, and saved prompts. Import
+  marks those assignments as setup-required instead of silently binding another
+  local object.
+- Import now enforces schema version, grid bounds, unique/rooted view graphs,
+  supported actions, valid pads, linked-view targets, a 2 MB file ceiling, and
+  the 80-template library ceiling. A source-to-second-clean-profile test proves
+  sanitized export, import, restart restoration, forward navigation, and Back
+  while asserting that bindings and private IDs/labels are absent. Exports also
+  carry a derived action/provider/skill/setup summary for a future catalog.
+- Consequential actions stay visibly pending until the user responds. Cancel,
+  success, unavailable actions, and execution errors update the Hardware footer;
+  the confirmation dialog waits for the real result and a second hardware press
+  cannot silently replace a pending request. Unanswered confirmations expire
+  after 30 seconds so a renderer reload cannot strand the hardware runtime.
+- Imported setup state is derived from the action's actual required target and,
+  for saved-prompt actions, instruction. Saving repaired inputs clears the red
+  state. MIDI conflict moves are visible, and mapped thread actions now resolve
+  the same live-plus-history index offered by the inspector.
+- Browser-skill visual QA passed at 1280×720. It caught a clipped fourth row;
+  the grid now derives size from available height and all pads remain above the
+  footer. Pad selection and the full inspector were checked in the rendered DOM.
+- Focused hardware/APC verification passes 37/37 tests, including clean-profile
+  bundle exchange, confirmation lifecycle, import validation, and custom APC
+  assignment feedback; the production Electron/Vite build passes. The
+  release-safe repository suite passes 199 runnable tests with 0 failures and 2
+  intentional transport skips. The separate fake-Claude OAuth callback
+  simulator is excluded by that release-safe script because its live callback
+  wait remains flaky; the remaining Claude auth tests run. Preserve the later
+  committed `src/main/workspace-service.mjs` Codex rollout fix at HEAD.
+- `AMBIENTIC_STATE_DIR` is now applied before logging and the single-instance
+  lock, and isolated profiles use an ephemeral ingest port. A clean live smoke
+  ran beside the installed app with a healthy context database and health result
+  `{"ok":true,"sessions":8}`. It repeatedly detected the connected
+  `APC mini mk2 Control` port without writing to the real Ambientic profile.
+
+Remaining release gates:
+
+1. Repeat the now-automated clean-profile bundle exchange through the installed
+   app's native Export and Import file dialogs.
+2. On physical APC40 MKII and APC mini hardware, learn a grid pad, navigate into
+   a child view and Back, run one safe action, and verify confirmation for one
+   consequential action without regressing native RGB/voice/Vibe behavior.
+3. Decide whether focused computer-key bindings are sufficient for soft launch;
+   global system-wide shortcuts can be added later through a separate explicit
+   permission/conflict design.
 
 ## Session log — 2026-08-02 (context platform implemented)
 
@@ -532,6 +616,14 @@ Codex local task index ──> Codex deep links ────┤                 
                                                  ├──> previews           │
 APC40 MKII MIDI input ──> action mappings ──────┴───────────────────────┘
 APC40 MKII MIDI output <── session state and selection LEDs
+
+MIDI / focused keyboard ──> normalized control event ──> logical slot
+                                                            │
+hardware template store ──> active view assignment ─────────┤
+                                                            ▼
+                                            semantic action + permission
+                                                            │
+                                                            └──> screen / native feedback
 
 Codex app-server ─┐
 Claude local CLI ─┼──> normalized workspace bridge ──> transcript / composer / artifacts

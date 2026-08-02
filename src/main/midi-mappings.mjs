@@ -14,13 +14,20 @@ export const APC40_ACTIONS = [
 const ACTION_IDS = new Set(APC40_ACTIONS.map((action) => action.id))
 
 export function midiControlForMessage (message) {
+  const event = midiEventForMessage(message)
+  if (!event || event.pressed === false) return null
+  if (event.type === 'note') return { key: event.key, type: event.type, channel: event.channel, number: event.number }
+  return { key: event.key, type: event.type, channel: event.channel, number: event.number, value: event.value }
+}
+
+export function midiEventForMessage (message) {
   if (!Array.isArray(message) || message.length < 3) return null
   const [status, number, value] = message.map(Number)
   const type = status & 0xF0
   const channel = status & 0x0F
   if (!Number.isInteger(number) || number < 0 || number > 127) return null
-  if (type === 0x90 && value > 0) return { key: `note:${channel}:${number}`, type: 'note', channel: channel + 1, number }
-  if (type === 0xB0) return { key: `cc:${channel}:${number}`, type: 'cc', channel: channel + 1, number, value }
+  if (type === 0x90 || type === 0x80) return { key: `note:${channel}:${number}`, type: 'note', channel: channel + 1, number, value, pressed: type === 0x90 && value > 0 }
+  if (type === 0xB0) return { key: `cc:${channel}:${number}`, type: 'cc', channel: channel + 1, number, value, pressed: value >= 64 }
   return null
 }
 

@@ -9,11 +9,12 @@ import {
   miniRecordLedMessages,
   miniSelectedSessionForRecordColumn
 } from './apc-mini-mk2.mjs'
-import { APC40_ACTIONS, midiControlForMessage, normalizeMappings } from './midi-mappings.mjs'
+import { APC40_ACTIONS, midiControlForMessage, midiEventForMessage, normalizeMappings } from './midi-mappings.mjs'
 import { VIBE_SEQUENCE, VIBE_VARIANTS, changedVibeMessages, shouldCelebrateMidiConnection, vibeLedMessages } from './vibe-sequence.mjs'
 
 const RECONNECT_MS = 3000
 const AUTO_PROFILE = 'auto'
+const GENERIC_MIDI_ID = 'generic-midi'
 
 const PROFILES = [
   {
@@ -52,9 +53,34 @@ const PROFILES = [
 ]
 
 export const MIDI_PROFILE_OPTIONS = [
-  { id: AUTO_PROFILE, label: 'Automatic', description: 'Use the first supported APC controller found.' },
-  ...PROFILES.map(({ id, label, gridLabel }) => ({ id, label, description: `${gridLabel} native Ambientic layout` }))
+  { id: AUTO_PROFILE, label: 'Automatic', description: 'Prefer a native APC profile, then use the first available MIDI input.' },
+  ...PROFILES.map(({ id, label, gridLabel }) => ({ id, label, description: `${gridLabel} native Ambientic layout` })),
+  { id: GENERIC_MIDI_ID, label: 'Generic MIDI input', description: 'Learn notes, keys, pads, buttons, and CC controls from any MIDI input.' }
 ]
+
+function genericProfile (deviceName = 'Generic MIDI input') {
+  return {
+    id: GENERIC_MIDI_ID,
+    label: deviceName,
+    shortLabel: 'MIDI',
+    padCount: 0,
+    gridLabel: 'Custom',
+    inputOnly: true,
+    padForMessage: () => null,
+    gridSessions: () => [],
+    gridLedMessages: () => [],
+    recordForMessage: () => null,
+    selectedSessionForRecordColumn: () => null,
+    recordLedMessages: () => []
+  }
+}
+
+function isGenericProfileId (profileId) { return profileId === GENERIC_MIDI_ID || String(profileId || '').startsWith(`${GENERIC_MIDI_ID}:`) }
+function validProfileId (profileId) { return MIDI_PROFILE_OPTIONS.some((profile) => profile.id === profileId) || isGenericProfileId(profileId) }
+function genericDeviceName (profileId) {
+  if (!String(profileId || '').startsWith(`${GENERIC_MIDI_ID}:`)) return ''
+  try { return decodeURIComponent(String(profileId).slice(GENERIC_MIDI_ID.length + 1)) } catch { return '' }
+}
 
 function portIndex (device, pattern) {
   for (let index = 0; index < device.getPortCount(); index++) {
@@ -66,6 +92,8 @@ function portIndex (device, pattern) {
 export function createMidiController (store, {
   onPadPress,
   onAction,
+  onControl,
+  getFeedback,
   onRecordStart,
   onRecordStop,
   onRecordUnavailable,
@@ -80,11 +108,12 @@ export function createMidiController (store, {
   let inputListenerAttached = false
   let timer = null
   let selectedSessionId = null
-  let selectedProfile = MIDI_PROFILE_OPTIONS.some((profile) => profile.id === initialProfile) ? initialProfile : AUTO_PROFILE
+  let selectedProfile = validProfileId(initialProfile) ? initialProfile : AUTO_PROFILE
   let activeProfile = null
   let mappingsByProfile = {
     'apc40-mkii': normalizeMappings(initialMappingsByProfile?.['apc40-mkii'] || legacyMappings),
-    [APC_MINI_MK2.ID]: normalizeMappings(initialMappingsByProfile?.[APC_MINI_MK2.ID])
+    [APC_MINI_MK2.ID]: normalizeMappings(initialMappingsByProfile?.[APC_MINI_MK2.ID]),
+    [GENERIC_MIDI_ID]: normalizeMappings(initialMappingsByProfile?.[GENERIC_MIDI_ID])
   }
   let mappings = mappingsByProfile[selectedProfile === AUTO_PROFILE ? 'apc40-mkii' : selectedProfile] || {}
   let learningAction = ''
@@ -94,10 +123,12 @@ export function createMidiController (store, {
   let vibeIndex = 0
   let vibeVariant = null
   let status = { connected: false, device: '', error: '' }
+  let availableInputs = []
   const listeners = new Set()
 
   function snapshot () {
     const selected = PROFILES.find((profile) => profile.id === selectedProfile)
+    const genericOptions = availableInputs.map((name) => ({ id: `${GENERIC_MIDI_ID}:${encodeURIComponent(name)}`, label: name, description: 'Generic MIDI input with user-defined mappings.' }))
     return {
       ...status,
       model: activeProfile?.label || selected?.label || 'Akai APC controller',
@@ -106,7 +137,8 @@ export function createMidiController (store, {
       activeProfile: activeProfile?.id || '',
       gridLabel: activeProfile?.gridLabel || selected?.gridLabel || '',
       padCount: activeProfile?.padCount || selected?.padCount || 0,
-      profiles: MIDI_PROFILE_OPTIONS,
+      profiles: [...MIDI_PROFILE_OPTIONS, ...genericOptions],
+      availableInputs: [...availableInputs],
       mappings: { ...mappings },
       learningAction,
       actions: APC40_ACTIONS,
@@ -133,7 +165,7 @@ export function createMidiController (store, {
   }
 
   function saveMappings () {
-    const mappingProfile = activeProfile?.id || (selectedProfile === AUTO_PROFILE ? 'apc40-mkii' : selectedProfile)
+    const mappingProfile = isGenericProfileId(activeProfile?.id) ? GENERIC_MIDI_ID : (activeProfile?.id || (selectedProfile === AUTO_PROFILE ? 'apc40-mkii' : selectedProfile))
     mappingsByProfile = { ...mappingsByProfile, [mappingProfile]: { ...mappings } }
     onPreferencesChange?.({ selectedProfile, mappingsByProfile })
     notify()
@@ -164,7 +196,11 @@ export function createMidiController (store, {
     if (!output || !activeProfile) return
     if (vibeActive) return
     try {
-      for (const message of activeProfile.gridLedMessages(store.list())) output.sendMessage(message)
+      const customFeedback = getFeedback?.()
+      const gridMessages = customFeedback && !activeProfile.inputOnly
+        ? customGridLedMessages(activeProfile, customFeedback)
+        : activeProfile.gridLedMessages(store.list())
+      for (const message of gridMessages) output.sendMessage(message)
       for (const message of activeProfile.recordLedMessages(recording)) output.sendMessage(message)
     } catch (error) {
       close()
@@ -184,16 +220,28 @@ export function createMidiController (store, {
       candidateOutput = output || new midiModule.Output()
       input = candidateInput
       output = candidateOutput
+      availableInputs = Array.from({ length: candidateInput.getPortCount() }, (_, index) => candidateInput.getPortName(index))
       const candidates = selectedProfile === AUTO_PROFILE
         ? PROFILES
         : PROFILES.filter((profile) => profile.id === selectedProfile)
-      const match = candidates
+      let match = candidates
         .map((profile) => ({
           profile,
           inputIndex: portIndex(candidateInput, profile.portPattern),
           outputIndex: portIndex(candidateOutput, profile.portPattern)
         }))
         .find((entry) => entry.inputIndex >= 0 && entry.outputIndex >= 0)
+      if (!match && (selectedProfile === AUTO_PROFILE || isGenericProfileId(selectedProfile)) && candidateInput.getPortCount() > 0) {
+        const requestedName = genericDeviceName(selectedProfile)
+        const requestedIndex = requestedName ? availableInputs.indexOf(requestedName) : -1
+        const inputIndex = requestedIndex >= 0 ? requestedIndex : 0
+        const inputName = candidateInput.getPortName(inputIndex)
+        let outputIndex = -1
+        for (let index = 0; index < candidateOutput.getPortCount(); index++) {
+          if (candidateOutput.getPortName(index) === inputName) { outputIndex = index; break }
+        }
+        match = { profile: genericProfile(inputName), inputIndex, outputIndex }
+      }
       if (!match) {
         candidateInput.closePort()
         candidateOutput.closePort()
@@ -206,6 +254,8 @@ export function createMidiController (store, {
       const device = candidateInput.getPortName(match.inputIndex)
       candidateInput.ignoreTypes(false, false, false)
       if (!inputListenerAttached) candidateInput.on('message', (_deltaTime, message) => {
+        const incomingControl = midiEventForMessage(message)
+        if (incomingControl && onControl?.(incomingControl)) return
         const recordArm = activeProfile.recordForMessage(message)
         if (recordArm) {
           if (recordArm.pressed) {
@@ -255,7 +305,7 @@ export function createMidiController (store, {
       })
       inputListenerAttached = true
       candidateInput.openPort(match.inputIndex)
-      candidateOutput.openPort(match.outputIndex)
+      if (match.outputIndex >= 0) candidateOutput.openPort(match.outputIndex)
       input = candidateInput
       output = candidateOutput
       if (activeProfile.intro) output.sendMessage(activeProfile.intro)
@@ -291,7 +341,7 @@ export function createMidiController (store, {
   }
 
   function triggerVibe () {
-    if (!output || !activeProfile) return false
+    if (!output || !activeProfile || activeProfile.inputOnly) return false
     if (vibeTimer) clearInterval(vibeTimer)
     vibeActive = true
     vibeVariant = VIBE_VARIANTS[vibeIndex]
@@ -341,13 +391,13 @@ export function createMidiController (store, {
     },
     triggerVibe,
     setProfile: (profileId) => {
-      if (!MIDI_PROFILE_OPTIONS.some((profile) => profile.id === profileId)) return false
+      if (!validProfileId(profileId)) return false
       if (selectedProfile === profileId) return true
       selectedProfile = profileId
       learningAction = ''
       recording = null
       close()
-      const mappingProfile = selectedProfile === AUTO_PROFILE ? 'apc40-mkii' : selectedProfile
+      const mappingProfile = selectedProfile === AUTO_PROFILE ? 'apc40-mkii' : isGenericProfileId(selectedProfile) ? GENERIC_MIDI_ID : selectedProfile
       mappings = normalizeMappings(mappingsByProfile[mappingProfile])
       onPreferencesChange?.({ selectedProfile, mappingsByProfile })
       setStatus({ connected: false, device: '', error: '' })
@@ -382,4 +432,18 @@ export function createMidiController (store, {
     getStatus: snapshot,
     onStatus: (listener) => { listeners.add(listener); return () => listeners.delete(listener) }
   }
+}
+
+function customGridLedMessages (profile, feedback = {}) {
+  const mini = profile.id === APC_MINI_MK2.ID
+  const channel = mini ? APC_MINI_MK2.ANIMATION.SOLID : APC40.ANIMATION.SOLID
+  const colors = mini
+    ? { off: APC_MINI_MK2.COLOR.OFF, red: APC_MINI_MK2.COLOR.RED, green: APC_MINI_MK2.COLOR.GREEN, blue: APC_MINI_MK2.COLOR.BLUE, violet: APC_MINI_MK2.COLOR.BLUE, cyan: APC_MINI_MK2.COLOR.BLUE, 'target-state': APC_MINI_MK2.COLOR.BLUE }
+    : { off: APC40.COLOR.OFF, red: APC40.COLOR.RED, green: APC40.COLOR.GREEN, blue: APC40.COLOR.BLUE, violet: APC40.COLOR.BLUE, cyan: 45, 'target-state': APC40.COLOR.BLUE }
+  const byNote = new Map()
+  for (const [key, tone] of Object.entries(feedback)) {
+    const match = key.match(/^note:\d+:(\d+)$/)
+    if (match) byNote.set(Number(match[1]), colors[tone] ?? colors.blue)
+  }
+  return Array.from({ length: profile.padCount }, (_, note) => [0x90 | channel, note, byNote.get(note) ?? colors.off])
 }

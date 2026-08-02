@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { midiControlForMessage, normalizeMappings, bindingLabel } from '../src/main/midi-mappings.mjs'
+import { midiControlForMessage, midiEventForMessage, normalizeMappings, bindingLabel } from '../src/main/midi-mappings.mjs'
 
 test('recognizes APC40 MKII note-on and CC controls', () => {
   assert.deepEqual(midiControlForMessage([0x91, 64, 127]), {
@@ -15,6 +15,14 @@ test('ignores releases and unsupported MIDI messages', () => {
   assert.equal(midiControlForMessage([0x90, 12, 0]), null)
   assert.equal(midiControlForMessage([0x80, 12, 127]), null)
   assert.equal(midiControlForMessage([0xF0, 0x47, 0x7F]), null)
+})
+
+test('normalized hardware events retain press and release semantics', () => {
+  assert.equal(midiEventForMessage([0x90, 12, 100]).pressed, true)
+  assert.deepEqual(midiEventForMessage([0x80, 12, 0]), {
+    key: 'note:0:12', type: 'note', channel: 1, number: 12, value: 0, pressed: false
+  })
+  assert.equal(midiEventForMessage([0xB0, 18, 20]).pressed, false)
 })
 
 test('keeps only known Ambientic actions and valid controls', () => {

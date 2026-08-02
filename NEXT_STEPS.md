@@ -137,14 +137,21 @@ Exit condition: another user can import, configure, preview, and run a workflow 
 
 ## Phase 3 — universal hardware mapping
 
-- Inventory generic MIDI and keyboard input/output capabilities.
-- Generalize the current mapping model to device profiles, banks, layers, modifiers, press/hold/release, values, conditions, and semantic actions.
-- Build device discovery, input monitor, MIDI/keyboard learn, conflict resolution, test mode, and recovery.
-- Add output-feedback profiles with input-only fallbacks.
-- Add profile import/export, privacy linting, compatibility checks, and local gallery.
-- Maintain dedicated APC40 MKII and APC mini mk2 regressions throughout.
+- [x] Inventory and normalize APC and generic MIDI Note/CC input plus focused computer-keyboard input.
+- [x] Add the versioned semantic action catalog and normalized assignments with target, trigger, permission, and feedback metadata.
+- [x] Add an atomic hardware-template repository with a protected native profile, arbitrary grids, multiple views, logical slots, shared physical bindings, and navigation history.
+- [x] Build the dedicated Hardware library and editor with Play/Edit/Map/Test modes, live input monitor, target inspector, linked-view creation, Back/Home navigation, conflict replacement, and safe recovery states.
+- [x] Add generic input-only MIDI fallback while retaining selectable APC40 MKII and APC mini native profiles.
+- [x] Add Note/CC/keyboard Learn and press, release, 650 ms hold, and CC-value triggers.
+- [x] Add privacy-sanitized file import/export that removes physical bindings, exact local targets, and saved prompts.
+- [x] Render assignment feedback on learned APC grid controls for custom templates while preserving the protected native session-state lighting path.
+- [x] Maintain dedicated APC40 MKII, APC mini mk2, MIDI-client-lifetime, generic-input, template-store, interaction, build, and reduced-motion regressions.
+- [x] Exchange one exported template between two clean profile stores and verify setup-required targets, restart restoration, linked-view/Back behavior, no bindings, and no private source IDs or labels.
+- [x] Launch a disposable live profile alongside the installed app with isolated logging/locking/data, a healthy context database, ephemeral ingest port, and connected APC mini detection.
+- [ ] Complete a human-operated APC two-view navigation and confirmation pass, then repeat import through the installed app's native file dialogs.
+- [ ] Add generic device-specific LED/SysEx output-profile authoring after the input-first V1 proves controller coverage; input-only fallback is intentional until then.
 
-Exit condition: a new MIDI controller and a keyboard shortcut can each be configured without code, exported, imported into a clean profile, and restored with correct feedback semantics.
+Exit condition: automated implementation coverage, clean-profile exchange/restart, isolated live startup, and development visual QA pass. Phase completion still requires human APC pad interaction and the installed file-dialog import smoke above.
 
 ## Phase 4 — Ambientic Coach
 

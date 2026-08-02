@@ -4,7 +4,7 @@ import http from 'node:http'
 // keep it dead simple and permissive (any parse error just 400s, never throws).
 export const PORT = 47600
 
-export function startServer (store, { focusById, onTaskText, onApprovalRequest } = {}) {
+export function startServer (store, { focusById, onTaskText, onApprovalRequest, port = PORT } = {}) {
   const server = http.createServer((req, res) => {
     // Loopback only — never accept anything off-box.
     const ra = req.socket.remoteAddress || ''
@@ -90,14 +90,16 @@ export function startServer (store, { focusById, onTaskText, onApprovalRequest }
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`[ambientic] port ${PORT} already in use — another instance running?`)
+      console.error(`[ambientic] port ${port} already in use — another instance running?`)
     } else {
       console.error('[ambientic] server error:', err.message)
     }
   })
 
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log(`[ambientic] ingest listening on http://127.0.0.1:${PORT}`)
+  server.listen(port, '127.0.0.1', () => {
+    const address = server.address()
+    const activePort = typeof address === 'object' && address ? address.port : port
+    console.log(`[ambientic] ingest listening on http://127.0.0.1:${activePort}`)
   })
 
   return server

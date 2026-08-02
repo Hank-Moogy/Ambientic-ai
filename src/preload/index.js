@@ -18,6 +18,26 @@ contextBridge.exposeInMainWorld('controller', {
   runWorkflow: (workflowId) => ipcRenderer.invoke('run-workflow', workflowId),
   approveWorkflowRun: (runId, allow) => ipcRenderer.invoke('approve-workflow-run', runId, allow),
   cancelWorkflowRun: (runId) => ipcRenderer.invoke('cancel-workflow-run', runId),
+  getHardwareProfiles: () => ipcRenderer.invoke('get-hardware-profiles'),
+  hardwareCreateTemplate: (input) => ipcRenderer.invoke('hardware-create-template', input),
+  hardwareUpdateTemplate: (templateId, patch) => ipcRenderer.invoke('hardware-update-template', templateId, patch),
+  hardwareDuplicateTemplate: (templateId) => ipcRenderer.invoke('hardware-duplicate-template', templateId),
+  hardwareDeleteTemplate: (templateId) => ipcRenderer.invoke('hardware-delete-template', templateId),
+  hardwareActivateTemplate: (templateId) => ipcRenderer.invoke('hardware-activate-template', templateId),
+  hardwareSetMode: (mode) => ipcRenderer.invoke('hardware-set-mode', mode),
+  hardwareAddView: (templateId, input) => ipcRenderer.invoke('hardware-add-view', templateId, input),
+  hardwareRenameView: (templateId, viewId, name) => ipcRenderer.invoke('hardware-rename-view', templateId, viewId, name),
+  hardwareDeleteView: (templateId, viewId) => ipcRenderer.invoke('hardware-delete-view', templateId, viewId),
+  hardwareAssignPad: (templateId, viewId, slot, assignment) => ipcRenderer.invoke('hardware-assign-pad', templateId, viewId, slot, assignment),
+  hardwareTriggerPad: (slot) => ipcRenderer.invoke('hardware-trigger-pad', slot),
+  hardwareOpenView: (viewId) => ipcRenderer.invoke('hardware-open-view', viewId),
+  hardwareLearnPad: (templateId, slot) => ipcRenderer.invoke('hardware-learn-pad', templateId, slot),
+  hardwareCancelLearn: () => ipcRenderer.invoke('hardware-cancel-learn'),
+  hardwareClearBinding: (templateId, slot) => ipcRenderer.invoke('hardware-clear-binding', templateId, slot),
+  hardwareKeyInput: (code, modifiers, pressed = true) => ipcRenderer.invoke('hardware-key-input', code, modifiers, pressed),
+  hardwareConfirmAction: (id, allow) => ipcRenderer.invoke('hardware-confirm-action', id, allow),
+  hardwareExportTemplate: (templateId) => ipcRenderer.invoke('hardware-export-template', templateId),
+  hardwareImportTemplate: () => ipcRenderer.invoke('hardware-import-template'),
   getUsage: () => ipcRenderer.invoke('get-usage'),
   getConsumptionLedger: () => ipcRenderer.invoke('get-consumption-ledger'),
   getAmbientMode: () => ipcRenderer.invoke('get-ambient-mode'),
@@ -101,6 +121,26 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('workflows', handler)
     return () => ipcRenderer.removeListener('workflows', handler)
+  },
+  onHardwareProfiles: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('hardware-profiles', handler)
+    return () => ipcRenderer.removeListener('hardware-profiles', handler)
+  },
+  onHardwareNavigate: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('hardware-navigate', handler)
+    return () => ipcRenderer.removeListener('hardware-navigate', handler)
+  },
+  onHardwareConfirmation: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('hardware-confirmation', handler)
+    return () => ipcRenderer.removeListener('hardware-confirmation', handler)
+  },
+  onHardwareConfirmationExpired: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('hardware-confirmation-expired', handler)
+    return () => ipcRenderer.removeListener('hardware-confirmation-expired', handler)
   },
   onUsage: (cb) => {
     const handler = (_e, payload) => cb(payload)

@@ -77,6 +77,16 @@ The hardware system must support:
 - Versioned setup bundles that users can export, import, fork, and eventually share.
 - First-class APC40 MKII behavior and regressions even as generic hardware support expands.
 
+Implementation status (2026-08-02): the first complete local V1 is implemented in the working tree. Hardware is now a dedicated primary workspace with an atomic template store, protected native live-session profile, arbitrary 1–12 row/column decks, editable deck/view identity, multiple linked views, Back/Home navigation, Play/Edit/Map/Test modes, semantic assignment and target inspection across the complete live/history thread index, Note/CC/computer-key learning, press/release/hold/value triggers, input monitoring, visible conflict moves, derived setup readiness, expiring truthful confirmation lifecycle, generic input-only MIDI fallback, validated privacy-sanitized file import/export with catalog-ready requirements metadata, and clean-profile exchange/restart coverage. APC40 MKII and APC mini native input/output paths remain the default and retain their regression coverage; learned custom-template grid controls now receive assignment feedback without reusing stale session colors. A disposable live profile starts alongside the installed app and detects the connected APC mini without sharing state or ports. Remaining release gates are installed file-dialog import and human-operated two-view APC tests; arbitrary device-specific LED/SysEx output-profile authoring stays deferred.
+
+The durable model separates three things:
+
+1. A **device profile** describes how hardware communicates and, where known, how its lights behave.
+2. A **mapping template** contains the portable logical grid, views, semantic assignments, triggers, and declared setup needs.
+3. A local **installation** resolves private goals, workflows, threads, prompts, physical controls, and device identity. Export sanitization removes those local bindings rather than publishing the installation.
+
+Physical input binds to a logical slot once. Every view assigns its own action to that slot, so navigation changes meaning while preserving muscle memory. “Create linked view” atomically creates the child view, assigns the source pad to open it, and seeds a Back pad in the child.
+
 ### 5. Ambientic Coach
 
 Offer evidence-backed improvements derived from the user's work and explicitly chosen external sources.

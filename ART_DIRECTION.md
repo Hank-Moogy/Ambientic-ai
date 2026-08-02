@@ -108,6 +108,22 @@ Memory should feel like a local field the user can inspect and prune, never like
 - The session capsule is treated as a sealed object: its hash, age, and token size are quiet evidence of continuity, while recall activity appears as a small adjacent trail.
 - Compact layouts move the project/activity rail below the memory cards instead of squeezing the reading column. Reduced motion changes nothing essential because the workspace communicates through depth and hierarchy, not animation.
 
+## Hardware: the programmable instrument field
+
+Hardware is a dedicated instrument, not an advanced Settings form. Its local template library is the quiet shelf; opening a template reveals a single floating control deck shared by the screen, MIDI controller, and computer keyboard.
+
+- **One logical surface.** Physical notes, pads, buttons, and keys bind to stable virtual positions. Changing view changes meaning without forcing the user to relearn the physical layout.
+- **Low-motion depth.** The deck moves as one restrained field over a subtle perspective grid. Individual pads answer immediately under the hand but do not bob independently or create constant arcade motion.
+- **Views feel spatial.** View tabs and violet navigation pads communicate location. Creating a linked view should feel like opening another room in the same instrument, with a visible path Back or Home.
+- **Light carries operational truth.** Green remains running, red remains input-required or failed, and blue remains idle. Violet identifies navigation, cyan a neutral executable action, and amber a confirmation boundary.
+- **Input is always acknowledged.** A connected core stays softly lit; each valid MIDI arrival creates one short halo even when unmapped, so diagnosis begins with visible truth rather than configuration guesswork.
+- **Editing stays inspectable.** Play, Edit, Map MIDI, and Test are explicit modes. The selected pad, its semantic action, local target, trigger gesture, permission level, and physical binding remain readable together.
+- **Safety interrupts atmosphere.** Sending a saved prompt, starting work, running a workflow, or interrupting a turn enters an explicit confirmation surface when invoked from hardware. Decorative light never implies permission.
+- **Portability is calm and private.** Export is visible from the library, but physical bindings, exact local targets, and saved private prompts are removed before a template leaves the Mac.
+- **Native behavior remains sacred.** The APC40 MKII/APC mini live-session template is protected. Users fork it to explore; generic input support never weakens task-state RGB, voice controls, or Vibe restoration.
+
+At compact heights the complete grid scales down before it clips or becomes scroll-dependent. Reduced-motion users keep the same depth, color, selection, and arrival truth without field drift or pulsing.
+
 ## First-run expression: Enter the field
 
 Onboarding should feel like entering a quiet game world, not completing an enterprise setup checklist. It uses one full-screen decision at a time, oversized editorial type, a restrained five-step progress trace, floating symbols, and one unmistakable primary action.

@@ -64,6 +64,9 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - First-class **Goals** section in the persistent left sidebar, with a spacious floating-card landing field and an in-section goal detail experience.
 - First visual **Workflows** section in the persistent left sidebar, with an atmospheric workflow library and run-history stream, trackpad pan/pinch zoom, zoom-at-pointer behavior, draggable provider-neutral steps, keyboard delete and undo, a capability palette, step inspector, a larger collapsible natural-language dock, sequential dry-run lighting, local draft persistence, and privacy-safe portable manifest copying.
 - Local workflow execution service with multiple saved workflows, recurrence scheduling, provider-neutral agent steps, explicit approval gates for consequential inbox/calendar actions, managed-thread continuation, run history, duplication, and cancellation.
+- Dedicated **Hardware** workspace in the persistent navigation, designed as a calm programmable instrument rather than a Settings form: local template library, protected Ambientic Live Sessions profile, arbitrary grid creation, deck/view rename and secondary-view deletion, Play/Edit/Map MIDI/Test modes, low-motion floating pads, multiple linked views, automatic Back navigation, target/action inspector, input-arrival light, and responsive/reduced-motion layouts.
+- Atomic local hardware-template persistence with logical-slot bindings shared across views, schema/graph/size-validated privacy-sanitized JSON import/export, derived non-private requirements summaries for future community catalogs, fork/duplicate/delete flows, exact-local-target repair markers, and explicit expiring confirmation before consequential hardware actions run.
+- Universal input-first mapping for selectable native APC profiles, generic input-only MIDI devices, and focused computer keyboard controls, including Note/CC learning, visible conflict moves, press/release/650 ms hold/CC-value triggers, reconnect recovery, and visible raw-control labels.
 - Collapsible global navigation with a persistent preference and ⌘\\ shortcut, giving canvas, board, and thread surfaces the full window when focus matters.
 - Workspace renderer recovery: visible error fallback, renderer console diagnostics, and a bounded automatic reload replace permanent black screens after renderer load/process failures.
 - Rotating, secret-redacted main-process diagnostics available from the tray, plus Claude usage collection that rejects expired windows, refreshes its cache from the current provider UI, and consistently selects the newest installed Claude Code binary.
@@ -245,7 +248,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-07-30
+Last updated: 2026-08-02
 
 ### Completed
 
@@ -397,6 +400,14 @@ Last updated: 2026-07-30
 - [x] Build the first Workflow Studio surface: a new left-navigation section, infinite visual canvas, draggable capability nodes, natural-language drafting, local persistence, permission/provider inspector, sequential dry-run visualization, and portable manifest copy.
 - [ ] Connect the Workflow Studio to a versioned manifest validator, semantic action registry, atomic workflow/run store, and deterministic headless runner.
 - [ ] Prove one semantic action can be invoked consistently from the regular UI, a workflow step, and an existing MIDI Learn mapping.
+- [x] Build the dedicated universal Hardware workspace and atomic profile service with saved templates, arbitrary grids, multi-view navigation, semantic assignments, Play/Edit/Map/Test modes, and protected native APC behavior.
+- [x] Add generic input-only MIDI discovery, selectable input ports, computer-key Learn, Note/CC input monitoring, conflict replacement, and press/release/hold/value trigger semantics.
+- [x] Add portable hardware template import/export with privacy removal of physical bindings, exact thread/goal/workflow targets, and saved prompts.
+- [x] Project learned custom-template assignments back onto APC40 MKII/APC mini pads, clearing stale live-session colors while a custom deck is active and restoring the protected native feedback path for Ambientic Live Sessions.
+- [x] Development visual QA at 1280×720: the four-row deck scales fully above its footer, pad selection opens the complete inspector, low-motion depth remains legible, and reduced-motion/responsive contracts are present.
+- [x] Prove a sanitized two-view bundle can move between separate clean profile stores, survive restart, retain linked-view/Back navigation, discard physical bindings, and expose local targets as setup-required.
+- [x] Launch a fully isolated clean development profile alongside the installed app, with separate lock/log/data state, a healthy context database and ephemeral hook port, and live APC mini mk2 Control-port detection.
+- [ ] Complete human-operated physical validation for a two-view APC mapping, Back navigation, safe action, and confirmation handling, then repeat the import through the installed app's file dialogs.
 - [ ] Validate three workflows end to end: rate-limit handover, build → test → review, and repetitive request → goal task → agent execution → artifact review.
 - [ ] Visually validate the new Goals field at common workspace sizes with real goal/task content, including the two-column floating layout, reduced motion, horizontal board navigation, drag/drop, and compact-window fallbacks.
 - [ ] Validate the private `goals.json` store through an installed-app restart and confirm a goal, task ownership, board move, and lifecycle change all survive relaunch.
@@ -418,7 +429,7 @@ Last updated: 2026-07-30
 
 ### Next
 
-- [ ] Add the universal mapping foundation for arbitrary MIDI and keyboard devices: capability discovery, semantic actions, layers/banks/modifiers, input monitoring, feedback profiles, conflict detection, and portable setup bundles.
+- [ ] Add generic controller LED/SysEx output-profile authoring after the input-first Hardware V1 completes physical and clean-profile validation; retain graceful input-only fallback.
 - [ ] Build Ambientic Coach as an opt-in local signal and recommendation system with bounded evidence, source provenance, user feedback, and one-click draft workflows/mappings/goal tasks.
 - [ ] Add privacy-safe local template/profile import and export, then validate clean-profile sharing before designing community accounts, public discovery, ratings, or moderation.
 - [x] **C1** Shared contract and fixtures, byte-stable prompt assembler regression, and preload boundary.
@@ -450,6 +461,14 @@ Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*.
 - [ ] Replace terminal-owned Hermes and Kimi setup with guided provider-native browser/device-code ceremonies where their supported local protocols expose reliable completion callbacks.
 - [ ] Bundle a supported recording/transcription runtime so voice prompts do not depend on Homebrew tools in public builds.
 - [ ] Configure Apple notarization for distribution beyond the development Mac.
+
+### Verification notes — Hardware Mapping V1
+
+- 2026-08-02 focused Hardware/APC verification: 37/37 tests pass across profile persistence and sharing, clean-profile exchange/restart, import graph validation, setup-state repair, confirmation lifecycle, full live/history thread targeting, multi-view navigation, trigger semantics, interaction contracts, MIDI normalization, conflict moves, generic input fallback, native controller behavior, and custom APC assignment LEDs.
+- 2026-08-02 release-safe repository verification: `npm run test:local-release` passes 199 runnable tests with 0 failures and 2 intentional transport skips. The separate fake-Claude OAuth callback simulator remains excluded by that script because its live callback wait is flaky; the rest of the Claude authentication suite runs.
+- 2026-08-02 production verification: `npm run build` succeeds for the Electron main process, preload, and renderer bundles.
+- Browser-assisted visual QA at 1280×720 verified that a four-row deck stays above the footer and that selecting a pad exposes its full assignment inspector.
+- A disposable live profile started beside the installed Ambientic app, created its own healthy context database, served `{"ok":true,"sessions":8}` on an ephemeral loopback port, and repeatedly detected the connected `APC mini mk2 Control` input/output. Human pad presses and installed-dialog import remain explicit release gates.
 - [ ] Add an in-app reconnect message when another older controller process owns port `47600`.
 - [ ] Add history filters, archive controls, and pagination when the local conversation index grows beyond the current recent-session limit.
 - [ ] Add rich unified diffs, image/media previews, and embedded localhost websites to the workspace artifact panel.
