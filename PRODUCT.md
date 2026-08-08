@@ -262,6 +262,7 @@ Hermes is an inspiration and a supported provider, not the foundation. Its bound
 - Indexing locally visible sessions requires one explicit onboarding consent, with per-provider and per-project exclusions.
 - Project scoping must prevent one project's memory from reaching another's sessions.
 - The user can inspect exactly what any agent will see for a given project before starting it, and can edit, supersede, or forget any record.
+- Ambientic runs agents as child processes, and the host OS attributes their file access to Ambientic rather than to the agent. The product therefore inherits blame for everything an agent touches, and users see permission requests naming Ambientic for reads it never performed. Ambientic's own file access is deliberately narrow, but that narrowness is invisible to the user at the moment a prompt appears, so the launch flow must warn before a project inside a protected location is chosen rather than explaining afterwards.
 
 ## Deferred — context kernel and gateway backlog
 

@@ -444,6 +444,7 @@ Last updated: 2026-08-02
 - [x] **H4** Apps & Tools connection, health, capability permission, dependent, and credential-boundary UX.
 - [x] **H5** Gateway approval metadata, session-only remembered approval, destructive safeguards, terminal outcomes, and audit filters.
 - [ ] Run one installed-app live acceptance pass across Claude, Codex, Hermes, and a real external MCP server.
+- [ ] Handle macOS protected-folder prompts caused by spawned agents. Ambientic's own scans stay inside `~/.claude/projects` and `project-scope.mjs` refuses protected home children, but macOS attributes a child process's file access to the responsible parent, so an agent working inside `~/Documents`, `~/Music`, `~/Pictures`, `~/Desktop`, or `~/Downloads` raises a permission prompt naming Ambientic for something Ambientic never read. Warn in the New Task flow when a chosen project sits inside a protected folder, explain in the prompt-adjacent UI why the request appears under Ambientic's name, and document the trade-off; declaring usage-description strings is not a fix and pulls the app into TCC classes it does not need.
 - [ ] Link threads, runs, and artifacts to goal tasks without copying whole transcripts; add execution evidence, provider/model metadata, and continuity.
 - [ ] Make the frozen capsule the cross-provider continuity mechanism and keep the generated handover file as a portable export rather than the transfer path.
 
