@@ -31,3 +31,19 @@ export function protectedHomeChild (path, home = homedir()) {
 export function canInspectProjectRoot (cwd, home = homedir()) {
   return !isBroadProjectRoot(cwd, home) && !protectedHomeChild(cwd, home)
 }
+
+export function projectLaunchAccess (cwd, home = homedir()) {
+  const broad = isBroadProjectRoot(cwd, home)
+  const protectedCollection = broad ? '' : protectedHomeChild(cwd, home)
+  return {
+    broad,
+    protectedCollection,
+    ambienticCanInspect: !broad && !protectedCollection,
+    providerRunsInWorkspace: !broad,
+    warning: protectedCollection
+      ? `This project is inside ${protectedCollection}. macOS may show file-access requests under Ambientic's name because Ambientic launches the agent.`
+      : broad
+        ? 'Choose a specific project folder instead of your whole home or filesystem.'
+        : ''
+  }
+}

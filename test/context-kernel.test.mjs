@@ -66,6 +66,58 @@ test('capsules bind inferred project, goal, and task and remain frozen after reb
   store.close()
 })
 
+test('one launch cannot mix a project context with an unrelated workspace', () => {
+  const { store, engine } = fixture()
+  try {
+    assert.throws(() => engine.prepareSession({
+      provider: 'codex',
+      providerSessionId: 'mixed-context',
+      cwd: '/tmp/unrelated',
+      projectId: 'project-1'
+    }), /linked to \/tmp\/ambientic/)
+
+    const nested = engine.prepareSession({
+      provider: 'codex',
+      providerSessionId: 'nested-workspace',
+      cwd: '/tmp/ambientic/packages/desktop',
+      projectId: 'project-1'
+    })
+    assert.equal(nested.binding.projectId, 'project-1')
+  } finally { store.close() }
+})
+
+test('prompt inference never imports a goal from another project', () => {
+  const { store, engine } = fixture()
+  try {
+    store.upsertProject({ id: 'project-2', rootPath: '/tmp/other', name: 'Other' })
+    const prepared = engine.prepareSession({
+      provider: 'claude',
+      providerSessionId: 'project-scoped-prompt',
+      cwd: '/tmp/other',
+      prompt: 'Build the context kernel and freeze its capsules.'
+    })
+    assert.equal(prepared.binding.projectId, 'project-2')
+    assert.equal(prepared.binding.goalId, '')
+    assert.equal(prepared.binding.taskId, '')
+  } finally { store.close() }
+})
+
+test('folderless projects keep durable context while execution uses an isolated workspace', () => {
+  const { store, engine } = fixture()
+  try {
+    store.upsertProject({ id: 'project-notes', name: 'Research notes', brief: 'A non-code research project.' })
+    const prepared = engine.prepareSession({
+      provider: 'hermes',
+      providerSessionId: 'folderless-project',
+      cwd: '/tmp/ambientic-private-workspace',
+      projectId: 'project-notes'
+    })
+    assert.equal(prepared.binding.projectId, 'project-notes')
+    assert.match(prepared.capsule.text, /Research notes/)
+    assert.match(prepared.capsule.text, /non-code research project/)
+  } finally { store.close() }
+})
+
 test('linked work turns require an explicit goal reconciliation and audit skipped closeout', () => {
   const { store, engine } = fixture()
   try {
@@ -111,6 +163,24 @@ test('candidate promotion requires corroboration from a second session', () => {
   store.close()
 })
 
+test('recall never leaks another project\'s scoped memory into an unbound or differently-bound session', () => {
+  const { store, engine } = fixture()
+  store.upsertProject({ id: 'project-2', rootPath: '/tmp/other-project', name: 'Other', brief: 'Unrelated project.' })
+  engine.remember({ scope: 'project', scopeId: 'project-2', kind: 'decision', content: 'Other project uses a private staging database.' })
+  engine.remember({ scope: 'user', kind: 'preference', content: 'User prefers concise implementation updates.' })
+
+  const unbound = engine.prepareSession({ provider: 'claude', providerSessionId: 'claude-unbound', cwd: '/tmp/unknown-project' })
+  assert.equal(unbound.binding.projectId, '')
+  const hitsFromUnbound = engine.recall({ query: 'staging database' }, unbound.binding)
+  assert.equal(hitsFromUnbound.length, 0)
+  assert.equal(engine.recall({ query: 'concise implementation' }, unbound.binding).length, 1)
+
+  const otherProject = engine.prepareSession({ provider: 'codex', providerSessionId: 'codex-project-1', cwd: '/tmp/ambientic' })
+  assert.equal(otherProject.binding.projectId, 'project-1')
+  assert.equal(engine.recall({ query: 'staging database' }, otherProject.binding).length, 0)
+  store.close()
+})
+
 test('secret-like content is redacted from transcripts and rejected from durable memory', () => {
   const { store, engine } = fixture()
   const redacted = redactSecrets('api_key=secret-value-123456789')
@@ -151,4 +221,29 @@ test('sensitive personal assertions remain review-only and out of recall', () =>
     assert.equal(record.sensitive, true)
     assert.equal(value.engine.recall({ query: 'diagnosis' }, prepared.binding).length, 0)
   } finally { value.store.close() }
+})
+
+test('reconnecting an MCP server never silently reinstates auto-approval over a human denial', () => {
+  const { store } = fixture()
+  try {
+    store.upsertConnection({ id: 'conn-1', name: 'Test server', transport: 'stdio', config: { command: 'true' } })
+    store.replaceCapabilities('conn-1', [{ name: 'list_files', description: 'List files in a folder.', permission: 'read' }])
+    const initial = store.getCapability('conn-1:list_files')
+    assert.equal(initial.permissionMode, 'auto')
+
+    store.updateCapabilityPolicy('conn-1:list_files', 'deny')
+    assert.equal(store.getCapability('conn-1:list_files').permissionMode, 'deny')
+
+    // Reconnect: the server re-reports the same read-only tool.
+    store.replaceCapabilities('conn-1', [{ name: 'list_files', description: 'List files in a folder.', permission: 'read' }])
+    assert.equal(store.getCapability('conn-1:list_files').permissionMode, 'deny')
+
+    // A capability a human explicitly allowed to auto-run must fall back to
+    // requiring approval if the server later reclassifies it as write/destructive.
+    store.updateCapabilityPolicy('conn-1:list_files', 'auto')
+    store.replaceCapabilities('conn-1', [{ name: 'list_files', description: 'Delete files in a folder.', permission: 'destructive' }])
+    const escalated = store.getCapability('conn-1:list_files')
+    assert.equal(escalated.permission, 'destructive')
+    assert.equal(escalated.permissionMode, 'ask')
+  } finally { store.close() }
 })

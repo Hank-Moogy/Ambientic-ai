@@ -79,7 +79,7 @@ contextBridge.exposeInMainWorld('controller', {
   showController: () => ipcRenderer.invoke('show-controller'),
   hideController: () => ipcRenderer.invoke('hide-controller'),
   showWorkspace: (id) => ipcRenderer.invoke('show-workspace', id),
-  openArtifact: (path) => ipcRenderer.invoke('open-artifact', path),
+  openArtifact: (id, path) => ipcRenderer.invoke('open-artifact', id, path),
   presentPreview: (id) => ipcRenderer.invoke('present-preview', id),
   getMidi: () => ipcRenderer.invoke('get-midi'),
   getVoice: () => ipcRenderer.invoke('get-voice'),
@@ -228,6 +228,7 @@ contextBridge.exposeInMainWorld('ambientic', {
     listProjects: () => ipcRenderer.invoke('context-list-projects'),
     upsertProject: (input = {}) => ipcRenderer.invoke('context-upsert-project', input),
     inferLaunch: (input = {}) => ipcRenderer.invoke('context-infer-launch', input),
+    launchAccess: (cwd = '') => ipcRenderer.invoke('context-launch-access', cwd),
     getBinding: (sessionId) => ipcRenderer.invoke('context-get-binding', sessionId),
     rebind: (sessionId, patch = {}) => ipcRenderer.invoke('context-rebind', sessionId, patch)
   },

@@ -184,6 +184,8 @@ Because the store is a native module, native packaging is a release gate: the bu
 
 A project is a stable identity with an optional root path, so work that is not code still gets a brief and a memory scope. Every managed session is bound to a project and, where confidence allows, a goal and task. The binding records what inferred it and whether the user corrected it.
 
+The project is Ambientic's provider-neutral launch unit. Its identity owns the durable brief, scoped memory, goal/task relationships, exclusions, and default workspace. The working directory is only the execution location. A launch may use the project's root or a descendant workspace, but Ambientic rejects an explicit project paired with an unrelated folder before any provider starts. A folderless project runs in a private per-task Ambientic workspace while retaining the project's durable context. Provider selection, model, and effort remain runtime policy over that same launch unit.
+
 Launch context is inferred in this order:
 
 1. Explicit user selection.
@@ -250,7 +252,7 @@ Capabilities are requested semantically and resolved to an eligible connection a
 
 ### Cross-provider continuity
 
-A new session's capsule is the handover. Provider switching stops being a distinct feature with its own document and becomes the default behavior of the context kernel: the new provider receives the same binding, a fresh capsule, and recall access. The generated handover file remains as an explicit portable export, not as the transfer mechanism.
+A new session's capsule is the handover. Provider switching stops being a distinct feature with its own document and becomes the default behavior of the context kernel: the new provider receives the same project/goal/task binding, a fresh capsule, and recall access. Ambientic now passes that binding explicitly through the managed handoff path instead of asking the destination provider to infer it again. The generated handover file remains as an explicit portable export, not as the transfer mechanism.
 
 ### Relationship to Hermes
 
@@ -262,6 +264,7 @@ Hermes is an inspiration and a supported provider, not the foundation. Its bound
 - Indexing locally visible sessions requires one explicit onboarding consent, with per-provider and per-project exclusions.
 - Project scoping must prevent one project's memory from reaching another's sessions.
 - The user can inspect exactly what any agent will see for a given project before starting it, and can edit, supersede, or forget any record.
+- Ambientic runs agents as child processes, and the host OS attributes their file access to Ambientic rather than to the agent. The product therefore inherits blame for everything an agent touches, and users see permission requests naming Ambientic for reads it never performed. Ambientic's own file access is deliberately narrow, but that narrowness is invisible to the user at the moment a prompt appears, so the launch flow must warn before a project inside a protected location is chosen rather than explaining afterwards.
 
 ## Deferred — context kernel and gateway backlog
 

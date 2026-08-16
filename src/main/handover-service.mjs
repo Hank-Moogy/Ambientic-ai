@@ -167,7 +167,8 @@ export class HandoverService extends EventEmitter {
     const record = this.records.get(join(source?.cwd || '', 'HANDOVER.md')) || await this.generate(sessionId, 'provider switch')
     if (source?.agent === targetProvider) throw new Error('Choose a different provider for the handover.')
     const prompt = `Take over this project from ${source?.agent || 'another provider'}. Read ${record.path}, inspect the working tree, and continue the Current objective / First action. Treat the handover and repository as the source of truth; do not ask for the prior chat or repeat the handover back to me.`
-    const targetSessionId = await this.workspace.create({ provider: targetProvider, cwd: source.cwd, prompt })
+    const contextBinding = this.workspace.contextBindingFor?.(source) || {}
+    const targetSessionId = await this.workspace.create({ provider: targetProvider, cwd: source.cwd, prompt, contextBinding })
     return { ...record, targetProvider, targetSessionId }
   }
 

@@ -1,8 +1,8 @@
 import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
-import { readFile, stat, writeFile } from 'node:fs/promises'
+import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { cpSync, existsSync, readdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { SessionStore, STATE } from './sessions.js'
@@ -32,6 +32,7 @@ import { createContextEngine } from './context-engine.mjs'
 import { createCapabilityGateway } from './capability-gateway.mjs'
 import { createMemoryBootstrapService } from './memory-bootstrap-service.mjs'
 import { createHardwareProfileService } from './hardware-profile-service.mjs'
+import { projectLaunchAccess } from './project-scope.mjs'
 
 // Apply disposable state before logging and before Electron derives the
 // single-instance lock. This lets a clean-profile developer smoke coexist with
@@ -768,6 +769,7 @@ ipcMain.handle('hardware-import-template', async () => {
 ipcMain.handle('context-list-projects', () => requireContextService(contextStore).listProjects())
 ipcMain.handle('context-upsert-project', (_event, input = {}) => requireContextService(contextStore).upsertProject(input))
 ipcMain.handle('context-infer-launch', (_event, input = {}) => requireContextService(contextEngine).inferLaunch(input))
+ipcMain.handle('context-launch-access', (_event, cwd = '') => projectLaunchAccess(String(cwd || '')))
 ipcMain.handle('context-get-binding', (_event, sessionId) => {
   const session = workspace?.sessionFor(String(sessionId || ''))
   if (!session) return null
@@ -966,7 +968,20 @@ ipcMain.handle('hide-controller', () => {
   return true
 })
 ipcMain.handle('show-workspace', (_event, id) => showWorkspace(id))
-ipcMain.handle('open-artifact', (_event, path) => shell.openPath(path))
+ipcMain.handle('open-artifact', async (_event, id, path) => {
+  // Artifact paths are self-reported by the agent transcript, so never hand
+  // shell.openPath a location outside that thread's own working directory —
+  // a prompt-injected agent could otherwise get the user to click-launch an
+  // arbitrary file or executable elsewhere on disk.
+  const session = workspace.sessionFor(String(id || ''))
+  const cwd = session?.cwd ? resolve(String(session.cwd)) : ''
+  if (!cwd) return false
+  const requested = resolve(String(path || ''))
+  let target
+  try { target = await realpath(requested) } catch { target = requested }
+  if (target !== cwd && !target.startsWith(`${cwd}${sep}`)) return false
+  return shell.openPath(target)
+})
 ipcMain.handle('present-preview', (_event, id) => presentWorkspacePreview(id))
 
 function accessibilityGranted (prompt = false) {
