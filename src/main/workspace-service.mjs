@@ -498,6 +498,13 @@ export class WorkspaceService extends EventEmitter {
     return { ...runtime, capsule: binding.capsuleText }
   }
 
+  contextBindingFor (sessionOrId) {
+    const session = typeof sessionOrId === 'string' ? this.sessionFor(sessionOrId) : sessionOrId
+    if (!session || !this.contextEngine) return {}
+    const binding = this.contextEngine.bindingFor(session.agent, this.providerSessionId(session))
+    return binding ? { projectId: binding.projectId || '', goalId: binding.goalId || '', taskId: binding.taskId || '' } : {}
+  }
+
   recentProjects (limit = 4) {
     const projects = new Map()
     for (const session of [...this.store.list(), ...this.history.values()].sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))) {

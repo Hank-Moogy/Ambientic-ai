@@ -175,6 +175,15 @@ function Message ({ item, providerLabel }) {
   )
 }
 
+function TypingIndicator ({ providerLabel }) {
+  return (
+    <article className="message message--typing" data-role="assistant" aria-live="polite">
+      <div className="message__role"><span>{providerLabel || 'Agent'}</span></div>
+      <div className="typing-indicator"><i /><i /><i /></div>
+    </article>
+  )
+}
+
 function ComposerDraft ({
   sessionId,
   canManage,
@@ -330,14 +339,16 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
   const [taskOptions, setTaskOptions] = useState({ provider: '', models: [], efforts: [] })
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [prompt, setPrompt] = useState('')
-  const [recentProjects, setRecentProjects] = useState([])
+  const [projects, setProjects] = useState([])
+  const [selectedProjectId, setSelectedProjectId] = useState('')
+  const [launchAccess, setLaunchAccess] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [contextBinding, setContextBinding] = useState({})
   const projectChoiceMade = useRef(false)
   const selectedConnector = taskConnectors.find((item) => item.id === provider)
   const providerReady = Boolean(selectedConnector?.installed && selectedConnector.manageable !== false)
-  const selectedProject = recentProjects.find((project) => project.cwd === cwd)
+  const selectedProject = projects.find((project) => project.id === selectedProjectId) || projects.find((project) => project.rootPath === cwd)
   const selectedProjectName = selectedProject?.name || cwd.split(/[\\/]/).filter(Boolean).at(-1) || 'Existing project'
   const selectedModel = taskOptions.models.find((item) => item.id === model)
   const effortOptions = selectedModel?.efforts?.length ? selectedModel.efforts : taskOptions.efforts
@@ -347,13 +358,28 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
     if (fallback && fallback.id !== provider) setProvider(fallback.id)
   }, [provider, providerReady, taskConnectors])
   useEffect(() => {
-    window.controller.getRecentProjects().then((projects) => {
-      setRecentProjects(projects)
-      // A real, recently used project is the most useful default. Scratch work
-      // remains one explicit click away and is never confused with project work.
-      setCwd((current) => projectChoiceMade.current ? current : (current || projects[0]?.cwd || ''))
-    }).catch(() => setRecentProjects([]))
+    let active = true
+    // Refreshing recent work also backfills stable Ambientic project records.
+    // The launch surface then reads those canonical records rather than keeping
+    // a second folder-only idea of what a project is.
+    window.controller.getRecentProjects().then(() => window.ambientic?.context?.listProjects?.() || []).then((items) => {
+      if (!active) return
+      const available = Array.isArray(items) ? items.filter((item) => item.state !== 'archived') : []
+      setProjects(available)
+      const initial = available.find((item) => item.rootPath) || available[0]
+      if (!projectChoiceMade.current && initial) {
+        setSelectedProjectId(initial.id)
+        setCwd(initial.rootPath || '')
+      }
+    }).catch(() => { if (active) setProjects([]) })
+    return () => { active = false }
   }, [])
+  useEffect(() => {
+    let active = true
+    if (!cwd || typeof window.ambientic?.context?.launchAccess !== 'function') { setLaunchAccess(null); return undefined }
+    window.ambientic.context.launchAccess(cwd).then((value) => { if (active) setLaunchAccess(value) }).catch(() => { if (active) setLaunchAccess(null) })
+    return () => { active = false }
+  }, [cwd])
   useEffect(() => {
     let active = true
     setLoadingOptions(true)
@@ -387,6 +413,12 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
       const selected = await window.controller.chooseProjectFolder()
       if (selected) {
         projectChoiceMade.current = true
+        const name = selected.split(/[\\/]/).filter(Boolean).at(-1) || 'Local project'
+        const project = await window.ambientic?.context?.upsertProject?.({ rootPath: selected, name })
+        if (project?.id) {
+          setProjects((items) => [project, ...items.filter((item) => item.id !== project.id)])
+          setSelectedProjectId(project.id)
+        }
         setCwd(selected)
       }
       return selected || ''
@@ -394,6 +426,15 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
       setError(taskCreationError(cause))
       return ''
     }
+  }
+  const chooseProject = (projectId, projectRecord = null) => {
+    projectChoiceMade.current = true
+    const project = projectRecord || projects.find((item) => item.id === projectId)
+    if (projectRecord?.id) setProjects((items) => [projectRecord, ...items.filter((item) => item.id !== projectRecord.id)])
+    setSelectedProjectId(project?.id || '')
+    setCwd(project?.rootPath || '')
+    setContextBinding((current) => ({ ...current, projectId: project?.id || '', goalId: '', taskId: '' }))
+    setError('')
   }
   const submit = async (event) => {
     event.preventDefault()
@@ -404,7 +445,7 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
     }
     setBusy(true)
     try {
-      await onCreate({ provider, cwd: cwd.trim(), prompt, model, effort, mode: 'build', contextBinding })
+      await onCreate({ provider, cwd: cwd.trim(), prompt, model, effort, mode: 'build', contextBinding: { ...contextBinding, projectId: selectedProjectId } })
     } catch (cause) {
       setError(taskCreationError(cause))
     } finally {
@@ -427,12 +468,13 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
           {(selectedModel?.description || effortOptions.find((item) => item.id === effort)?.description) && <small className="new-task-tuning-note">{[selectedModel?.description, effortOptions.find((item) => item.id === effort)?.description].filter(Boolean).join(' · ')}</small>}
         </section>
         <section className="new-task-work-area">
-          <div><span>Project context</span><b>{cwd ? selectedProjectName : 'Scratch workspace'}</b><small>{cwd || 'A new empty local folder. Use this only for work that does not belong to an existing project.'}</small></div>
-          <button type="button" onClick={chooseFolder}>{cwd ? 'Browse' : 'Choose project'}</button>
+          <div><span>Ambientic project</span><b>{selectedProject ? selectedProjectName : 'Scratch workspace'}</b><small>{cwd || (selectedProject ? 'Folderless project · the agent will run in a private Ambientic workspace.' : 'No durable project memory · the agent will run in a private Ambientic workspace.')}</small></div>
+          <button type="button" onClick={chooseFolder}>{selectedProject ? 'Change folder' : 'Add project'}</button>
         </section>
-        {recentProjects.length > 0 && <div className="new-task-recents"><span>Recent projects</span>{recentProjects.map((project) => <button type="button" key={project.cwd} data-selected={cwd === project.cwd} title={project.cwd} onClick={() => { projectChoiceMade.current = true; setCwd(project.cwd); setError('') }}>{project.name}</button>)}</div>}
-        {cwd && <button className="new-task-private" type="button" onClick={() => { projectChoiceMade.current = true; setCwd(''); setError('') }}>Start in an empty scratch workspace</button>}
-        <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} goalsSnapshot={goalsSnapshot} onChange={setContextBinding} onCreateGoal={onCreateGoal} onCreateTask={onCreateTask} />
+        {projects.length > 0 && <div className="new-task-recents"><span>Projects</span>{projects.slice(0, 8).map((project) => <button type="button" key={project.id} data-selected={selectedProjectId === project.id} title={project.rootPath || 'Folderless project'} onClick={() => chooseProject(project.id)}>{project.name}</button>)}</div>}
+        {selectedProjectId && <button className="new-task-private" type="button" onClick={() => chooseProject('')}>Start without a linked project</button>}
+        {launchAccess?.warning && <div className="new-task-access-note" data-risk={launchAccess.broad ? 'blocked' : 'notice'}><b>{launchAccess.broad ? 'Choose a narrower folder' : 'macOS access notice'}</b><span>{launchAccess.warning}</span></div>}
+        <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} projectId={selectedProjectId} goalsSnapshot={goalsSnapshot} onProjectChange={chooseProject} onChange={setContextBinding} onCreateGoal={onCreateGoal} onCreateTask={onCreateTask} />
         <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={cwd ? `What should the agent do in ${selectedProjectName}? (optional)` : 'What should this agent create? (optional)'} autoFocus /></label>
         {error && <div className="new-task__error" role="alert"><span>!</span><p>{error}</p></div>}
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !providerReady} type="submit">{busy ? 'Starting…' : providerReady ? 'Start task' : 'Connect a provider first'}</button></footer>
@@ -1391,6 +1433,7 @@ export default function Workspace () {
             {loading && <div className="loading">Loading local conversation…</div>}
             {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. Ambientic will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
             {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
+            {thread?.running && !thread.messages?.some((item) => item.streaming) && <TypingIndicator providerLabel={thread.providerLabel} />}
             {showJumpToLatest && <button className="thread-jump-latest" type="button" onClick={() => scrollToLatest('smooth')} aria-label="Jump to the latest message">↓ Latest</button>}
           </div>
           <div className="composer-wrap">
@@ -1443,7 +1486,7 @@ export default function Workspace () {
         <ThreadContextPanel sessionId={selectedId} thread={thread} goalsSnapshot={goalsSnapshot} />
         <section><h3>Task</h3><dl><div><dt>Provider</dt><dd>{thread?.providerLabel || '—'}</dd></div><div><dt>Status</dt><dd><i data-state={thread?.state} />{stateLabel[thread?.state] || '—'}</dd></div><div><dt>Project</dt><dd>{thread?.project || '—'}</dd></div></dl></section>
         <section><h3>Preview <span>{companions?.bySession?.[selectedId]?.activeCount || 0}</span></h3><ThreadPreview state={companions?.bySession?.[selectedId]} onPresent={() => window.controller.presentPreview(selectedId)} /></section>
-        <section><h3>Artifacts <span>{thread?.artifacts?.length || 0}</span></h3>{thread?.artifacts?.length ? <div className="artifacts">{thread.artifacts.map((artifact) => <button key={artifact.path} type="button" title={artifact.path} onClick={() => window.controller.openArtifact(artifact.path)}><span>⌘</span><div><b>{artifact.name}</b><small>{artifact.path}</small></div></button>)}</div> : <div className="no-artifacts">Files touched by the agent appear here.</div>}</section>
+        <section><h3>Artifacts <span>{thread?.artifacts?.length || 0}</span></h3>{thread?.artifacts?.length ? <div className="artifacts">{thread.artifacts.map((artifact) => <button key={artifact.path} type="button" title={artifact.path} onClick={() => window.controller.openArtifact(thread.id, artifact.path)}><span>⌘</span><div><b>{artifact.name}</b><small>{artifact.path}</small></div></button>)}</div> : <div className="no-artifacts">Files touched by the agent appear here.</div>}</section>
         <section className="capabilities"><h3>Connection</h3><p>Provider credentials stay in the provider’s own local store. Ambientic never asks for or copies your API keys.</p></section>
       </aside></>}
       {newTask && <NewTask key={newTaskProvider || 'any'} connectors={connectors} goalsSnapshot={goalsSnapshot} initialProvider={newTaskProvider} onClose={() => setNewTask(false)} onCreate={create} onCreateGoal={createGoal} onCreateTask={createGoalTask} />}

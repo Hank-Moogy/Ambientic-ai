@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canInspectProjectRoot, isBroadProjectRoot, protectedHomeChild } from '../src/main/project-scope.mjs'
+import { canInspectProjectRoot, isBroadProjectRoot, projectLaunchAccess, protectedHomeChild } from '../src/main/project-scope.mjs'
 
 const home = '/Users/person'
 
@@ -23,4 +23,19 @@ test('identifies macOS protected home collections', () => {
   assert.equal(canInspectProjectRoot('/Users/person/Music/project', home), false)
   assert.equal(canInspectProjectRoot('/Users/person/Pictures/project', home), false)
   assert.equal(canInspectProjectRoot('/Users/person/Documents/project', home), false)
+})
+
+test('describes provider access separately from Ambientic background inspection', () => {
+  assert.deepEqual(projectLaunchAccess('/Users/person/projects/ambientic', home), {
+    broad: false,
+    protectedCollection: '',
+    ambienticCanInspect: true,
+    providerRunsInWorkspace: true,
+    warning: ''
+  })
+  const protectedProject = projectLaunchAccess('/Users/person/Documents/ambientic', home)
+  assert.equal(protectedProject.providerRunsInWorkspace, true)
+  assert.equal(protectedProject.ambienticCanInspect, false)
+  assert.equal(protectedProject.protectedCollection, 'Documents')
+  assert.match(protectedProject.warning, /under Ambientic's name/)
 })

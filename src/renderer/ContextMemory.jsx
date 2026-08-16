@@ -8,7 +8,7 @@ function apiError (cause, fallback) {
   return cause?.message || fallback
 }
 
-export function LaunchContext ({ provider, cwd, prompt, goalsSnapshot, onChange, onCreateGoal, onCreateTask }) {
+export function LaunchContext ({ provider, cwd, prompt, projectId = '', goalsSnapshot, onProjectChange, onChange, onCreateGoal, onCreateTask }) {
   const [projects, setProjects] = useState([])
   const [binding, setBinding] = useState(EMPTY_BINDING)
   const [inference, setInference] = useState(null)
@@ -47,7 +47,7 @@ export function LaunchContext ({ provider, cwd, prompt, goalsSnapshot, onChange,
     }
     setState('loading')
     const timer = setTimeout(() => {
-      Promise.resolve(api.inferLaunch({ provider, cwd, prompt })).then((result) => {
+      Promise.resolve(api.inferLaunch({ provider, cwd, prompt, projectId })).then((result) => {
         if (!active) return
         const next = result?.binding || result || {}
         const ids = bindingInput(next)
@@ -60,13 +60,14 @@ export function LaunchContext ({ provider, cwd, prompt, goalsSnapshot, onChange,
       }).catch(() => { if (active) setState('error') })
     }, 240)
     return () => { active = false; clearTimeout(timer) }
-  }, [provider, cwd, prompt])
+  }, [provider, cwd, prompt, projectId])
 
-  const update = (patch) => {
+  const update = (patch, projectRecord = null) => {
     const next = { ...binding, ...patch }
     if (Object.hasOwn(patch, 'projectId')) Object.assign(next, { goalId: '', taskId: '' })
     if (Object.hasOwn(patch, 'goalId')) next.taskId = ''
     setBinding(next)
+    if (Object.hasOwn(patch, 'projectId')) onProjectChange?.(patch.projectId, projectRecord)
     onChange?.({ ...next, inferenceSource: 'explicit', correctedByUser: true })
   }
   const project = projects.find((item) => item.id === binding.projectId)
@@ -83,7 +84,7 @@ export function LaunchContext ({ provider, cwd, prompt, goalsSnapshot, onChange,
     if (!projectTitle.trim() || typeof contextApi().context.upsertProject !== 'function') return
     const value = await contextApi().context.upsertProject({ name: projectTitle.trim(), rootPath: '' })
     setProjects((items) => [value, ...items.filter((item) => item.id !== value.id)])
-    setCreatingProject(false); setProjectTitle(''); update({ projectId: value.id })
+    setCreatingProject(false); setProjectTitle(''); update({ projectId: value.id }, value)
   }
   const createTask = async () => {
     if (!taskTitle.trim() || !binding.goalId || !onCreateTask) return

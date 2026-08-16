@@ -466,11 +466,16 @@ export class ContextStore {
     return rows.map((row) => this.getMemory(row.id))
   }
 
-  searchMemory (query, { projectId = '', limit = 12 } = {}) {
+  searchMemory (query, { projectId, limit = 12 } = {}) {
     const term = `%${cleanText(query, 500).replaceAll('%', '\\%').replaceAll('_', '\\_')}%`
+    const scoped = projectId !== undefined
+    const scopeClause = scoped ? "(scope='user' OR scope_id=?)" : '1=1'
+    const args = [term]
+    if (scoped) args.push(cleanText(projectId, 120))
+    args.push(this.now())
     const rows = this.db.prepare(`SELECT * FROM memory_records WHERE content LIKE ? ESCAPE '\\' AND status IN ('active','candidate')
-      AND (scope='user' OR scope_id=? OR ?='') AND (expires_at IS NULL OR expires_at>?) ORDER BY status='active' DESC, confidence DESC, updated_at DESC LIMIT ?`)
-      .all(term, projectId, projectId, this.now(), Math.max(1, Math.min(50, Number(limit) || 12)))
+      AND ${scopeClause} AND (expires_at IS NULL OR expires_at>?) ORDER BY status='active' DESC, confidence DESC, updated_at DESC LIMIT ?`)
+      .all(...args, Math.max(1, Math.min(50, Number(limit) || 12)))
     return rows.map((row) => this.getMemory(row.id))
   }
 
@@ -506,18 +511,23 @@ export class ContextStore {
       VALUES (?,?,?,?,?,?,?,?)`).run(cleanText(input.provider, 24), cleanText(input.providerSessionId, 200), cleanText(input.providerMessageId, 200) || this.id(), cleanText(input.bindingId, 120) || null, cleanText(input.role, 24) || 'unknown', content, input.sensitive ? 1 : 0, Number(input.createdAt) || this.now()).changes > 0
   }
 
-  searchMessages (query, { bindingId = '', projectId = '', limit = 12 } = {}) {
+  searchMessages (query, { bindingId, projectId, limit = 12 } = {}) {
     const raw = cleanText(query, 500)
     if (!raw) return []
     const fts = raw.split(/\s+/).filter(Boolean).slice(0, 12).map((token) => `"${token.replaceAll('"', '""')}"`).join(' OR ')
     if (!fts) return []
+    const bindingClause = bindingId !== undefined ? 'm.binding_id=?' : '1=1'
+    const projectClause = projectId !== undefined ? 'b.project_id=?' : '1=1'
+    const args = [fts]
+    if (bindingId !== undefined) args.push(cleanText(bindingId, 120))
+    if (projectId !== undefined) args.push(cleanText(projectId, 120))
     return this.db.prepare(`SELECT m.id,m.provider,m.provider_session_id,m.role,m.content,m.created_at,b.project_id,
       bm25(session_messages_fts) AS rank FROM session_messages_fts
       JOIN session_messages m ON m.id=session_messages_fts.rowid
       LEFT JOIN session_bindings b ON b.id=m.binding_id
       WHERE session_messages_fts MATCH ? AND m.sensitive=0
-        AND (?='' OR m.binding_id=?) AND (?='' OR b.project_id=?)
-      ORDER BY rank LIMIT ?`).all(fts, bindingId, bindingId, projectId, projectId, Math.max(1, Math.min(50, Number(limit) || 12))).map((row) => ({
+        AND ${bindingClause} AND ${projectClause}
+      ORDER BY rank LIMIT ?`).all(...args, Math.max(1, Math.min(50, Number(limit) || 12))).map((row) => ({
         id: `message:${row.id}`, type: 'episode', provider: row.provider, providerSessionId: row.provider_session_id,
         role: row.role, content: row.content, projectId: row.project_id || '', createdAt: row.created_at, score: -Number(row.rank || 0)
       }))
@@ -552,13 +562,27 @@ export class ContextStore {
   replaceCapabilities (connectionId, capabilities = []) {
     const now = this.now()
     this.db.transaction(() => {
+      // A reconnect/re-test re-fetches tool metadata from the (possibly
+      // compromised or updated) external server, which must never overrule a
+      // human's prior explicit 'ask' or 'deny' decision for that same
+      // capability. Only a brand-new capability gets the classified default,
+      // and 'auto' is re-validated against the freshly reported permission so
+      // a capability that has escalated from read to write/destructive always
+      // falls back to requiring approval.
+      const priorPolicy = new Map(this.db.prepare('SELECT id,policy FROM capabilities WHERE connection_id=?').all(connectionId).map((row) => [row.id, row.policy]))
       this.db.prepare('DELETE FROM capabilities WHERE connection_id=?').run(connectionId)
       const insert = this.db.prepare(`INSERT INTO capabilities(id,connection_id,name,description,input_schema_json,permission,enabled,dependencies_json,created_at,updated_at,policy)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       for (const item of capabilities.slice(0, 500)) {
         const name = cleanText(item.name, 160)
         if (!name) continue
-        insert.run(`${connectionId}:${name}`, connectionId, name, cleanText(item.description, 1000), JSON.stringify(item.inputSchema || {}), VALID_PERMISSIONS.has(item.permission) ? item.permission : 'read', 1, JSON.stringify(item.dependencies || []), now, now, item.permission === 'read' ? 'auto' : 'ask')
+        const id = `${connectionId}:${name}`
+        const permission = VALID_PERMISSIONS.has(item.permission) ? item.permission : 'read'
+        const previous = priorPolicy.get(id)
+        const policy = previous && ['auto', 'ask', 'deny'].includes(previous) && !(previous === 'auto' && permission !== 'read')
+          ? previous
+          : (permission === 'read' ? 'auto' : 'ask')
+        insert.run(id, connectionId, name, cleanText(item.description, 1000), JSON.stringify(item.inputSchema || {}), permission, 1, JSON.stringify(item.dependencies || []), now, now, policy)
       }
     })()
     return this.listCapabilities({ connectionId })

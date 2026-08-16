@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { basename } from 'node:path'
+import { basename, resolve, sep } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { CAPSULE_MAX_TOKENS, CAPSULE_TARGET_TOKENS } from '../shared/context-contract.mjs'
 
@@ -25,6 +25,13 @@ function lexicalScore (query, candidate) {
   let matches = 0
   for (const word of left) if (right.has(word)) matches += 1
   return matches / Math.sqrt(left.size * right.size)
+}
+
+function pathContains (rootPath, workingDirectory) {
+  if (!rootPath || !workingDirectory) return false
+  const root = resolve(String(rootPath))
+  const cwd = resolve(String(workingDirectory))
+  return cwd === root || cwd.startsWith(`${root}${sep}`)
 }
 
 export function estimateTokens (value) {
@@ -93,20 +100,27 @@ export class ContextEngine extends EventEmitter {
 
   inferLaunch ({ cwd = '', prompt = '', projectId = '', goalId = '', taskId = '' } = {}) {
     const goals = goalCollections(this.goals)
-    let project = projectId ? this.store.getProject(projectId) : null
-    let source = project || goalId || taskId ? 'explicit' : ''
+    let goal = goalId ? goals.find((item) => item.id === goalId) : null
+    let task = taskId ? goals.flatMap((item) => item.tasks || []).find((item) => item.id === taskId) : null
+    if (goalId && !goal) throw new Error('The selected Ambientic goal is no longer available.')
+    if (taskId && !task) throw new Error('The selected Ambientic task is no longer available.')
+    if (task && goal && task.goalId !== goal.id) throw new Error('The selected task does not belong to the selected goal.')
+    if (task && !goal) goal = goals.find((item) => item.id === task.goalId) || null
+
+    const impliedProjectId = projectId || task?.projectId || goal?.projectId || ''
+    let project = impliedProjectId ? this.store.getProject(impliedProjectId) : null
+    if (impliedProjectId && !project) throw new Error('The selected Ambientic project is no longer available.')
+    let source = projectId || goalId || taskId ? 'explicit' : ''
     if (!project && cwd) {
       project = this.store.projectByRoot(cwd)
       if (project) source = 'working_directory'
     }
-    if (!project && cwd) {
-      project = this.store.upsertProject({ rootPath: cwd, name: basename(cwd) || 'Local project' })
-      source = 'working_directory'
-    }
 
-    let goal = goalId ? goals.find((item) => item.id === goalId) : null
-    let task = taskId ? goals.flatMap((item) => item.tasks || []).find((item) => item.id === taskId) : null
-    if (task && !goal) goal = goals.find((item) => item.id === task.goalId)
+    if (project?.rootPath && cwd && !pathContains(project.rootPath, cwd)) {
+      throw new Error(`“${project.name}” is linked to ${project.rootPath}. Choose that project workspace instead of mixing its context with another folder.`)
+    }
+    if (goal?.projectId && project && goal.projectId !== project.id) throw new Error('The selected goal belongs to a different Ambientic project.')
+    if (task?.projectId && project && task.projectId !== project.id) throw new Error('The selected task belongs to a different Ambientic project.')
 
     const projectGoals = goals.filter((item) => {
       const tasks = item.tasks || []
@@ -127,7 +141,11 @@ export class ContextEngine extends EventEmitter {
       if (goal) source ||= 'recent_active_goal'
     }
     if (!goal && prompt) {
-      const ranked = goals.map((item) => ({
+      // A prompt may refine direction inside the selected project, but must
+      // never pull a goal (and its memory) across project boundaries. When no
+      // project is selected, only explicitly folderless goals are eligible.
+      const eligibleGoals = project ? projectGoals : goals.filter((item) => !item.projectId)
+      const ranked = eligibleGoals.map((item) => ({
         goal: item,
         score: lexicalScore(prompt, [item.title, item.outcome, item.successCriteria, ...(item.tasks || []).map((candidate) => `${candidate.title} ${candidate.description}`)].join(' '))
       })).sort((left, right) => right.score - left.score)
