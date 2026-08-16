@@ -60,6 +60,7 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - Experimental Overview landing surface with slowly floating provider portals, live metrics, dedicated provider-aware task creation, and a dense cross-provider thread mosaic.
 - Settings → Usage & Billing with comparable Codex and Claude short/weekly quota meters, reset windows, stale/error states, manual refresh, and local weekly-session activity whenever a provider does not expose usable quota data.
 - Persistent local capacity ledger and Settings activity panel for provider limit hits, Codex reset-credit use, natural quota renewals, purchased-credit balance changes, and current observed balances. Codex reset allowance is shown beside its live plan without treating subscription capacity as currency spend.
+- Settings → Inference for connecting hosted OpenAI-compatible inference accounts — Nebius Token Factory first, then Fireworks AI and OpenRouter — with keychain-only key storage, live model listing, per-provider model selection, connection checks, and per-workload routing. Ambientic's own thread labelling runs through the routed account; agent threads keep running on their own provider CLIs, and any workload set to stay local, or routed to a provider that does not answer, falls back to on-device handling.
 - Explicit Overview and Threads navigation, preserving the conventional conversation interface as a secondary tab rather than the product's default mental model.
 - First-class **Goals** section in the persistent left sidebar, with a spacious floating-card landing field and an in-section goal detail experience.
 - First visual **Workflows** section in the persistent left sidebar, with an atmospheric workflow library and run-history stream, trackpad pan/pinch zoom, zoom-at-pointer behavior, draggable provider-neutral steps, keyboard delete and undo, a capability palette, step inspector, a larger collapsible natural-language dock, sequential dry-run lighting, local draft persistence, and privacy-safe portable manifest copying.
@@ -248,7 +249,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-08-02
+Last updated: 2026-08-16
 
 ### Completed
 
@@ -397,6 +398,8 @@ Last updated: 2026-08-02
 
 ### In progress
 
+- [x] Add a hosted inference provider layer with a Nebius Token Factory / Fireworks AI / OpenRouter catalog, keychain-only credential storage, live model listing and auto-selection, connection tests, per-workload routing with an automatic and a stay-local option, and a dedicated Settings → Inference surface.
+- [ ] Connect a real Nebius Token Factory account, confirm the live model list and a routed thread label end to end, then decide which further Ambientic workloads (memory distillation, handover summaries, workflow drafting) should become routable.
 - [x] Build the first Workflow Studio surface: a new left-navigation section, infinite visual canvas, draggable capability nodes, natural-language drafting, local persistence, permission/provider inspector, sequential dry-run visualization, and portable manifest copy.
 - [ ] Connect the Workflow Studio to a versioned manifest validator, semantic action registry, atomic workflow/run store, and deterministic headless runner.
 - [ ] Prove one semantic action can be invoked consistently from the regular UI, a workflow step, and an existing MIDI Learn mapping.
@@ -481,6 +484,7 @@ Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*.
 
 ### Verification
 
+- 2026-08-16 hosted inference providers: the focused inference/context suite passes 14/14, the stable local-release suite passes 215 runnable tests with 0 failures and 2 intentional transport skips, and the production Electron build succeeds. Coverage includes catalog shape, keychain-only key storage (the local `inference.json` is asserted never to contain the key), small-instruct model auto-selection with user override, rejected-key reporting, automatic and explicit workload routing including the disconnect-degrades-to-local path, lazy model discovery for an inherited pre-rename OpenRouter key, environment-key precedence, guarded external links, and the thread-label summarizer's local fallback when a provider fails. Not yet run against a live Nebius or Fireworks account; the model auto-selection heuristics are matched against whatever the account itself lists rather than hardcoded model IDs.
 - 2026-08-13 canonical project launch slice: focused context, access, launch-UI, handoff, provider-injection, and workspace regressions pass (53/53), and the production Electron build succeeds. Coverage proves an Ambientic project cannot be paired with an unrelated folder, sub-workspaces remain valid, prompt matching cannot import another project's goal, folderless projects retain durable context, protected-folder access is presented separately from background inspection, and cross-provider handoff preserves the exact project/goal/task binding. The unfiltered suite passes 206 runnable tests with 2 intentional socket skips; its one failure is the previously documented flaky simulated Claude OAuth callback waiting for a fake OAuth URL, outside this launch-context change.
 - 2026-08-02 latest-worktree integration: every registered worktree was inspected; the clean workflow runtime and overview branches are ancestors of the integration branch, while the older divergent interaction patch is already represented by the current canvas, navigation, recovery, tests, and documentation. Ambient Mode persistence/wake handling and systematic linked-goal closeout now pass the stable local-release suite (172 passed, 2 socket-only skips, 0 failures), the real Unix-socket/MCP shim suite (4/4), and the production renderer build. The local installer now restores the system Node SQLite ABI before tests and rebuilds it for Electron during packaging.
 - 2026-08-01 project-aware task start: focused regressions verify live Codex model/effort normalization, first-turn model and reasoning propagation, bounded project-orientation context, recent-project default selection, explicit scratch fallback, and the renderer-to-main capability IPC. `npm run build` succeeds; the stable local-release gate passes all 148 tests, while the unfiltered suite retains its separately documented simulated Claude OAuth callback timeout (148/149 passing).
@@ -592,3 +596,5 @@ The optional memory step asks only connected Claude Code, Codex, and Hermes runt
 ## Project discipline
 
 `README.md` is the current source of truth for scope and implementation status. Every coding task must update the completed, in-progress, next, and verification information before handoff.
+
+Every major milestone ends at the installed app, not at a source build: after verification and documentation, commit a clean tree, run `npm run release:local`, replace and relaunch `/Applications/Ambientic.app`, and confirm that the running health endpoint and installed build identity match that commit.

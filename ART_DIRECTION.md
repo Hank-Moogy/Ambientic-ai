@@ -108,6 +108,10 @@ Memory should feel like a local field the user can inspect and prune, never like
 - The session capsule is treated as a sealed object: its hash, age, and token size are quiet evidence of continuity, while recall activity appears as a small adjacent trail.
 - Compact layouts move the project/activity rail below the memory cards instead of squeezing the reading column. Reduced motion changes nothing essential because the workspace communicates through depth and hierarchy, not animation.
 
+## Inference: a quiet utility account
+
+Hosted inference belongs in Settings as an Ambientic utility, visually and conceptually separate from the agent accounts that own threads. Provider cards should make connection, endpoint, selected model, and key provenance legible without turning model catalogs into a primary workspace. Routing stays workload-first and explicit: automatic selection, a named connected provider, and local-only handling are peer choices. Provider color communicates identity; green is reserved for verified connection truth. Credential boundaries and local fallback remain visible in plain language, with no animated urgency or suggestion that an inference account gains project, thread, or tool access.
+
 ## Hardware: the programmable instrument field
 
 Hardware is a dedicated instrument, not an advanced Settings form. Its local template library is the quiet shelf; opening a template reveals a single floating control deck shared by the screen, MIDI controller, and computer keyboard.

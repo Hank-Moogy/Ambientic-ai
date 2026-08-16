@@ -1,31 +1,9 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = process.env.AMBIENTIC_SUMMARY_MODEL || process.env.AGENTBASE_SUMMARY_MODEL || process.env.CLAUDE_CONTROLLER_SUMMARY_MODEL || 'amazon/nova-micro-v1'
-const KEYCHAIN_SERVICE = 'com.findmecreators.claudecontroller.openrouter'
-
-let keyPromise = null
-
-function keyFromKeychain () {
-  return new Promise((resolve) => {
-    execFile(
-      '/usr/bin/security',
-      ['find-generic-password', '-w', '-s', KEYCHAIN_SERVICE],
-      { timeout: 3000 },
-      (err, stdout) => resolve(err ? '' : String(stdout || '').trim())
-    )
-  })
-}
-
-function openRouterKey () {
-  if (!keyPromise) {
-    keyPromise = Promise.resolve(process.env.OPENROUTER_API_KEY || '').then(
-      (key) => key.trim() || keyFromKeychain()
-    )
-  }
-  return keyPromise
-}
+const WORKLOAD = 'thread-label'
+// An explicit override still wins, so a developer can pin one model without
+// touching the configured route.
+const MODEL_OVERRIDE = process.env.AMBIENTIC_SUMMARY_MODEL || process.env.AGENTBASE_SUMMARY_MODEL || process.env.CLAUDE_CONTROLLER_SUMMARY_MODEL || ''
 
 function sourceText (value) {
   return String(value || '')
@@ -61,38 +39,25 @@ function localLabel (text) {
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
-async function remoteLabel (text, fallback) {
-  const key = await openRouterKey()
-  if (!key) return fallback
-
-  const response = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${key}`,
-      'content-type': 'application/json',
-      'x-title': 'Ambientic'
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0,
-      max_tokens: 18,
-      messages: [
-        {
-          role: 'system',
-          content: 'Name the coding task in 2 to 5 concrete words. Return only the label, no punctuation, quotes, or explanation. Prefer an action plus object, for example: Fix terminal focus, Add voice option, Audit payment flow.'
-        },
-        { role: 'user', content: sourceText(text) }
-      ]
-    }),
-    signal: AbortSignal.timeout(8000)
+async function remoteLabel (inference, text, fallback) {
+  const result = await inference.complete({
+    workload: WORKLOAD,
+    temperature: 0,
+    maxTokens: 18,
+    timeout: 8000,
+    model: MODEL_OVERRIDE || undefined,
+    messages: [
+      {
+        role: 'system',
+        content: 'Name the coding task in 2 to 5 concrete words. Return only the label, no punctuation, quotes, or explanation. Prefer an action plus object, for example: Fix terminal focus, Add voice option, Audit payment flow.'
+      },
+      { role: 'user', content: sourceText(text) }
+    ]
   })
-
-  if (!response.ok) throw new Error(`OpenRouter ${response.status}`)
-  const payload = await response.json()
-  return tidyLabel(payload?.choices?.[0]?.message?.content, fallback)
+  return { label: tidyLabel(result.text, fallback), model: `${result.provider}/${result.model}` }
 }
 
-export function createTaskSummarizer (store) {
+export function createTaskSummarizer (store, { inference = null } = {}) {
   const lastBySession = new Map()
   const cache = new Map()
   let queue = Promise.resolve()
@@ -114,19 +79,21 @@ export function createTaskSummarizer (store) {
       return
     }
 
+    if (!inference) return
+
     queue = queue
       .catch(() => {})
       .then(async () => {
         try {
-          const label = await remoteLabel(text, fallback)
+          const { label, model } = await remoteLabel(inference, text, fallback)
           cache.set(fingerprint, label)
           store.updateTask(sessionId, label, fingerprint, 'model')
-          console.log(`[summary] ${MODEL} -> "${label}"`)
+          console.log(`[summary] ${model} -> "${label}"`)
         } catch (error) {
           console.warn(`[summary] using local label: ${error.message}`)
         }
       })
   }
 
-  return { enqueue, model: MODEL }
+  return { enqueue, workload: WORKLOAD }
 }
