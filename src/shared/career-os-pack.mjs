@@ -11,7 +11,7 @@ export const CAREER_OS_PACK = {
   schema: 'ambientic.workflow-pack',
   schemaVersion: 1,
   id: 'ambientic.career-os',
-  version: '0.3.0',
+  version: '0.4.0',
   name: 'Career OS',
   tagline: 'A persistent career agent that decides where your time has the highest expected value.',
   description: 'Discover, rank, prepare, track, and learn through one calm 30–60 minute daily routine.',
@@ -19,7 +19,7 @@ export const CAREER_OS_PACK = {
   visibility: 'shared',
   setup: {
     estimatedMinutes: 12,
-    summaryFields: ['routineMinutes', 'routineTime', 'maxDailyOpportunities'],
+    summaryFields: ['routineMinutes', 'routineTime', 'resultsLimit'],
     stages: [
       {
         id: 'profile',
@@ -81,7 +81,7 @@ export const CAREER_OS_PACK = {
         fields: [
           { id: 'routineMinutes', label: 'Career Daily length', type: 'select', required: true, defaultValue: '45', options: [{ value: '30', label: '30 minutes' }, { value: '45', label: '45 minutes' }, { value: '60', label: '60 minutes' }] },
           { id: 'routineTime', label: 'Career Daily time', type: 'time', required: true, defaultValue: '08:30', placeholder: '08:30' },
-          { id: 'maxDailyOpportunities', label: 'Maximum new opportunities per day', type: 'select', required: true, defaultValue: '5', options: [{ value: '3', label: '3 opportunities' }, { value: '5', label: '5 opportunities' }] }
+          { id: 'resultsLimit', label: 'Jobs shown after each market scan', type: 'opportunity-limit', required: true, defaultValue: 'all', placeholder: 'Any number' }
         ]
       }
     ]
@@ -102,18 +102,17 @@ export const CAREER_OS_PACK = {
       id: 'profile-build',
       role: 'profile',
       name: 'Career OS · Build career profile',
-      description: 'Mine user-provided career evidence and reviewed Ambientic memory into one truthful structured profile.',
+      description: 'Mine user-provided career evidence into a truthful profile proposal that the user reviews in Career OS Home.',
       enabled: false,
       nodes: [
-        node('profile-mine', 'agent', 'Build your Career Profile', 'Read only the CV, LinkedIn PDF/profile URL, manual context, and reviewed Ambientic memories the user explicitly selected during setup. Use ambientic_recall only when Ambientic memory was selected. Extract roles, achievements, metrics, skills, projects, leadership, technologies, domains, ambitions, and constraints. Reconcile overlaps, preserve source coverage, distinguish fact from inference, and never fabricate. Then use ambientic_career_update with action profile to persist the structured Career Profile with status needs_review.', 'career.profile.mine', 160, 140, 'auto'),
-        node('profile-review', 'approval', 'Review what Career OS understood', 'Pause so the user can review the structured profile before Career OS treats it as trusted ranking context. The user can correct or add evidence; approval never submits or publishes anything.', 'human.approval', 560, 140)
+        node('profile-mine', 'agent', 'Build your Career Profile', 'Read only the CV, LinkedIn PDF/profile URL, manual context, and reviewed Ambientic memories the user explicitly selected during setup. Use ambientic_recall only when Ambientic memory was selected. Extract achievements, metrics, skills, projects, leadership, technologies, domains, ambitions, and constraints. Reconcile overlaps, preserve source coverage as simple source-name strings, distinguish fact from inference, and never fabricate. Persist only the flat ambientic_career_update profile schema with status needs_review. Do not wait for profile approval inside this agent thread: the user reviews and edits the proposal in Career OS Home.', 'career.profile.mine', 160, 140, 'auto')
       ]
     },
     {
       id: 'market-scan',
       role: 'scout',
       name: 'Career OS · Market scan',
-      description: 'Discover overnight, normalize the market, and retain only the few opportunities worth human attention.',
+      description: 'Discover overnight, normalize the market, and rank every opportunity while keeping the daily queue focused.',
       enabled: true,
       schedule: { recurrence: 'Every weekday', fromSetup: 'routineTime', offsetMinutes: -60 },
       nodes: [
@@ -121,7 +120,7 @@ export const CAREER_OS_PACK = {
         node('discover', 'web', 'Discover new roles', 'Use ambientic_jobs_discover. Monitor the watchlist through canonical Greenhouse, Ashby, and Lever APIs, then search Himalayas, Remotive, Jobicy, Remote OK, and the We Work Remotely Product RSS feed. Preserve attribution and resolve aggregator finds back to an employer ATS when possible. Welcome to the Jungle (formerly Otta) is an optional alert/browser source, not a scraping dependency.', 'career.discover', 350, 120),
         node('normalize', 'agent', 'Normalize and deduplicate', 'Create structured Opportunity records, resolve canonical postings, normalize remote eligibility, mark compensation as Published, Inferred, or Unknown, and remove duplicates.', 'career.normalize', 630, 158, 'auto'),
         node('judge', 'agent', 'Judge fit and value', 'Score Candidate Fit and Career Fit separately. Rank by expected career value, probability of success, urgency, and effort. Treat missing salary as uncertainty, not automatic rejection.', 'career.rank', 910, 120, 'auto'),
-        node('shortlist', 'agent', 'Prepare the action queue', 'Return no more than the configured daily maximum. For each recommendation include why it fits, concerns, the candidate’s edge, compensation confidence, remote eligibility, urgency, and the next action. Persist structured opportunity state locally when the Ambientic context tools are available.', 'career.queue.prepare', 1190, 158, 'auto')
+        node('shortlist', 'agent', 'Prepare ranked results', 'Persist every normalized role found in this scan so the full result set remains inspectable in Career OS. Rank all roles, then identify the few highest-value actions for the time-boxed daily queue. For each role include why it fits, concerns, the candidate’s edge, compensation confidence, remote eligibility, urgency, and the next action.', 'career.queue.prepare', 1190, 158, 'auto')
       ]
     },
     {
@@ -131,7 +130,7 @@ export const CAREER_OS_PACK = {
       description: 'A protected 30–60 minute queue for reviewing, pursuing, preparing, and updating only the best opportunities.',
       enabled: false,
       nodes: [
-        node('daily-plan', 'agent', 'Build today’s queue', 'Use the latest Career OS opportunity state and pipeline to propose a time-boxed Career Daily. Prioritize no more than five new opportunities and unfinished high-value actions. State when no prior market scan is available.', 'career.daily.plan', 100, 140, 'auto'),
+        node('daily-plan', 'agent', 'Build today’s queue', 'Read the Career Profile first. If its status is not reviewed, stop and direct the user to review it in Career OS Home; do not promote it, discover jobs, rank roles, or alter profile status. Otherwise use the complete ranked opportunity set and pipeline to propose a time-boxed Career Daily containing only the actions that fit the configured routine. The full market result set remains visible outside this queue. State when no prior market scan is available.', 'career.daily.plan', 100, 140, 'auto'),
         node('daily-review', 'approval', 'Choose what to pursue', 'Pause for the user to review the shortlist. Passing is one tap and should capture a lightweight reason. Never submit an application from this workflow.', 'human.approval', 390, 178),
         node('daily-prepare', 'agent', 'Prepare approved work', 'For pursued roles, prepare the company brief, truthful resume tailoring suggestions, ATS terminology gaps, application answers, and interview preparation that fit inside the remaining routine time.', 'career.daily.prepare', 680, 140, 'auto'),
         node('daily-track', 'agent', 'Update momentum', 'Update the local pipeline and summarize meaningful progress. Keep rejections diagnostic; lead with active opportunities, processes advanced, and the next best action.', 'career.pipeline.update', 970, 178, 'auto')

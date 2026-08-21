@@ -81,6 +81,35 @@ test('creates a Codex task with its chosen model, effort, and explicit project c
   }
 })
 
+test('starts the first Codex turn without reading an unmaterialized new thread', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-first-turn-'))
+  try {
+    const requests = []
+    const session = { id: 'new-thread', agent: 'codex', project: 'Private task', cwd: directory, task: 'Career profile' }
+    const service = new WorkspaceService({ list: () => [session], ingest: () => {}, updateTask: () => {} }, () => [])
+    service.historyRefreshedAt = Date.now()
+    service.codexStartedThreads.add(session.id)
+    service.codexClient = async () => ({
+      request: async (method, params) => {
+        requests.push({ method, params })
+        if (method === 'collaborationMode/list') return { data: [] }
+        if (method === 'turn/start') return { turn: { id: 'first-turn' } }
+        if (method === 'thread/read') throw new Error('thread is not materialized yet; includeTurns is unavailable before first user message')
+        return {}
+      }
+    })
+
+    const snapshot = await service.send(session.id, 'Build the Career Profile.')
+
+    assert.equal(requests.some((entry) => entry.method === 'thread/read'), false)
+    assert.equal(requests.some((entry) => entry.method === 'turn/start'), true)
+    assert.equal(snapshot.error, '')
+    assert.equal(snapshot.running, true)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('offers real recent projects but not private task workspaces or protected folders', () => {
   const home = homedir()
   const taskWorkspaceRoot = join(home, '.ambientic', 'workspaces')

@@ -104,12 +104,31 @@ export const AMBIENTIC_TOOL_SCHEMAS = Object.freeze([
   },
   {
     name: 'ambientic_career_update',
-    description: 'Persist normalized Career OS opportunities, pipeline changes, interviews, pass feedback, or market-scan totals. Available only to Career OS workflow sessions and audited locally.',
+    description: 'Persist normalized Career OS profile proposals, opportunities, pipeline changes, interviews, pass feedback, or market-scan totals. Profile proposals use flat string arrays and remain needs_review until the user approves them in Career OS. Available only to Career OS workflow sessions and audited locally.',
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['profile', 'upsert', 'status', 'pass', 'interview', 'market_scan'] },
-        profile: { type: 'object' },
+        profile: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['needs_review'] },
+            headline: { type: 'string', maxLength: 240 },
+            summary: { type: 'string', maxLength: 3000 },
+            yearsExperience: { type: 'number', minimum: 0, maximum: 80 },
+            strongestAreas: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 160 } },
+            achievements: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 500 } },
+            skills: { type: 'array', maxItems: 80, items: { type: 'string', maxLength: 120 } },
+            projects: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 500 } },
+            leadership: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 500 } },
+            technologies: { type: 'array', maxItems: 80, items: { type: 'string', maxLength: 120 } },
+            domains: { type: 'array', maxItems: 40, items: { type: 'string', maxLength: 160 } },
+            careerNarrative: { type: 'string', maxLength: 4000 },
+            uncertainties: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } },
+            sourceCoverage: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 160 } }
+          },
+          additionalProperties: false
+        },
         opportunityId: { type: 'string', maxLength: 120 },
         opportunity: { type: 'object' },
         status: { type: 'string', enum: ['New', 'Saved', 'Pursuing', 'Application Ready', 'Applied', 'Recruiter Screen', 'Interview', 'Final Round', 'Offer', 'Rejected', 'Withdrawn', 'Archived'] },

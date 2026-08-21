@@ -145,6 +145,7 @@ export class WorkflowService extends EventEmitter {
     id = () => randomUUID(),
     connectors = () => [],
     executeAgentStep,
+    canStartWorkflow = () => true,
     schedule = setInterval,
     cancelSchedule = clearInterval
   }) {
@@ -154,6 +155,7 @@ export class WorkflowService extends EventEmitter {
     this.id = id
     this.connectors = connectors
     this.executeAgentStep = executeAgentStep
+    this.canStartWorkflow = canStartWorkflow
     this.schedule = schedule
     this.cancelSchedule = cancelSchedule
     this.timer = null
@@ -340,6 +342,8 @@ export class WorkflowService extends EventEmitter {
   async startRun (workflowId, { source = 'manual' } = {}) {
     const workflow = this.workflow(workflowId)
     if (!workflow) throw new Error('Workflow not found.')
+    const start = this.canStartWorkflow(workflow, { source })
+    if (start === false || start?.allowed === false) throw new Error(start?.message || 'This workflow is not ready to run.')
     const active = this.state.runs.find((run) => run.workflowId === workflowId && ACTIVE_RUN_STATUSES.has(run.status))
     if (active) return copy(active)
     const now = this.now()
@@ -503,6 +507,7 @@ export class WorkflowService extends EventEmitter {
     if (!run) return false
     const step = run.steps.find((candidate) => candidate.status === 'running' && candidate.sessionId === snapshot.id)
     if (snapshot.error) {
+      if (/not materialized yet|before first user message/i.test(snapshot.error)) return false
       this.failRun(run, step, new Error(snapshot.error))
       return true
     }
@@ -548,7 +553,7 @@ export class WorkflowService extends EventEmitter {
       if (workflow.nextRunAt && workflow.nextRunAt <= at) {
         workflow.nextRunAt = nextScheduleAt(scheduleNode.detail, at + 1000)
         this.persist()
-        await this.startRun(workflow.id, { source: 'schedule' })
+        try { await this.startRun(workflow.id, { source: 'schedule' }) } catch (error) { console.error(`[ambientic] scheduled workflow skipped: ${error.message}`) }
       }
     }
   }

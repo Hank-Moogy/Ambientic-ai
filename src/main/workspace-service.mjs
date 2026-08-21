@@ -984,7 +984,13 @@ export class WorkspaceService extends EventEmitter {
     if (!session) throw new Error('This session is no longer available.')
     const contextSuppressed = Boolean(options.skipAmbienticContext || this.contextSuppressedSessions.has(id))
     if (contextSuppressed) this.contextSuppressedSessions.add(id)
-    const snapshot = await this.read(id)
+    const newCodexThread = session.agent === 'codex' && this.codexStartedThreads.has(this.codexThreadId(session)) && !this.activeTurns.has(id)
+    // Codex cannot serve includeTurns between thread/start and the first
+    // turn/start. Building the empty local snapshot here prevents that normal
+    // pre-turn state from being emitted as a fatal managed-workflow error.
+    const snapshot = newCodexThread
+      ? { ...this.baseSnapshot(session), ...(this.snapshots.get(id) || {}), messages: [], error: '', running: false, turnStateKnown: false }
+      : await this.read(id)
     const promptOptions = normalizePromptOptions(options, session.agent)
     const context = contextSuppressed ? null : this.ensureContext(session, { prompt: text, contextBinding: options.contextBinding || {} })
     const startsTurn = !this.activeTurns.has(id)

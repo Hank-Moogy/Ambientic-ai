@@ -19,7 +19,7 @@ function setup () {
     careerObjective: 'Become a CPO', workAuthorization: 'EU citizen', locationPolicy: 'Remote EU',
     minimumCompensation: '€100k', targetCompensation: '€130k', targetRoles: ['Head of Product'], stretchRoles: ['VP Product'],
     country: 'France', priorities: ['Technical / AI depth'], tradeoffs: '', sources: ['Public ATS feeds'],
-    routineMinutes: '45', routineTime: '08:30', maxDailyOpportunities: '5'
+    routineMinutes: '45', routineTime: '08:30', resultsLimit: 'all'
   }
 }
 
@@ -39,6 +39,7 @@ test('persists private career configuration without returning it to renderer sna
   const snapshot = service.configure({ ...setup(), resumePath: '/private/career/cv.pdf', linkedinProfilePath: '/private/career/linkedin.pdf', linkedinProfileUrl: 'https://linkedin.com/in/example?trk=profile', ambienticContext: '- Wants to build category-defining products' })
   assert.equal(snapshot.configured, true)
   assert.equal(snapshot.preferences.routineMinutes, 45)
+  assert.equal(snapshot.preferences.resultsLimit, 0)
   assert.equal(JSON.stringify(snapshot).includes('Product leader with eight years'), false)
   assert.equal(JSON.stringify(snapshot).includes('/private/career'), false)
   assert.equal(JSON.stringify(snapshot).includes('category-defining'), false)
@@ -58,11 +59,26 @@ test('builds a reviewable structured profile and preserves it when the user appr
   const before = service.list().profile
   assert.equal(before.status, 'needs_review')
   assert.equal(before.headline, 'AI Product Leader')
-  assert.equal(JSON.stringify(before).includes('Private detailed narrative'), false)
+  assert.equal(before.careerNarrative, 'Private detailed narrative.')
   const reviewed = service.reviewProfile()
   assert.equal(reviewed.status, 'reviewed')
   assert.equal(reviewed.achievements[0], 'Reduced inference cost by 30%')
   assert.equal(service.list().profile.status, 'reviewed')
+})
+
+test('normalizes agent profile shapes without dropping typed evidence', () => {
+  const { service } = fixture()
+  service.configure(setup())
+  service.updateProfile({
+    headline: 'Technical Product Leader', yearsExperience: '7+ years',
+    skills: { product: ['Strategy', 'Discovery'], technical: ['AI inference'] },
+    sourceCoverage: [{ source: 'CV PDF', path: '/private/cv.pdf' }, { source: 'LinkedIn PDF' }]
+  })
+  const profile = service.list().profile
+  assert.equal(profile.yearsExperience, 7)
+  assert.deepEqual(profile.skills, ['Strategy', 'Discovery', 'AI inference'])
+  assert.deepEqual(profile.sourceCoverage, ['CV PDF', 'LinkedIn PDF'])
+  assert.equal(JSON.stringify(profile).includes('/private/cv.pdf'), false)
 })
 
 test('normalizes and deduplicates canonical opportunities while preserving separate fit scores', () => {
@@ -112,6 +128,26 @@ test('Career Daily stays within its time and new-opportunity attention budgets',
   assert.ok(queue.plannedMinutes <= 30)
   assert.equal(queue.items.filter((item) => item.type === 'review').length, 3)
   assert.equal(queue.items[0].type, 'interview')
+})
+
+test('keeps the Career Daily queue locked until the profile is reviewed', () => {
+  const { service } = fixture()
+  service.configure(setup())
+  service.updateProfile({ headline: 'AI Product Leader', summary: 'Technical product leadership.' })
+  service.upsertOpportunity(opportunity())
+  assert.equal(service.list().dailyQueue.items.length, 0)
+  service.reviewProfile()
+  assert.equal(service.list().dailyQueue.items.length, 1)
+})
+
+test('shows every market result by default and accepts any explicit display limit', () => {
+  const { service } = fixture()
+  service.configure(setup())
+  assert.equal(service.list().preferences.resultsLimit, 0)
+  service.updatePreferences({ resultsLimit: 37 })
+  assert.equal(service.list().preferences.resultsLimit, 37)
+  service.updatePreferences({ resultsLimit: 'all' })
+  assert.equal(service.list().preferences.resultsLimit, 0)
 })
 
 test('passing is one-tap feedback that archives the opportunity and trains the summary', () => {

@@ -45,6 +45,12 @@ function sanitizeFieldValue (field, value) {
     if (!Number.isFinite(number)) return field.defaultValue ?? null
     return Math.max(Number(field.min ?? number), Math.min(Number(field.max ?? number), number))
   }
+  if (field.type === 'opportunity-limit') {
+    const selected = String(value ?? field.defaultValue ?? '').trim().toLocaleLowerCase()
+    if (selected === 'all') return 'all'
+    const number = Number(selected)
+    return Number.isFinite(number) && number >= 1 ? String(Math.min(1000, Math.floor(number))) : String(field.defaultValue || 'all')
+  }
   if (field.type === 'time') {
     const selected = String(value || field.defaultValue || '')
     return /^([01]\d|2[0-3]):[0-5]\d$/.test(selected) ? selected : ''

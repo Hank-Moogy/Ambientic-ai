@@ -6,7 +6,7 @@ import { portableWorkflowPack } from '../shared/workflow-pack.mjs'
 import './workflows.css'
 
 const EMPTY_SNAPSHOT = { version: 2, workflows: [], runs: [], packs: [], updatedAt: null }
-const EMPTY_CAREER = { version: 1, configured: false, preferences: { routineMinutes: 45, maxDailyOpportunities: 5 }, opportunities: [], pipeline: {}, dailyQueue: { minutes: 45, plannedMinutes: 0, remainingMinutes: 45, items: [] }, market: {}, feedbackSummary: {}, updatedAt: null }
+const EMPTY_CAREER = { version: 1, configured: false, preferences: { routineMinutes: 45, maxDailyOpportunities: 5, resultsLimit: 0 }, opportunities: [], pipeline: {}, dailyQueue: { minutes: 45, plannedMinutes: 0, remainingMinutes: 45, items: [] }, market: {}, feedbackSummary: {}, updatedAt: null }
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'awaiting_approval', 'needs_attention'])
 const PASS_REASONS = ['Salary', 'Location', 'Company', 'Industry', 'Too junior', 'Too senior', 'Not technical enough', 'Not interesting', 'Other']
 
@@ -83,6 +83,10 @@ function initialPackValues () {
 
 function PackField ({ field, value, onChange }) {
   const [choosing, setChoosing] = useState(false)
+  if (field.type === 'opportunity-limit') {
+    const all = value === 'all' || Number(value) === 0
+    return <fieldset className="career-pack-limit"><legend>{field.label}{field.required && <i>Required</i>}</legend><p>Show every role found, or enter any maximum you prefer. The daily action queue stays time-boxed separately.</p><div><button type="button" data-selected={all} onClick={() => onChange('all')}>All jobs from the scan</button><label data-selected={!all}><span>Limit to</span><input type="number" min="1" max="1000" value={all ? '' : value} placeholder={field.placeholder} onFocus={() => { if (all) onChange('25') }} onChange={(event) => onChange(event.target.value)} /><small>jobs</small></label></div></fieldset>
+  }
   if (field.type === 'file') {
     const name = String(value || '').split('/').filter(Boolean).at(-1)
     const choose = async () => {
@@ -182,19 +186,17 @@ function CareerPackSetup ({ onClose, onInstall }) {
   </div>
 }
 
-function CareerPackCard ({ installed, workflows, runs, onInstall, onOpen, onRun, onCopy }) {
+function CareerPackCard ({ installed, workflows, runs, onInstall, onViewWorkflows, onOpenDashboard, onCopy }) {
   const [copied, setCopied] = useState(false)
-  const daily = workflows.find((workflow) => workflow.packRole === 'daily')
   const scout = workflows.find((workflow) => workflow.packRole === 'scout')
   const scoutRun = scout && runs.find((run) => run.workflowId === scout.id)
-  const dailyRun = daily && runs.find((run) => run.workflowId === daily.id)
   const routine = installed?.summary?.routineMinutes || '45'
 
   return <article className="career-pack-card" data-installed={Boolean(installed)}>
     <div className="career-pack-card__mark"><span>◎</span><i /></div>
     <div className="career-pack-card__copy"><small>Ambientic workflow pack · Career</small><h2>Career OS</h2><p>{installed ? `${routine}-minute daily routine for the opportunities most worth your time.` : CAREER_OS_PACK.description}</p><div className="career-pack-card__route"><span>Discover</span><i /> <span>Rank</span><i /> <span>Prepare</span><i /> <span>Learn</span></div></div>
     {installed
-      ? <div className="career-pack-card__status"><span><i data-status={scoutRun?.status || 'idle'} />{scoutRun?.status === 'completed' ? `Market scan ready · ${relativeTime(scoutRun.createdAt)}` : scoutRun ? statusLabel(scoutRun.status) : 'First market scan pending'}</span><b>{workflows.length} private routines installed</b><div><button type="button" onClick={() => { void onCopy(); setCopied(true); setTimeout(() => setCopied(false), 1800) }}>{copied ? 'Pack copied' : 'Copy pack'}</button><button type="button" onClick={() => onOpen(daily)}>Inspect</button><button className="primary" type="button" disabled={!daily || ACTIVE_STATUSES.has(dailyRun?.status)} onClick={() => onRun(daily)}>{ACTIVE_STATUSES.has(dailyRun?.status) ? statusLabel(dailyRun.status) : 'Start Career Daily'}</button></div></div>
+      ? <div className="career-pack-card__status"><span><i data-status={scoutRun?.status || 'idle'} />Installed · {scoutRun?.status === 'completed' ? `latest scan ${relativeTime(scoutRun.createdAt)}` : scoutRun ? statusLabel(scoutRun.status) : 'ready for its first run'}</span><b>{workflows.length} private routines installed</b><div><button type="button" onClick={() => { void onCopy(); setCopied(true); setTimeout(() => setCopied(false), 1800) }}>{copied ? 'Pack copied' : 'Copy pack'}</button><button type="button" onClick={onViewWorkflows}>View workflows</button><button className="primary" type="button" onClick={onOpenDashboard}>Open Career OS</button></div></div>
       : <div className="career-pack-card__install"><span>10–15 minute setup</span><b>Workflow logic is portable.<br />Your career context stays private.</b><div><button type="button" onClick={() => { void onCopy(); setCopied(true); setTimeout(() => setCopied(false), 1800) }}>{copied ? 'Pack copied' : 'Copy manifest'}</button><button className="primary" type="button" onClick={onInstall}>Install Career OS</button></div></div>}
   </article>
 }
@@ -207,8 +209,9 @@ function salaryLabel (opportunity) {
   return `${range}${opportunity.salarySource === 'Inferred' ? ' estimated' : ''}`
 }
 
-function CareerOpportunityCard ({ opportunity, onUpdate, onPass }) {
+function CareerOpportunityCard ({ opportunity, onUpdate, onPass, onOpen }) {
   const [passing, setPassing] = useState(false)
+  const jobUrl = opportunity.canonicalUrl || opportunity.sourceUrl
   return <article className="career-opportunity" data-status={opportunity.status}>
     <header><div><span>{opportunity.company}</span><h3>{opportunity.roleTitle}</h3></div><strong><b>{opportunity.opportunityScore}</b><small>Opportunity</small></strong></header>
     <div className="career-opportunity__facts"><span>{opportunity.remotePolicy}</span><span>{salaryLabel(opportunity)}</span><span>{opportunity.salaryConfidence} confidence</span><span>{opportunity.status}</span></div>
@@ -216,24 +219,100 @@ function CareerOpportunityCard ({ opportunity, onUpdate, onPass }) {
     <div className="career-opportunity__reason"><section><span>Why it fits</span><ul>{(opportunity.whyFits || []).slice(0, 3).map((reason) => <li key={reason}>{reason}</li>)}{!opportunity.whyFits?.length && <li>Awaiting Judge analysis</li>}</ul></section><section><span>Concerns</span><ul>{(opportunity.concerns || []).slice(0, 2).map((reason) => <li key={reason}>{reason}</li>)}{!opportunity.concerns?.length && <li>No explicit concern recorded</li>}</ul></section></div>
     {opportunity.candidateEdge && <blockquote><span>Your edge</span>{opportunity.candidateEdge}</blockquote>}
     {passing && <div className="career-pass-reasons"><span>Why pass?</span>{PASS_REASONS.map((reason) => <button type="button" key={reason} onClick={() => { void onPass(opportunity.id, reason); setPassing(false) }}>{reason}</button>)}</div>}
-    <footer><button type="button" onClick={() => void onUpdate(opportunity.id, { status: 'Saved', nextAction: 'Review later' })}>Save</button><button type="button" onClick={() => setPassing((current) => !current)}>Pass</button><button className="primary" type="button" onClick={() => void onUpdate(opportunity.id, { status: 'Pursuing', nextAction: 'Run pursued-opportunity preparation' })}>Pursue</button></footer>
+    <footer><button className="job-link" type="button" disabled={!jobUrl} onClick={() => jobUrl && onOpen(jobUrl)}>{jobUrl ? 'View job ↗' : 'Link unavailable'}</button><button type="button" onClick={() => void onUpdate(opportunity.id, { status: 'Saved', nextAction: 'Review later' })}>Save</button><button type="button" onClick={() => setPassing((current) => !current)}>Pass</button><button className="primary" type="button" onClick={() => void onUpdate(opportunity.id, { status: 'Pursuing', nextAction: 'Run pursued-opportunity preparation' })}>Pursue</button></footer>
   </article>
 }
 
-function CareerOsHome ({ snapshot, onUpdate, onPass, onRunScout, onRunDaily, onReviewProfile, scoutActive, dailyActive }) {
-  const queueIds = new Set(snapshot.dailyQueue.items.map((item) => item.opportunityId))
-  const opportunities = snapshot.opportunities.filter((opportunity) => queueIds.has(opportunity.id) && !['Archived', 'Rejected', 'Withdrawn'].includes(opportunity.status))
+function OpportunityLimitControl ({ value, onChange }) {
+  const [draft, setDraft] = useState(value > 0 ? String(value) : '')
+  useEffect(() => { setDraft(value > 0 ? String(value) : '') }, [value])
+  const apply = () => {
+    const limit = Math.max(1, Math.min(1000, Number(draft) || 1))
+    setDraft(String(limit))
+    void onChange(limit)
+  }
+  return <div className="career-results-limit"><span>Results shown</span><button type="button" data-selected={value === 0} onClick={() => void onChange(0)}>All</button><form onSubmit={(event) => { event.preventDefault(); apply() }}><input aria-label="Maximum jobs shown" type="number" min="1" max="1000" value={draft} placeholder="Any number" onChange={(event) => setDraft(event.target.value)} /><button type="submit" disabled={!draft || Number(draft) === value}>Apply</button></form></div>
+}
+
+const PROFILE_LIST_FIELDS = [
+  ['strongestAreas', 'Strongest areas'],
+  ['achievements', 'Major achievements'],
+  ['skills', 'Skills'],
+  ['leadership', 'Leadership evidence'],
+  ['projects', 'Projects'],
+  ['technologies', 'Technologies'],
+  ['domains', 'Domains'],
+  ['uncertainties', 'Questions and conflicts']
+]
+
+function profileDraft (profile = {}) {
+  return {
+    headline: profile.headline || '',
+    summary: profile.summary || '',
+    yearsExperience: profile.yearsExperience ?? '',
+    careerNarrative: profile.careerNarrative || '',
+    sourceCoverage: profile.sourceCoverage || [],
+    ...Object.fromEntries(PROFILE_LIST_FIELDS.map(([field]) => [field, (profile[field] || []).join('\n')]))
+  }
+}
+
+function CareerProfileReview ({ profile, run, onClose, onSave, onApprove, onRun, onOpenAgent }) {
+  const [draft, setDraft] = useState(() => profileDraft(profile))
+  const [saving, setSaving] = useState(false)
+  const hasProfile = Boolean(profile?.headline || profile?.summary)
+  useEffect(() => { setDraft(profileDraft(profile)) }, [profile?.updatedAt])
+  const set = (field, value) => setDraft((current) => ({ ...current, [field]: value }))
+  const payload = () => ({
+    ...draft,
+    yearsExperience: draft.yearsExperience === '' ? null : Number(draft.yearsExperience),
+    ...Object.fromEntries(PROFILE_LIST_FIELDS.map(([field]) => [field, String(draft[field] || '').split('\n').map((item) => item.trim()).filter(Boolean)]))
+  })
+  const save = async () => {
+    setSaving(true)
+    try { await onSave(payload()) } finally { setSaving(false) }
+  }
+  const approve = async () => {
+    setSaving(true)
+    try { await onSave(payload()); await onApprove(); onClose() } finally { setSaving(false) }
+  }
+
+  return <div className="career-profile-review" role="dialog" aria-modal="true" aria-labelledby="career-profile-review-title">
+    <div className="career-profile-review__panel">
+      <header><div><span>Private Career Profile</span><h2 id="career-profile-review-title">Review what Career OS understood</h2><p>Correct the proposal before it becomes trusted ranking evidence. Nothing here is published or added to the shared pack.</p></div><button type="button" aria-label="Close profile review" onClick={onClose}>×</button></header>
+      {run?.status === 'needs_attention' && <aside className="career-profile-review__attention"><div><b>The profile agent needs you</b><span>Resolve its permission or question in the agent thread, then this proposal will update automatically.</span></div><button type="button" onClick={onOpenAgent}>Open agent request ↗</button></aside>}
+      {!hasProfile ? <main className="career-profile-review__empty"><b>No profile proposal is ready yet</b><p>{run?.status === 'failed' ? `The last build failed: ${run.error || 'Open its thread for details.'}` : 'Run the Profile Builder and this screen will fill with the evidence it extracted.'}</p><button type="button" disabled={['queued', 'running', 'needs_attention'].includes(run?.status)} onClick={onRun}>Run Profile Builder</button></main> : <main>
+        <div className="career-profile-review__identity"><label><span>Headline</span><input value={draft.headline} onChange={(event) => set('headline', event.target.value)} /></label><label><span>Years of experience</span><input type="number" min="0" max="80" value={draft.yearsExperience} onChange={(event) => set('yearsExperience', event.target.value)} /></label></div>
+        <label><span>Summary</span><textarea rows="5" value={draft.summary} onChange={(event) => set('summary', event.target.value)} /></label>
+        <div className="career-profile-review__sources"><span>Evidence used</span>{draft.sourceCoverage.length ? draft.sourceCoverage.map((source) => <i key={source}>{source}</i>) : <small>No source labels were recorded.</small>}</div>
+        <section>{PROFILE_LIST_FIELDS.map(([field, label]) => <label key={field}><span>{label}</span><textarea rows={field === 'achievements' || field === 'uncertainties' ? 6 : 4} value={draft[field]} onChange={(event) => set(field, event.target.value)} placeholder="One item per line" /></label>)}</section>
+        <label><span>Career narrative</span><textarea rows="5" value={draft.careerNarrative} onChange={(event) => set('careerNarrative', event.target.value)} /></label>
+      </main>}
+      <footer><span>{profile?.status === 'reviewed' ? 'Reviewed profile' : 'Not used for ranking until approved'}</span><button type="button" onClick={onClose}>Close</button>{hasProfile && <button type="button" disabled={saving} onClick={() => void save()}>Save corrections</button>}{hasProfile && profile?.status !== 'reviewed' && <button className="primary" type="button" disabled={saving} onClick={() => void approve()}>{saving ? 'Saving…' : 'Approve profile'}</button>}</footer>
+    </div>
+  </div>
+}
+
+function CareerOsHome ({ snapshot, profileRun, onUpdate, onPass, onOpenJob, onUpdatePreferences, onRunScout, onRunDaily, onRunProfile, onSaveProfile, onApproveProfile, onOpenProfileAgent, scoutActive, dailyActive }) {
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const resultLimit = snapshot.preferences.resultsLimit ?? 0
+  const allResults = snapshot.opportunities.filter((opportunity) => !['Archived', 'Rejected', 'Withdrawn'].includes(opportunity.status))
+  const opportunities = resultLimit > 0 ? allResults.slice(0, resultLimit) : allResults
   const active = Object.entries(snapshot.pipeline).filter(([status]) => ['Saved', 'Pursuing', 'Application Ready', 'Applied', 'Recruiter Screen', 'Interview', 'Final Round'].includes(status)).reduce((sum, [, count]) => sum + count, 0)
   const interviewing = (snapshot.pipeline['Recruiter Screen'] || 0) + (snapshot.pipeline.Interview || 0) + (snapshot.pipeline['Final Round'] || 0)
+  const hasProfile = Boolean(snapshot.profile?.headline || snapshot.profile?.summary)
+  const profileBuildFailed = profileRun?.status === 'failed' && !hasProfile
+  const profileNeedsAgent = profileRun?.status === 'needs_attention'
+  const profileReviewed = snapshot.profile?.status === 'reviewed'
 
-  return <section className="career-home">
-    <header><div><span>Career OS</span><h2>Good morning</h2><p><b>{snapshot.dailyQueue.minutes}-minute Career Daily</b> · {snapshot.dailyQueue.items.length ? `${snapshot.dailyQueue.items.length} high-value actions planned` : 'Your queue is waiting for its first market scan'}</p></div><button className="primary" type="button" disabled={dailyActive} onClick={onRunDaily}>{dailyActive ? 'Career Daily running' : 'Start Career Daily'}</button></header>
-    <div className="career-profile-state" data-status={snapshot.profile?.status || 'pending'}><div><span>Career Profile</span><b>{snapshot.profile?.headline || (snapshot.profile?.status === 'pending' ? 'Mining your CV and selected context…' : 'Ready for your review')}</b><small>{snapshot.profile?.sourceCoverage?.length ? `Built from ${snapshot.profile.sourceCoverage.join(', ')}` : 'CV, LinkedIn, manual evidence, and selected Ambientic memories remain private on this Mac.'}</small></div>{snapshot.profile?.strongestAreas?.length > 0 && <ul>{snapshot.profile.strongestAreas.slice(0, 5).map((area) => <li key={area}>{area}</li>)}</ul>}<button type="button" onClick={onReviewProfile}>{snapshot.profile?.status === 'reviewed' ? 'Inspect profile' : 'Review profile'}</button><i>{snapshot.profile?.status === 'reviewed' ? 'Reviewed' : snapshot.profile?.status === 'needs_review' ? 'Needs review' : 'Building'}</i></div>
+  return <section className="career-home" id="career-os-results">
+    {reviewOpen && <CareerProfileReview profile={snapshot.profile} run={profileRun} onClose={() => setReviewOpen(false)} onSave={onSaveProfile} onApprove={onApproveProfile} onRun={onRunProfile} onOpenAgent={onOpenProfileAgent} />}
+    <header><div><span>Career OS</span><h2>Good morning</h2><p><b>{snapshot.dailyQueue.minutes}-minute Career Daily</b> · {!profileReviewed ? 'Review your Career Profile to unlock ranking' : snapshot.dailyQueue.items.length ? `${snapshot.dailyQueue.items.length} high-value actions planned` : 'Your queue is waiting for its first market scan'}</p></div><button className="primary" type="button" disabled={dailyActive || !profileReviewed} onClick={onRunDaily}>{!profileReviewed ? 'Review profile first' : dailyActive ? 'Career Daily running' : 'Start Career Daily'}</button></header>
+    <div className="career-profile-state" data-status={profileBuildFailed ? 'failed' : snapshot.profile?.status || 'pending'}><div><span>Career Profile</span><b>{snapshot.profile?.headline || (profileBuildFailed ? 'Profile build failed' : 'Mining your CV and selected context…')}</b><small>{profileNeedsAgent ? 'The profile agent needs a permission or answer before it can finish.' : snapshot.profile?.sourceCoverage?.length ? `Built from ${snapshot.profile.sourceCoverage.join(', ')}` : 'CV, LinkedIn, manual evidence, and selected Ambientic memories remain private on this Mac.'}</small></div>{snapshot.profile?.strongestAreas?.length > 0 && <ul>{snapshot.profile.strongestAreas.slice(0, 5).map((area) => <li key={area}>{area}</li>)}</ul>}<button type="button" onClick={() => setReviewOpen(true)}>{profileNeedsAgent ? 'Resolve & review' : snapshot.profile?.status === 'reviewed' ? 'Inspect profile' : 'Review profile'}</button><i>{profileNeedsAgent ? 'Agent needs you' : profileBuildFailed ? 'Failed' : snapshot.profile?.status === 'reviewed' ? 'Reviewed' : snapshot.profile?.status === 'needs_review' ? 'Needs review' : 'Building'}</i></div>
     <div className="career-home__summary">
-      <section><span>Today</span>{snapshot.dailyQueue.items.length ? <ol>{snapshot.dailyQueue.items.map((item) => <li key={item.id}><span>{item.label}</span><b>{item.minutes} min</b></li>)}</ol> : <div className="career-home__empty"><b>No ranked opportunities yet</b><p>Run the market scan to search canonical ATS postings, normalize eligibility, and prepare the first shortlist.</p><button type="button" disabled={scoutActive} onClick={onRunScout}>{scoutActive ? 'Market scan running' : 'Run first market scan'}</button></div>}</section>
+      <section><span>Today</span>{snapshot.dailyQueue.items.length ? <ol>{snapshot.dailyQueue.items.map((item) => <li key={item.id}><span>{item.label}</span><b>{item.minutes} min</b></li>)}</ol> : <div className="career-home__empty"><b>{profileReviewed ? 'No ranked opportunities yet' : 'Your profile is waiting for review'}</b><p>{profileReviewed ? 'Run the market scan to search canonical ATS postings, normalize eligibility, and prepare the first shortlist.' : 'Review and approve the extracted evidence above before Career OS searches or ranks roles.'}</p><button type="button" disabled={scoutActive || !profileReviewed} onClick={onRunScout}>{!profileReviewed ? 'Review profile first' : scoutActive ? 'Market scan running' : 'Run first market scan'}</button></div>}</section>
       <aside><div><span>Market</span><b>{snapshot.market.processed || 0}</b><small>roles processed</small></div><div><span>Pipeline</span><b>{active}</b><small>active opportunities</small></div><div><span>Interviews</span><b>{interviewing}</b><small>processes moving</small></div></aside>
     </div>
-    {opportunities.length > 0 && <section className="career-home__opportunities"><header><div><span>Worth your attention</span><small>Candidate fit and career fit stay separate</small></div><b>{opportunities.length} in today’s queue · max {snapshot.preferences.maxDailyOpportunities || 5} new</b></header><div>{opportunities.map((opportunity) => <CareerOpportunityCard key={opportunity.id} opportunity={opportunity} onUpdate={onUpdate} onPass={onPass} />)}</div></section>}
+    {allResults.length > 0 && <section className="career-home__opportunities"><header><div><span>Market results</span><small>Every discovered role remains available; ranking controls order, not access.</small></div><OpportunityLimitControl value={resultLimit} onChange={(resultsLimit) => onUpdatePreferences({ resultsLimit })} /></header><div>{opportunities.map((opportunity) => <CareerOpportunityCard key={opportunity.id} opportunity={opportunity} onUpdate={onUpdate} onPass={onPass} onOpen={onOpenJob} />)}</div><footer>Showing {opportunities.length} of {allResults.length} active roles from Career OS scans.</footer></section>}
   </section>
 }
 
@@ -332,6 +411,8 @@ export function WorkflowStudio ({ onOpenThread }) {
   const careerDaily = careerWorkflows.find((workflow) => workflow.packRole === 'daily')
   const careerProfile = careerWorkflows.find((workflow) => workflow.packRole === 'profile')
   const activeCareerRun = (workflow) => workflow && snapshot.runs.some((run) => run.workflowId === workflow.id && ACTIVE_STATUSES.has(run.status))
+  const careerProfileRun = careerProfile && (snapshot.runs.find((run) => run.workflowId === careerProfile.id && ACTIVE_STATUSES.has(run.status)) || snapshot.runs.find((run) => run.workflowId === careerProfile.id))
+  const careerProfileSessionId = careerProfileRun && (careerProfileRun.steps.find((step) => step.status === 'running')?.sessionId || [...careerProfileRun.steps].reverse().find((step) => step.sessionId)?.sessionId)
 
   if (selected) {
     return <WorkflowBuilder
@@ -350,14 +431,9 @@ export function WorkflowStudio ({ onOpenThread }) {
     <section className="workflow-library">
       {showCareerSetup && <CareerPackSetup onClose={() => setShowCareerSetup(false)} onInstall={installCareerOs} />}
       <main>
-        <header className="workflow-library__header"><div><span>Workflow studio</span><h1>All workflows</h1><p>Reusable, provider-neutral routines that your agents can run on demand or on schedule.</p></div><button type="button" onClick={() => createWorkflow(createStarterWorkflow())}>＋ New workflow</button></header>
-        <CareerPackCard installed={installedCareer} workflows={careerWorkflows} runs={snapshot.runs} onInstall={() => setShowCareerSetup(true)} onOpen={(workflow) => workflow && setSelectedId(workflow.id)} onRun={(workflow) => workflow && window.controller.runWorkflow(workflow.id)} onCopy={() => window.controller.copyText(JSON.stringify(portableWorkflowPack(CAREER_OS_PACK), null, 2))} />
-        {installedCareer && <CareerOsHome snapshot={career} onUpdate={(id, patch) => window.controller.careerUpdateOpportunity(id, patch)} onPass={(id, reason) => window.controller.careerPassOpportunity(id, reason)} onRunScout={() => careerScout && window.controller.runWorkflow(careerScout.id)} onRunDaily={() => careerDaily && window.controller.runWorkflow(careerDaily.id)} onReviewProfile={() => careerProfile && setSelectedId(careerProfile.id)} scoutActive={activeCareerRun(careerScout)} dailyActive={activeCareerRun(careerDaily)} />}
-        <form className="workflow-library__prompt" onSubmit={(event) => { event.preventDefault(); if (prompt.trim()) void createWorkflow(draftWorkflowFromPrompt(prompt)) }}>
-          <span>✦</span><label><b>Build a new workflow with an agent</b><textarea rows="2" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Every weekday at 8:30, research competitor news, summarize it, let me approve, then email the brief…" /></label><button type="submit" disabled={!prompt.trim()}>Draft workflow ↑</button>
-        </form>
-        <section className="workflow-library__section">
-          <header><div><span>Your workflows</span><small>{snapshot.workflows.length} private on this Mac</small></div><div className="workflow-library__legend"><i data-status="running" />Running<i data-status="awaiting_approval" />Needs you<i data-status="completed" />Complete</div></header>
+        <header className="workflow-library__header"><div><span>Workflow studio</span><h1>Workflows</h1><p>Install proven workflow packs or build your own, then run and monitor everything here.</p></div><button type="button" onClick={() => createWorkflow(createStarterWorkflow())}>＋ New workflow</button></header>
+        <section className="workflow-library__section" id="installed-workflows">
+          <header><div><span>Your workflows</span><small>{snapshot.workflows.length} installed and private on this Mac</small></div><div className="workflow-library__legend"><i data-status="running" />Running<i data-status="awaiting_approval" />Needs you<i data-status="completed" />Complete</div></header>
           <div className="workflow-library__grid">
             {snapshot.workflows.map((workflow) => <WorkflowCard
               key={workflow.id}
@@ -369,7 +445,15 @@ export function WorkflowStudio ({ onOpenThread }) {
               onDelete={() => removeWorkflow(workflow)}
             />)}
           </div>
-          {!loading && !snapshot.workflows.length && <div className="workflow-library__empty"><span>⌁</span><h2>Build your first reusable workflow</h2><p>Describe it above or start from a visual canvas.</p></div>}
+          {!loading && !snapshot.workflows.length && <div className="workflow-library__empty"><span>⌁</span><h2>No workflows installed yet</h2><p>Choose a pack from the catalog below or create your own.</p></div>}
+        </section>
+        {installedCareer && <CareerOsHome snapshot={career} profileRun={careerProfileRun} onUpdate={(id, patch) => window.controller.careerUpdateOpportunity(id, patch)} onPass={(id, reason) => window.controller.careerPassOpportunity(id, reason)} onOpenJob={(url) => window.controller.openExternalUrl(url)} onUpdatePreferences={(preferences) => window.controller.careerUpdatePreferences(preferences)} onRunScout={() => careerScout && window.controller.runWorkflow(careerScout.id)} onRunDaily={() => careerDaily && window.controller.runWorkflow(careerDaily.id)} onRunProfile={() => careerProfile && window.controller.runWorkflow(careerProfile.id)} onSaveProfile={(profile) => window.controller.careerUpdateProfile(profile)} onApproveProfile={() => window.controller.careerReviewProfile()} onOpenProfileAgent={() => careerProfileSessionId && onOpenThread?.(careerProfileSessionId)} scoutActive={activeCareerRun(careerScout)} dailyActive={activeCareerRun(careerDaily)} />}
+        <form className="workflow-library__prompt" onSubmit={(event) => { event.preventDefault(); if (prompt.trim()) void createWorkflow(draftWorkflowFromPrompt(prompt)) }}>
+          <span>✦</span><label><b>Build a new workflow with an agent</b><textarea rows="2" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Every weekday at 8:30, research competitor news, summarize it, let me approve, then email the brief…" /></label><button type="submit" disabled={!prompt.trim()}>Draft workflow ↑</button>
+        </form>
+        <section className="workflow-catalog">
+          <header><div><span>Workflow catalog</span><small>Install complete outcomes; private context is added only during setup.</small></div><b>1 pack available</b></header>
+          <CareerPackCard installed={installedCareer} workflows={careerWorkflows} runs={snapshot.runs} onInstall={() => setShowCareerSetup(true)} onViewWorkflows={() => document.getElementById('installed-workflows')?.scrollIntoView({ behavior: 'smooth' })} onOpenDashboard={() => document.getElementById('career-os-results')?.scrollIntoView({ behavior: 'smooth' })} onCopy={() => window.controller.copyText(JSON.stringify(portableWorkflowPack(CAREER_OS_PACK), null, 2))} />
         </section>
       </main>
       <RunTimeline runs={snapshot.runs} onOpenThread={onOpenThread} />

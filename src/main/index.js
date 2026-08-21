@@ -739,6 +739,9 @@ ipcMain.handle('install-career-os', async (_event, rawSetup) => {
   return { ...installed, profileRunId: profileRun?.id || '' }
 })
 ipcMain.handle('get-career-os', () => career?.list() || { version: 1, configured: false, opportunities: [], pipeline: {}, dailyQueue: { minutes: 45, plannedMinutes: 0, remainingMinutes: 45, items: [] }, market: {}, feedbackSummary: {}, updatedAt: null })
+ipcMain.handle('career-update-profile', (_event, profile) => career.updateProfile(profile || {}, { actor: 'human' }))
+ipcMain.handle('career-review-profile', () => career.reviewProfile({ actor: 'human' }))
+ipcMain.handle('career-update-preferences', (_event, preferences) => career.updatePreferences(preferences || {}, { actor: 'human' }))
 ipcMain.handle('career-update-opportunity', (_event, opportunityId, patch) => career.updateOpportunity(String(opportunityId || ''), patch || {}, { actor: 'human' }))
 ipcMain.handle('career-pass-opportunity', (_event, opportunityId, reason, note) => career.passOpportunity(String(opportunityId || ''), reason, note, { actor: 'human' }))
 ipcMain.handle('create-workflow', (_event, input) => workflows.create(input || {}))
@@ -1554,6 +1557,9 @@ app.whenReady().then(() => {
   workflows = createWorkflowsRepository({
     file: join(app.getPath('userData'), 'workflows.json'),
     connectors: () => connectors,
+    canStartWorkflow: (workflow) => workflow.packId !== CAREER_OS_PACK.id || workflow.packRole === 'profile' || career.list().profile.status === 'reviewed'
+      ? true
+      : { allowed: false, message: 'Review and approve your Career Profile before running other Career OS workflows.' },
     executeAgentStep: async ({ provider, prompt, workflow }) => ({
       sessionId: await workspace.create({ provider, prompt, gatewayScopes: workflow.packId === CAREER_OS_PACK.id ? CAREER_OS_GATEWAY_SCOPES : null })
     })

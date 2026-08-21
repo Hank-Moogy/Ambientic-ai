@@ -133,6 +133,29 @@ test('links a managed provider thread and resumes after its final snapshot', asy
   assert.equal(run.steps[0].output, 'Managed task finished.')
 })
 
+test('does not fail a managed run on Codex first-turn materialization noise', async () => {
+  const { service } = fixture({ executeAgentStep: async () => ({ sessionId: 'thread-new' }) })
+  const workflow = service.create(workflowInput([{ id: 'agent', kind: 'agent', label: 'Run agent', detail: 'Do the work', action: 'agent.run', provider: 'auto' }]))
+  await service.startRun(workflow.id)
+  await flush()
+
+  assert.equal(service.handleThread({ id: 'thread-new', error: 'thread is not materialized yet; includeTurns is unavailable before first user message', approvals: [] }), false)
+  assert.equal(service.list().runs[0].status, 'running')
+  assert.equal(service.list().runs[0].steps[0].status, 'running')
+})
+
+test('enforces workflow start preconditions before launching an agent', async () => {
+  let executions = 0
+  const { service } = fixture({
+    canStartWorkflow: () => ({ allowed: false, message: 'Review the profile first.' }),
+    executeAgentStep: async () => { executions++; return { output: 'Should not run' } }
+  })
+  const workflow = service.create(workflowInput([{ id: 'agent', kind: 'agent', label: 'Run agent', detail: 'Do the work', action: 'agent.run', provider: 'auto' }]))
+  await assert.rejects(service.startRun(workflow.id), /Review the profile first/)
+  assert.equal(executions, 0)
+  assert.equal(service.list().runs.length, 0)
+})
+
 test('execution prompts refuse to simulate missing action tools', () => {
   const prompt = workflowExecutionPrompt({
     workflow: { name: 'Inbox triage' },
@@ -150,7 +173,7 @@ test('installs a workflow pack once and keeps private setup out of portable work
     careerObjective: 'Become a CPO', country: 'France', workAuthorization: 'EU citizen',
     locationPolicy: 'Remote EU', minimumCompensation: '€100k', targetCompensation: '€130k',
     priorities: ['Technical / AI depth'], tradeoffs: '', sources: ['Public ATS feeds'],
-    routineMinutes: '45', routineTime: '09:15', maxDailyOpportunities: '5'
+    routineMinutes: '45', routineTime: '09:15', resultsLimit: 'all'
   }
   const installed = service.installPack(CAREER_OS_PACK, setup)
   service.installPack(CAREER_OS_PACK, setup)
@@ -183,14 +206,15 @@ test('upgrades an installed pack with new workflow roles while preserving workfl
     careerObjective: 'Become a CPO', country: 'France', workAuthorization: 'EU citizen',
     locationPolicy: 'Remote EU', minimumCompensation: '€100k', targetCompensation: '€130k',
     priorities: ['Technical / AI depth'], tradeoffs: '', sources: ['Public ATS feeds'],
-    routineMinutes: '45', routineTime: '09:15', maxDailyOpportunities: '5'
+    routineMinutes: '45', routineTime: '09:15', resultsLimit: 'all'
   }
   const priorPack = { ...CAREER_OS_PACK, version: '0.2.0', workflows: CAREER_OS_PACK.workflows.filter((workflow) => workflow.role !== 'profile') }
-  service.installPack(priorPack, setup)
+  const legacyPack = { ...priorPack, setup: { ...priorPack.setup, summaryFields: priorPack.setup.summaryFields.filter((field) => field !== 'resultsLimit'), stages: priorPack.setup.stages.map((stage) => stage.id === 'routine' ? { ...stage, fields: stage.fields.filter((field) => field.id !== 'resultsLimit') } : stage) } }
+  service.installPack(legacyPack, setup)
   const priorScout = service.list().workflows.find((workflow) => workflow.packRole === 'scout')
   service.setEnabled(priorScout.id, false)
 
-  service.installPack(CAREER_OS_PACK, setup)
+  service.installPack(CAREER_OS_PACK, service.packSetup(CAREER_OS_PACK.id))
   const snapshot = service.list()
   const upgradedScout = snapshot.workflows.find((workflow) => workflow.packRole === 'scout')
   assert.equal(snapshot.packs[0].version, CAREER_OS_PACK.version)
@@ -198,4 +222,5 @@ test('upgrades an installed pack with new workflow roles while preserving workfl
   assert.ok(snapshot.workflows.some((workflow) => workflow.packRole === 'profile'))
   assert.equal(upgradedScout.id, priorScout.id)
   assert.equal(upgradedScout.enabled, false)
+  assert.equal(service.packSetup(CAREER_OS_PACK.id).resultsLimit, 'all')
 })

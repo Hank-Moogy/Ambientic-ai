@@ -32,6 +32,35 @@ function cleanStringList (input, { maxItems = 30, maxLength = 200 } = {}) {
   return [...new Set((Array.isArray(input) ? input : []).map((value) => cleanText(value, maxLength)).filter(Boolean))].slice(0, maxItems)
 }
 
+function profileStringList (input, options) {
+  const values = Array.isArray(input)
+    ? input
+    : input && typeof input === 'object'
+      ? Object.values(input).flatMap((value) => Array.isArray(value) ? value : [value])
+      : []
+  return cleanStringList(values, options)
+}
+
+function sourceCoverageList (input) {
+  return cleanStringList((Array.isArray(input) ? input : []).map((value) => {
+    if (!value || typeof value !== 'object') return value
+    return value.source || value.label || value.type || ''
+  }), { maxItems: 12, maxLength: 160 })
+}
+
+function experienceYears (value, fallback = null) {
+  if (typeof value === 'string') {
+    const match = value.match(/\d+(?:\.\d+)?/)
+    if (match) return boundedNumber(match[0], 0, 80, fallback)
+  }
+  return boundedNumber(value, 0, 80, fallback)
+}
+
+function opportunityLimit (value, fallback = 0) {
+  if (value === 0 || /^all$/i.test(String(value || '').trim())) return 0
+  return boundedNumber(value, 1, 1000, fallback)
+}
+
 function canonicalUrl (input) {
   try {
     const url = new URL(cleanText(input, 3000))
@@ -187,6 +216,7 @@ function queueAction (opportunity) {
 
 export function buildCareerDailyQueue (opportunities, { minutes = 45, maxNew = 5 } = {}) {
   const budget = boundedNumber(minutes, 15, 120, 45)
+  const limit = opportunityLimit(maxNew, 0)
   let remaining = budget
   let newCount = 0
   const items = opportunities
@@ -196,7 +226,7 @@ export function buildCareerDailyQueue (opportunities, { minutes = 45, maxNew = 5
     .sort((left, right) => (right.opportunity.opportunityScore + right.action.priorityBoost) - (left.opportunity.opportunityScore + left.action.priorityBoost) || right.opportunity.updatedAt - left.opportunity.updatedAt)
   const queue = []
   for (const item of items) {
-    if (item.action.type === 'review' && newCount >= boundedNumber(maxNew, 1, 10, 5)) continue
+    if (item.action.type === 'review' && limit > 0 && newCount >= limit) continue
     if (item.action.minutes > remaining && queue.length) continue
     queue.push({
       id: `${item.opportunity.id}:${item.action.type}`,
@@ -281,7 +311,8 @@ export class CareerOsService extends EventEmitter {
       companyWatchlist: cleanText(setup.companyWatchlist, 6000),
       routineMinutes: boundedNumber(setup.routineMinutes, 30, 60, 45),
       routineTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(String(setup.routineTime)) ? String(setup.routineTime) : '08:30',
-      maxDailyOpportunities: boundedNumber(setup.maxDailyOpportunities, 1, 5, 5)
+      maxDailyOpportunities: 5,
+      resultsLimit: opportunityLimit(setup.resultsLimit ?? setup.maxDailyOpportunities, 0)
     }
     this.record('career.configured', 'career-os', { targetRoles: this.state.preferences.targetRoles, routineMinutes: this.state.preferences.routineMinutes }, 'human')
     return this.persist()
@@ -294,7 +325,8 @@ export class CareerOsService extends EventEmitter {
   list () {
     const opportunities = [...this.state.opportunities].sort((left, right) => right.opportunityScore - left.opportunityScore || right.updatedAt - left.updatedAt)
     const routine = this.state.preferences.routineMinutes || 45
-    const maxNew = this.state.preferences.maxDailyOpportunities || 5
+    const maxNew = this.state.preferences.maxDailyOpportunities ?? 0
+    const profileReviewed = this.state.privateProfile?.structured?.status === 'reviewed'
     return {
       version: VERSION,
       configured: this.state.configured,
@@ -302,7 +334,8 @@ export class CareerOsService extends EventEmitter {
         targetRoles: copy(this.state.preferences.targetRoles || []),
         routineMinutes: routine,
         routineTime: this.state.preferences.routineTime || '08:30',
-        maxDailyOpportunities: maxNew
+        maxDailyOpportunities: maxNew,
+        resultsLimit: this.state.preferences.resultsLimit ?? 0
       },
       profile: copy({
         status: this.state.privateProfile?.structured?.status || 'pending',
@@ -311,13 +344,19 @@ export class CareerOsService extends EventEmitter {
         yearsExperience: this.state.privateProfile?.structured?.yearsExperience ?? null,
         strongestAreas: this.state.privateProfile?.structured?.strongestAreas || [],
         achievements: this.state.privateProfile?.structured?.achievements || [],
-        sourceCoverage: this.state.privateProfile?.structured?.sourceCoverage || [],
+        skills: this.state.privateProfile?.structured?.skills || [],
+        projects: this.state.privateProfile?.structured?.projects || [],
+        leadership: this.state.privateProfile?.structured?.leadership || [],
+        technologies: this.state.privateProfile?.structured?.technologies || [],
+        domains: this.state.privateProfile?.structured?.domains || [],
+        careerNarrative: this.state.privateProfile?.structured?.careerNarrative || '',
+        sourceCoverage: sourceCoverageList(this.state.privateProfile?.structured?.sourceCoverage).filter((value) => value !== '[object Object]'),
         uncertainties: this.state.privateProfile?.structured?.uncertainties || [],
         updatedAt: this.state.privateProfile?.structured?.updatedAt || null
       }),
       opportunities: copy(opportunities),
       pipeline: this.pipeline(),
-      dailyQueue: buildCareerDailyQueue(opportunities, { minutes: routine, maxNew }),
+      dailyQueue: profileReviewed ? buildCareerDailyQueue(opportunities, { minutes: routine, maxNew }) : { minutes: routine, plannedMinutes: 0, remainingMinutes: routine, items: [] },
       market: copy(this.state.market),
       feedbackSummary: Object.fromEntries([...PASS_REASONS].map((reason) => [reason, this.state.feedback.filter((item) => item.reason === reason).length])),
       updatedAt: this.state.updatedAt
@@ -329,21 +368,22 @@ export class CareerOsService extends EventEmitter {
   }
 
   updateProfile (input = {}, { actor = 'agent' } = {}) {
+    const existing = this.state.privateProfile?.structured || emptyCareerProfile()
     const profile = {
       status: input.status === 'reviewed' ? 'reviewed' : 'needs_review',
-      headline: cleanText(input.headline, 240),
-      summary: cleanText(input.summary, 3000),
-      yearsExperience: boundedNumber(input.yearsExperience, 0, 80, null),
-      strongestAreas: cleanStringList(input.strongestAreas, { maxItems: 12, maxLength: 160 }),
-      achievements: cleanStringList(input.achievements, { maxItems: 30, maxLength: 500 }),
-      skills: cleanStringList(input.skills, { maxItems: 80, maxLength: 120 }),
-      projects: cleanStringList(input.projects, { maxItems: 30, maxLength: 500 }),
-      leadership: cleanStringList(input.leadership, { maxItems: 30, maxLength: 500 }),
-      technologies: cleanStringList(input.technologies, { maxItems: 80, maxLength: 120 }),
-      domains: cleanStringList(input.domains, { maxItems: 40, maxLength: 160 }),
-      careerNarrative: cleanText(input.careerNarrative, 4000),
-      uncertainties: cleanStringList(input.uncertainties, { maxItems: 20, maxLength: 500 }),
-      sourceCoverage: cleanStringList(input.sourceCoverage, { maxItems: 12, maxLength: 160 }),
+      headline: cleanText(input.headline ?? existing.headline, 240),
+      summary: cleanText(input.summary ?? existing.summary, 3000),
+      yearsExperience: experienceYears(input.yearsExperience, existing.yearsExperience ?? null),
+      strongestAreas: input.strongestAreas === undefined ? existing.strongestAreas : profileStringList(input.strongestAreas, { maxItems: 12, maxLength: 160 }),
+      achievements: input.achievements === undefined ? existing.achievements : profileStringList(input.achievements, { maxItems: 30, maxLength: 500 }),
+      skills: input.skills === undefined ? existing.skills : profileStringList(input.skills, { maxItems: 80, maxLength: 120 }),
+      projects: input.projects === undefined ? existing.projects : profileStringList(input.projects, { maxItems: 30, maxLength: 500 }),
+      leadership: input.leadership === undefined ? existing.leadership : profileStringList(input.leadership, { maxItems: 30, maxLength: 500 }),
+      technologies: input.technologies === undefined ? existing.technologies : profileStringList(input.technologies, { maxItems: 80, maxLength: 120 }),
+      domains: input.domains === undefined ? existing.domains : profileStringList(input.domains, { maxItems: 40, maxLength: 160 }),
+      careerNarrative: cleanText(input.careerNarrative ?? existing.careerNarrative, 4000),
+      uncertainties: input.uncertainties === undefined ? existing.uncertainties : profileStringList(input.uncertainties, { maxItems: 20, maxLength: 500 }),
+      sourceCoverage: input.sourceCoverage === undefined ? existing.sourceCoverage : sourceCoverageList(input.sourceCoverage),
       updatedAt: this.now()
     }
     this.state.privateProfile.structured = profile
@@ -359,6 +399,12 @@ export class CareerOsService extends EventEmitter {
     this.record('career.profile.reviewed', 'career-profile', { sourceCoverage: existing.sourceCoverage || [] }, actor)
     this.persist()
     return copy(this.state.privateProfile.structured)
+  }
+
+  updatePreferences (input = {}, { actor = 'human' } = {}) {
+    if (input.resultsLimit !== undefined) this.state.preferences.resultsLimit = opportunityLimit(input.resultsLimit, this.state.preferences.resultsLimit ?? 0)
+    this.record('career.preferences.updated', 'career-os', { resultsLimit: this.state.preferences.resultsLimit ?? 0 }, actor)
+    return this.persist()
   }
 
   opportunity (opportunityId) {
