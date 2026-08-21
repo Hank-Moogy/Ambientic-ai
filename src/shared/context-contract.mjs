@@ -70,6 +70,61 @@ export const AMBIENTIC_TOOL_SCHEMAS = Object.freeze([
     }
   },
   {
+    name: 'ambientic_career_read',
+    description: 'Read the private local Career OS opportunity pipeline or today’s deterministic action queue. Available only to Career OS workflow sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['snapshot', 'opportunity', 'daily_queue'] },
+        opportunityId: { type: 'string', maxLength: 120 }
+      },
+      required: ['action'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'ambientic_jobs_discover',
+    description: 'Discover current jobs from supported public ATS APIs and remote-job feeds. Use catalog first, prefer canonical ATS sources, preserve source attribution, and resolve aggregator results back to an employer ATS when possible. Available only to Career OS workflow sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['catalog', 'discover'] },
+        source: { type: 'string', enum: ['greenhouse', 'ashby', 'lever', 'himalayas', 'remotive', 'jobicy', 'remoteok', 'weworkremotely', 'welcome'] },
+        board: { type: 'string', maxLength: 120 },
+        company: { type: 'string', maxLength: 160 },
+        region: { type: 'string', enum: ['global', 'eu'] },
+        query: { type: 'string', maxLength: 120 },
+        country: { type: 'string', maxLength: 80 },
+        worldwide: { type: 'boolean' },
+        limit: { type: 'integer', minimum: 1, maximum: 50 }
+      },
+      required: ['action'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'ambientic_career_update',
+    description: 'Persist normalized Career OS opportunities, pipeline changes, interviews, pass feedback, or market-scan totals. Available only to Career OS workflow sessions and audited locally.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['upsert', 'status', 'pass', 'interview', 'market_scan'] },
+        opportunityId: { type: 'string', maxLength: 120 },
+        opportunity: { type: 'object' },
+        status: { type: 'string', enum: ['New', 'Saved', 'Pursuing', 'Application Ready', 'Applied', 'Recruiter Screen', 'Interview', 'Final Round', 'Offer', 'Rejected', 'Withdrawn', 'Archived'] },
+        nextAction: { type: 'string', maxLength: 500 },
+        reason: { type: 'string', maxLength: 80 },
+        note: { type: 'string', maxLength: 1000 },
+        interview: { type: 'object' },
+        processed: { type: 'integer', minimum: 0, maximum: 1000000 },
+        matched: { type: 'integer', minimum: 0, maximum: 1000000 },
+        idempotencyKey: { type: 'string', maxLength: 160 }
+      },
+      required: ['action'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'ambientic_capability',
     description: 'Search connected tool capabilities or invoke one through Ambientic permissions and audit.',
     inputSchema: {

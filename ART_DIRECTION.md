@@ -97,6 +97,18 @@ The Workflow Builder is an infinite spatial field where intent moves through cle
 - Inbox, calendar, web, and other consequential capabilities always expose their permission boundary before a real run.
 - Portable sharing is visible from the beginning, but the field stays private and local until the user explicitly exports it.
 
+### Workflow packs: outcomes before topology
+
+Installable workflow packs enter the Studio as complete outcomes, not as a wall of agent nodes. Career OS establishes the pattern: one prominent atmospheric object explains the routine, privacy boundary, and next human action; its internal workflows remain inspectable only after the user asks for them.
+
+- Setup advances through one calm question field at a time, with a thin progress current rather than a configuration sidebar.
+- Shared logic and private state are visually separated in plain language before installation. Copying a pack copies only the portable manifest.
+- An installed pack leads with operational truth—whether its first scheduled work has run and the action the user can take now—rather than counts of agents or prompts.
+- Pack identity may have its own restrained light motif, but it stays inside Ambientic's cool mist, strong-contrast, reduced-motion language and never becomes a separate mini-brand.
+- Consequential outcomes keep the same amber approval boundary as ordinary workflows; a polished pack cannot imply permission the user has not granted.
+
+Career OS opens below its pack identity as a daily current, not a job-board grid. The first hierarchy is time available → actions worth taking → the few opportunities that justify attention. Opportunity cards keep Candidate Fit and Career Fit visibly separate, present uncertainty as confidence text, and reserve glow for current value rather than employer branding. Save, Pursue, and Pass remain quiet controls; passing unfolds lightweight reasons in place so learning does not become a form. Discovery setup groups sources by trust—canonical ATS, attributed remote feed, optional browser/alert—so adding reach still feels like choosing evidence quality rather than configuring a scraper.
+
 ## Memory: a quiet archive of continuity
 
 Memory should feel like a local field the user can inspect and prune, never like an invisible personality dossier. Memory lives inside Settings because it is a trust and control surface, not a daily navigation destination. It keeps the same deep, cool atmosphere while making origin and control unusually explicit.

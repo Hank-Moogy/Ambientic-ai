@@ -7,6 +7,7 @@ const workspace = readFileSync(new URL('../src/renderer/Workspace.jsx', import.m
 const renderer = readFileSync(new URL('../src/renderer/main.jsx', import.meta.url), 'utf8')
 const main = readFileSync(new URL('../src/main/index.js', import.meta.url), 'utf8')
 const workflowStyles = readFileSync(new URL('../src/renderer/workflows.css', import.meta.url), 'utf8')
+const studio = readFileSync(new URL('../src/renderer/WorkflowStudio.jsx', import.meta.url), 'utf8')
 
 test('workflow canvas exposes trackpad navigation and keyboard editing', () => {
   assert.match(builder, /addEventListener\('wheel', navigateCanvas, \{ passive: false \}\)/)
@@ -37,4 +38,17 @@ test('workflow overview has a complete responsive visual system', () => {
   assert.match(workflowStyles, /\.workflow-runs\{/)
   assert.match(workflowStyles, /@media\(max-width:1180px\)/)
   assert.match(workflowStyles, /@media\(prefers-reduced-motion:reduce\)/)
+})
+
+test('Workflow Studio can install Career OS through progressive private setup', () => {
+  assert.match(studio, /Install Career OS/)
+  assert.match(studio, /Start Career Daily/)
+  assert.match(studio, /private local workflow store/)
+  assert.match(studio, /CareerPackSetup/)
+  assert.match(workflowStyles, /\.career-pack-modal/)
+  assert.match(workflowStyles, /\.career-pack-card/)
+  assert.match(studio, /CareerOsHome/)
+  assert.match(studio, /Worth your attention/)
+  assert.match(studio, /PASS_REASONS/)
+  assert.match(workflowStyles, /\.career-opportunity/)
 })

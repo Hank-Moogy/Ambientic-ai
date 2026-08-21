@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWorkflowService, nextScheduleAt, workflowExecutionPrompt } from '../src/main/workflow-service.mjs'
+import { CAREER_OS_PACK } from '../src/shared/career-os-pack.mjs'
 
 function fixture (overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), 'ambientic-workflows-'))
@@ -46,6 +47,13 @@ test('persists multiple workflows and supports duplicate, update, and delete', (
   assert.equal(service.remove(duplicate.id), true)
   assert.equal(service.list().workflows.length, 2)
   assert.equal(JSON.parse(readFileSync(join(root, 'workflows.json'), 'utf8')).workflows.length, 2)
+})
+
+test('ordinary workflow creation cannot claim an installed pack identity', () => {
+  const { service } = fixture()
+  const workflow = service.create({ ...workflowInput(), packId: CAREER_OS_PACK.id, packRole: 'scout' })
+  assert.equal(workflow.packId, '')
+  assert.equal(workflow.packRole, '')
 })
 
 test('calculates daily, weekday, weekly, and monthly schedule boundaries', () => {
@@ -132,4 +140,38 @@ test('execution prompts refuse to simulate missing action tools', () => {
   })
   assert.match(prompt, /Do not claim success unless the tool confirms/)
   assert.match(prompt, /which connection is missing/)
+})
+
+test('installs a workflow pack once and keeps private setup out of portable workflow definitions', async () => {
+  const calls = []
+  const { service, root } = fixture({ executeAgentStep: async (input) => { calls.push(input); return { output: 'Done' } } })
+  const setup = {
+    careerProfile: 'AI product leader', careerContext: '', targetRoles: ['Head of Product'], stretchRoles: [],
+    careerObjective: 'Become a CPO', country: 'France', workAuthorization: 'EU citizen',
+    locationPolicy: 'Remote EU', minimumCompensation: '€100k', targetCompensation: '€130k',
+    priorities: ['Technical / AI depth'], tradeoffs: '', sources: ['Public ATS feeds'],
+    routineMinutes: '45', routineTime: '09:15', maxDailyOpportunities: '5'
+  }
+  const installed = service.installPack(CAREER_OS_PACK, setup)
+  service.installPack(CAREER_OS_PACK, setup)
+  const snapshot = service.list()
+  assert.equal(snapshot.packs.length, 1)
+  assert.equal(snapshot.workflows.filter((workflow) => workflow.packId === CAREER_OS_PACK.id).length, 4)
+  assert.equal(installed.workflowIds.length, 4)
+  assert.equal('privateContext' in snapshot.packs[0], false)
+  assert.equal('setup' in snapshot.packs[0], false)
+  assert.equal('privateContext' in installed, false)
+  assert.equal('setup' in installed, false)
+  assert.equal(snapshot.packs[0].summary.routineMinutes, '45')
+  assert.equal(snapshot.workflows.find((workflow) => workflow.packRole === 'scout').nodes[0].detail, 'Every weekday · 08:15')
+  assert.equal(JSON.stringify(snapshot.workflows).includes('AI product leader'), false)
+  assert.match(readFileSync(join(root, 'workflows.json'), 'utf8'), /AI product leader/)
+  assert.equal(service.packSetup(CAREER_OS_PACK.id).careerProfile, 'AI product leader')
+
+  const daily = snapshot.workflows.find((workflow) => workflow.packRole === 'daily')
+  await service.startRun(daily.id)
+  await flush()
+  assert.match(calls[0].prompt, /Private local setup supplied by the user/)
+  assert.match(calls[0].prompt, /AI product leader/)
+  assert.match(calls[0].prompt, /ambientic_career_update/)
 })

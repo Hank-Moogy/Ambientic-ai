@@ -64,6 +64,25 @@ This increment is deliberately personal and local. It adds the first full Ambien
 - First-class **Goals** section in the persistent left sidebar, with a spacious floating-card landing field and an in-section goal detail experience.
 - First visual **Workflows** section in the persistent left sidebar, with an atmospheric workflow library and run-history stream, trackpad pan/pinch zoom, zoom-at-pointer behavior, draggable provider-neutral steps, keyboard delete and undo, a capability palette, step inspector, a larger collapsible natural-language dock, sequential dry-run lighting, local draft persistence, and privacy-safe portable manifest copying.
 - Local workflow execution service with multiple saved workflows, recurrence scheduling, provider-neutral agent steps, explicit approval gates for consequential inbox/calendar actions, managed-thread continuation, run history, duplication, and cancellation.
+- First installable **Career OS** Workflow Pack: a schema-driven six-stage private setup, four provider-neutral routines for market scanning, Career Daily, pursued-opportunity preparation, and weekly learning, plus a copyable privacy-safe pack manifest. Career context is persisted locally with mode `0600`, never embedded in the portable definition or returned to the renderer, and supplied only during managed pack execution.
+- First-class private Career OS state in a separate mode-`0600` repository: canonical deduplicated Opportunity records, deterministic eligibility, published/inferred/unknown compensation, separate Candidate Fit and Career Fit, calculated Opportunity Score, pipeline status, interviews, pass feedback, market-scan totals, and a time- and attention-bounded daily queue. Only Career OS workflow sessions receive the scoped, audited read/write tools for this store.
+- Career-only public job discovery with an allowlisted, audited tool: direct Greenhouse, Ashby, and Lever board adapters plus attributed Himalayas, Remotive, Jobicy, Remote OK, and We Work Remotely Product feeds. Aggregator records remain visibly unresolved until their employer ATS URL is found. Welcome to the Jungle—now also the former Otta experience—is supported as a browser/alert input rather than an undocumented scraper dependency.
+
+### Career OS discovery sources
+
+| Source | Workflow access | Role in Career OS |
+| --- | --- | --- |
+| Greenhouse | Public Job Board JSON API; company board token | Canonical watchlist foundation |
+| Ashby | Public Job Postings JSON API; company board name; compensation included | Canonical watchlist foundation |
+| Lever | Public Postings JSON API; global and EU sites | Canonical watchlist foundation |
+| Himalayas | Public search JSON API | Remote discovery with country/worldwide filters and attribution |
+| Remotive | Public remote-jobs JSON API | Product-category discovery with attribution and conservative polling |
+| Jobicy | Public remote-jobs JSON API | Remote product-title discovery with region/salary metadata and attribution |
+| Remote OK | Public JSON feed | Broad remote discovery with attribution |
+| We Work Remotely | Public Product RSS feed | Product-specific remote discovery with attribution |
+| Welcome to the Jungle / Otta | Alerts or explicit browser session; no supported public candidate-search API | Optional discovery, followed by canonical ATS resolution |
+
+The machine-readable adapters run in Electron’s main process, require no stored job-board credentials, enforce fixed upstream hosts, cap response sizes and result counts, and are exposed only to installed Career OS workflow sessions. Source terms and attribution travel with each normalized Opportunity.
 - Dedicated **Hardware** workspace in the persistent navigation, designed as a calm programmable instrument rather than a Settings form: local template library, protected Ambientic Live Sessions profile, arbitrary grid creation, deck/view rename and secondary-view deletion, Play/Edit/Map MIDI/Test modes, low-motion floating pads, multiple linked views, automatic Back navigation, target/action inspector, input-arrival light, and responsive/reduced-motion layouts.
 - Atomic local hardware-template persistence with logical-slot bindings shared across views, schema/graph/size-validated privacy-sanitized JSON import/export, derived non-private requirements summaries for future community catalogs, fork/duplicate/delete flows, exact-local-target repair markers, and explicit expiring confirmation before consequential hardware actions run.
 - Universal input-first mapping for selectable native APC profiles, generic input-only MIDI devices, and focused computer keyboard controls, including Note/CC learning, visible conflict moves, press/release/650 ms hold/CC-value triggers, reconnect recovery, and visible raw-control labels.
@@ -248,9 +267,14 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-08-02
+Last updated: 2026-08-21
 
 ### Completed
+
+- [x] Added the versioned `ambientic.workflow-pack` contract, schema-bounded private setup values, idempotent local pack installation, workflow-to-pack identity, and private-context execution injection without leaking user values into portable definitions or renderer snapshots.
+- [x] Shipped Career OS as the first built-in pack with outcome-first install/start UI, Profile → Target → Constraints → Calibrate → Connect → Routine setup, four inspectable workflows, a five-opportunity daily cap, separate Candidate Fit/Career Fit instructions, truthful application preparation, and explicit approval before consequential work.
+- [x] Promoted Career OS from prose-only workflow output to structured local state: canonical Opportunity persistence and deduplication, scoring/eligibility/salary confidence, pipeline and interview records, one-tap pass learning, deterministic Career Daily planning, scoped agent tools, and Save/Pursue/Pass opportunity cards. Existing pack installs migrate their private setup into the new repository without sending it through the renderer.
+- [x] Added a source-aware Scout foundation: allowlisted adapters for Greenhouse, Ashby, Lever, Himalayas, Remotive, Jobicy, Remote OK, and We Work Remotely Product RSS; source provenance and canonical-resolution state; source-ID deduplication; safe response bounds; Career-only discovery scopes; an optional private ATS watchlist; and browser/alert guidance for Welcome to the Jungle (formerly Otta). Live read-only smokes returned normalized current roles from Ashby, Himalayas, Remotive, Jobicy, Remote OK, and We Work Remotely.
 
 - [x] Goals added as a first-class item in the persistent workspace sidebar.
 - [x] Dedicated local Goals service with atomic private JSON persistence, stable IDs, normalized goal/task states, validation, derived progress, and an append-only audit record.
@@ -397,6 +421,8 @@ Last updated: 2026-08-02
 
 ### In progress
 
+- [ ] Run the complete installed Career OS market-scan workflow with a clean local profile and real company watchlist; validate cross-source canonical resolution, deterministic remote eligibility, compensation confidence, the five-role attention cap, source attribution, and the approval boundary before any application action.
+
 - [x] Build the first Workflow Studio surface: a new left-navigation section, infinite visual canvas, draggable capability nodes, natural-language drafting, local persistence, permission/provider inspector, sequential dry-run visualization, and portable manifest copy.
 - [ ] Connect the Workflow Studio to a versioned manifest validator, semantic action registry, atomic workflow/run store, and deterministic headless runner.
 - [ ] Prove one semantic action can be invoked consistently from the regular UI, a workflow step, and an existing MIDI Learn mapping.
@@ -428,6 +454,9 @@ Last updated: 2026-08-02
 - [ ] Validate automatic handover regeneration against a real provider window crossing 85%, including reset-window deduplication.
 
 ### Next
+
+- [ ] Add per-source cursor persistence, retry/backoff and refresh health, canonical-link enrichment for attributed aggregator results, and scheduled watchlist batching; then live-smoke a known Greenhouse board and a Lever board containing a current product role.
+- [ ] Add privacy-safe Workflow Pack import/update/uninstall and a generic pack catalog so the schema-driven setup renderer can install packs beyond the built-in Career OS exemplar.
 
 - [ ] Add generic controller LED/SysEx output-profile authoring after the input-first Hardware V1 completes physical and clean-profile validation; retain graceful input-only fallback.
 - [ ] Build Ambientic Coach as an opt-in local signal and recommendation system with bounded evidence, source provenance, user feedback, and one-click draft workflows/mappings/goal tasks.
@@ -480,6 +509,8 @@ Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*.
 - [ ] Extend the ambient art direction into coordinated screen transitions, preview presentation, optional sound, and user-selectable hardware compositions while respecting reduced motion.
 
 ### Verification
+
+- 2026-08-21 Career OS multi-source Scout MVP: 35 focused source/pack/state/gateway/provider/UI tests pass with 2 intentional socket skips. The stable local-release suite passes 225 runnable tests with 0 failures and 2 skips; the production Electron bundles and `git diff --check` pass. Read-only live smokes returned current normalized roles from Greenhouse, Ashby, Himalayas, Remotive, Jobicy, Remote OK, and We Work Remotely; Lever’s official API responded successfully but its own board had no matching product role at test time. The unfiltered suite retains only the previously documented, unrelated simulated Claude OAuth callback timeout.
 
 - 2026-08-13 canonical project launch slice: focused context, access, launch-UI, handoff, provider-injection, and workspace regressions pass (53/53), and the production Electron build succeeds. Coverage proves an Ambientic project cannot be paired with an unrelated folder, sub-workspaces remain valid, prompt matching cannot import another project's goal, folderless projects retain durable context, protected-folder access is presented separately from background inspection, and cross-provider handoff preserves the exact project/goal/task binding. The unfiltered suite passes 206 runnable tests with 2 intentional socket skips; its one failure is the previously documented flaky simulated Claude OAuth callback waiting for a fake OAuth URL, outside this launch-context change.
 - 2026-08-02 latest-worktree integration: every registered worktree was inspected; the clean workflow runtime and overview branches are ancestors of the integration branch, while the older divergent interaction patch is already represented by the current canvas, navigation, recovery, tests, and documentation. Ambient Mode persistence/wake handling and systematic linked-goal closeout now pass the stable local-release suite (172 passed, 2 socket-only skips, 0 failures), the real Unix-socket/MCP shim suite (4/4), and the production renderer build. The local installer now restores the system Node SQLite ABI before tests and rebuilds it for Electron during packaging.
