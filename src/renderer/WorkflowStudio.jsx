@@ -201,6 +201,14 @@ function CareerPackCard ({ installed, workflows, runs, onInstall, onViewWorkflow
   </article>
 }
 
+function WorkflowGroupCard ({ workflows, runs, career, onOpen }) {
+  const workflowIds = new Set(workflows.map((workflow) => workflow.id))
+  const latestRun = runs.find((run) => workflowIds.has(run.workflowId))
+  const activeRun = runs.find((run) => workflowIds.has(run.workflowId) && ACTIVE_STATUSES.has(run.status))
+  const activePipeline = Object.entries(career.pipeline || {}).filter(([status]) => ['Saved', 'Pursuing', 'Application Ready', 'Applied', 'Recruiter Screen', 'Interview', 'Final Round'].includes(status)).reduce((total, [, count]) => total + count, 0)
+  return <article className="workflow-group-card" data-status={activeRun?.status || latestRun?.status || 'idle'}><button type="button" onClick={onOpen}><header><span>◎</span><div><small>Installed workflow pack · Career</small><h2>Career OS</h2><p>Discover, rank, prepare, and track the opportunities most worth your time.</p></div><i>→</i></header><dl><div><dt>Latest run</dt><dd>{latestRun ? `${statusLabel(latestRun.status)} · ${relativeTime(latestRun.createdAt)}` : 'Ready to run'}</dd></div><div><dt>Market</dt><dd>{career.market?.processed || 0} processed · {career.opportunities?.length || 0} saved</dd></div><div><dt>Pipeline</dt><dd>{activePipeline} active</dd></div></dl><footer><span>{workflows.length} related workflows</span><b>Open Career OS</b></footer></button></article>
+}
+
 function salaryLabel (opportunity) {
   if (opportunity.salaryMin == null && opportunity.salaryMax == null) return 'Compensation unknown'
   const symbol = { EUR: '€', USD: '$', GBP: '£' }[opportunity.currency] || `${opportunity.currency || ''} `
@@ -323,6 +331,7 @@ export function WorkflowStudio ({ onOpenThread }) {
   const [prompt, setPrompt] = useState('')
   const [loading, setLoading] = useState(true)
   const [showCareerSetup, setShowCareerSetup] = useState(false)
+  const [careerOpen, setCareerOpen] = useState(false)
   const pendingRef = useRef(new Map())
   const timersRef = useRef(new Map())
 
@@ -413,6 +422,11 @@ export function WorkflowStudio ({ onOpenThread }) {
   const activeCareerRun = (workflow) => workflow && snapshot.runs.some((run) => run.workflowId === workflow.id && ACTIVE_STATUSES.has(run.status))
   const careerProfileRun = careerProfile && (snapshot.runs.find((run) => run.workflowId === careerProfile.id && ACTIVE_STATUSES.has(run.status)) || snapshot.runs.find((run) => run.workflowId === careerProfile.id))
   const careerProfileSessionId = careerProfileRun && (careerProfileRun.steps.find((step) => step.status === 'running')?.sessionId || [...careerProfileRun.steps].reverse().find((step) => step.sessionId)?.sessionId)
+  const careerWorkflowIds = new Set(careerWorkflows.map((workflow) => workflow.id))
+  const careerRuns = snapshot.runs.filter((run) => careerWorkflowIds.has(run.workflowId))
+  const personalWorkflows = snapshot.workflows.filter((workflow) => workflow.packId !== CAREER_OS_PACK.id)
+  const installedCount = personalWorkflows.length + (installedCareer ? 1 : 0)
+  const careerHome = installedCareer && <CareerOsHome snapshot={career} profileRun={careerProfileRun} onUpdate={(id, patch) => window.controller.careerUpdateOpportunity(id, patch)} onPass={(id, reason) => window.controller.careerPassOpportunity(id, reason)} onOpenJob={(url) => window.controller.openExternalUrl(url)} onUpdatePreferences={(preferences) => window.controller.careerUpdatePreferences(preferences)} onRunScout={() => careerScout && window.controller.runWorkflow(careerScout.id)} onRunDaily={() => careerDaily && window.controller.runWorkflow(careerDaily.id)} onRunProfile={() => careerProfile && window.controller.runWorkflow(careerProfile.id)} onSaveProfile={(profile) => window.controller.careerUpdateProfile(profile)} onApproveProfile={() => window.controller.careerReviewProfile()} onOpenProfileAgent={() => careerProfileSessionId && onOpenThread?.(careerProfileSessionId)} scoutActive={activeCareerRun(careerScout)} dailyActive={activeCareerRun(careerDaily)} />
 
   if (selected) {
     return <WorkflowBuilder
@@ -427,15 +441,21 @@ export function WorkflowStudio ({ onOpenThread }) {
     />
   }
 
+  if (careerOpen && installedCareer) {
+    const latestRun = careerRuns[0]
+    return <section className="workflow-library workflow-library--group"><main><header className="workflow-group-header"><button type="button" onClick={() => setCareerOpen(false)}>← All workflows</button><div><span>Installed workflow pack</span><h1>Career OS</h1><p>Your latest outcome first; the specialized workflows that produced it remain inspectable below.</p></div><aside><span>Latest run</span><b>{latestRun ? statusLabel(latestRun.status) : 'Ready'}</b><small>{latestRun ? `${latestRun.workflowName} · ${relativeTime(latestRun.createdAt)}` : 'Run Profile Builder to begin'}</small></aside></header>{careerHome}<section className="workflow-library__section career-related-workflows"><header><div><span>Related workflows</span><small>Career OS coordinates these routines as one installed outcome.</small></div></header><div className="workflow-library__grid">{careerWorkflows.map((workflow) => <WorkflowCard key={workflow.id} workflow={workflow} onOpen={() => setSelectedId(workflow.id)} onRun={() => window.controller.runWorkflow(workflow.id)} onToggle={(enabled) => window.controller.setWorkflowEnabled(workflow.id, enabled)} onDuplicate={() => window.controller.duplicateWorkflow(workflow.id)} onDelete={() => removeWorkflow(workflow)} />)}</div></section></main><RunTimeline runs={careerRuns} onOpenThread={onOpenThread} /></section>
+  }
+
   return (
     <section className="workflow-library">
       {showCareerSetup && <CareerPackSetup onClose={() => setShowCareerSetup(false)} onInstall={installCareerOs} />}
       <main>
         <header className="workflow-library__header"><div><span>Workflow studio</span><h1>Workflows</h1><p>Install proven workflow packs or build your own, then run and monitor everything here.</p></div><button type="button" onClick={() => createWorkflow(createStarterWorkflow())}>＋ New workflow</button></header>
         <section className="workflow-library__section" id="installed-workflows">
-          <header><div><span>Your workflows</span><small>{snapshot.workflows.length} installed and private on this Mac</small></div><div className="workflow-library__legend"><i data-status="running" />Running<i data-status="awaiting_approval" />Needs you<i data-status="completed" />Complete</div></header>
+          <header><div><span>Your workflows</span><small>{installedCount} installed and private on this Mac</small></div><div className="workflow-library__legend"><i data-status="running" />Running<i data-status="awaiting_approval" />Needs you<i data-status="completed" />Complete</div></header>
           <div className="workflow-library__grid">
-            {snapshot.workflows.map((workflow) => <WorkflowCard
+            {installedCareer && <WorkflowGroupCard workflows={careerWorkflows} runs={snapshot.runs} career={career} onOpen={() => setCareerOpen(true)} />}
+            {personalWorkflows.map((workflow) => <WorkflowCard
               key={workflow.id}
               workflow={workflow}
               onOpen={() => setSelectedId(workflow.id)}
@@ -447,13 +467,12 @@ export function WorkflowStudio ({ onOpenThread }) {
           </div>
           {!loading && !snapshot.workflows.length && <div className="workflow-library__empty"><span>⌁</span><h2>No workflows installed yet</h2><p>Choose a pack from the catalog below or create your own.</p></div>}
         </section>
-        {installedCareer && <CareerOsHome snapshot={career} profileRun={careerProfileRun} onUpdate={(id, patch) => window.controller.careerUpdateOpportunity(id, patch)} onPass={(id, reason) => window.controller.careerPassOpportunity(id, reason)} onOpenJob={(url) => window.controller.openExternalUrl(url)} onUpdatePreferences={(preferences) => window.controller.careerUpdatePreferences(preferences)} onRunScout={() => careerScout && window.controller.runWorkflow(careerScout.id)} onRunDaily={() => careerDaily && window.controller.runWorkflow(careerDaily.id)} onRunProfile={() => careerProfile && window.controller.runWorkflow(careerProfile.id)} onSaveProfile={(profile) => window.controller.careerUpdateProfile(profile)} onApproveProfile={() => window.controller.careerReviewProfile()} onOpenProfileAgent={() => careerProfileSessionId && onOpenThread?.(careerProfileSessionId)} scoutActive={activeCareerRun(careerScout)} dailyActive={activeCareerRun(careerDaily)} />}
         <form className="workflow-library__prompt" onSubmit={(event) => { event.preventDefault(); if (prompt.trim()) void createWorkflow(draftWorkflowFromPrompt(prompt)) }}>
           <span>✦</span><label><b>Build a new workflow with an agent</b><textarea rows="2" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Every weekday at 8:30, research competitor news, summarize it, let me approve, then email the brief…" /></label><button type="submit" disabled={!prompt.trim()}>Draft workflow ↑</button>
         </form>
         <section className="workflow-catalog">
           <header><div><span>Workflow catalog</span><small>Install complete outcomes; private context is added only during setup.</small></div><b>1 pack available</b></header>
-          <CareerPackCard installed={installedCareer} workflows={careerWorkflows} runs={snapshot.runs} onInstall={() => setShowCareerSetup(true)} onViewWorkflows={() => document.getElementById('installed-workflows')?.scrollIntoView({ behavior: 'smooth' })} onOpenDashboard={() => document.getElementById('career-os-results')?.scrollIntoView({ behavior: 'smooth' })} onCopy={() => window.controller.copyText(JSON.stringify(portableWorkflowPack(CAREER_OS_PACK), null, 2))} />
+          <CareerPackCard installed={installedCareer} workflows={careerWorkflows} runs={snapshot.runs} onInstall={() => setShowCareerSetup(true)} onViewWorkflows={() => document.getElementById('installed-workflows')?.scrollIntoView({ behavior: 'smooth' })} onOpenDashboard={() => setCareerOpen(true)} onCopy={() => window.controller.copyText(JSON.stringify(portableWorkflowPack(CAREER_OS_PACK), null, 2))} />
         </section>
       </main>
       <RunTimeline runs={snapshot.runs} onOpenThread={onOpenThread} />

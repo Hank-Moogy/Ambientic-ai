@@ -101,7 +101,7 @@ The Workflow Builder is an infinite spatial field where intent moves through cle
 
 Installable workflow packs enter the Studio as complete outcomes, not as a wall of agent nodes. Career OS establishes the pattern: one prominent atmospheric object explains the routine, privacy boundary, and next human action; its internal workflows remain inspectable only after the user asks for them.
 
-Workflow Studio separates ownership from discovery. **Your workflows** comes first and keeps installed routines, run state, and results together; the **Workflow catalog** follows as a quieter shelf of outcomes that can be installed. A pack may remain visible in the catalog after installation, but its controls point back to the owned workflow and result surfaces instead of creating a second operational home.
+Workflow Studio separates ownership from discovery. **Your workflows** comes first and keeps installed routines, run state, and results together; the **Workflow catalog** follows as a quieter shelf of outcomes that can be installed. An installed pack is one top-level card—not a spray of internal routines. Opening it leads with the latest run and outcome surface, then reveals its related workflows below for inspection or direct execution. A pack may remain visible in the catalog after installation, but its controls point back to that single owned group instead of creating a second operational home.
 
 - Setup advances through one calm question field at a time, with a thin progress current rather than a configuration sidebar.
 - Shared logic and private state are visually separated in plain language before installation. Copying a pack copies only the portable manifest.
