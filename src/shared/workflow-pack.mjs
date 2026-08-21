@@ -49,7 +49,7 @@ function sanitizeFieldValue (field, value) {
     const selected = String(value || field.defaultValue || '')
     return /^([01]\d|2[0-3]):[0-5]\d$/.test(selected) ? selected : ''
   }
-  return cleanText(value, field.type === 'textarea' ? MAX_TEXT : 1000)
+  return cleanText(value, ['textarea', 'memory-import'].includes(field.type) ? MAX_TEXT : 1000)
 }
 
 export function sanitizePackSetup (pack, values = {}, { requireComplete = true } = {}) {

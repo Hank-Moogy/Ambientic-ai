@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('controller', {
   createGoalTask: (goalId, input) => ipcRenderer.invoke('create-goal-task', goalId, input),
   updateGoalTask: (taskId, patch) => ipcRenderer.invoke('update-goal-task', taskId, patch),
   getWorkflows: () => ipcRenderer.invoke('get-workflows'),
+  chooseCareerProfileFile: (kind) => ipcRenderer.invoke('choose-career-profile-file', kind),
   installCareerOs: (setup) => ipcRenderer.invoke('install-career-os', setup),
   getCareerOs: () => ipcRenderer.invoke('get-career-os'),
   careerUpdateOpportunity: (opportunityId, patch) => ipcRenderer.invoke('career-update-opportunity', opportunityId, patch),

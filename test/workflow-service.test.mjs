@@ -156,8 +156,8 @@ test('installs a workflow pack once and keeps private setup out of portable work
   service.installPack(CAREER_OS_PACK, setup)
   const snapshot = service.list()
   assert.equal(snapshot.packs.length, 1)
-  assert.equal(snapshot.workflows.filter((workflow) => workflow.packId === CAREER_OS_PACK.id).length, 4)
-  assert.equal(installed.workflowIds.length, 4)
+  assert.equal(snapshot.workflows.filter((workflow) => workflow.packId === CAREER_OS_PACK.id).length, 5)
+  assert.equal(installed.workflowIds.length, 5)
   assert.equal('privateContext' in snapshot.packs[0], false)
   assert.equal('setup' in snapshot.packs[0], false)
   assert.equal('privateContext' in installed, false)
@@ -174,4 +174,28 @@ test('installs a workflow pack once and keeps private setup out of portable work
   assert.match(calls[0].prompt, /Private local setup supplied by the user/)
   assert.match(calls[0].prompt, /AI product leader/)
   assert.match(calls[0].prompt, /ambientic_career_update/)
+})
+
+test('upgrades an installed pack with new workflow roles while preserving workflow identity and enablement', () => {
+  const { service } = fixture()
+  const setup = {
+    careerProfile: 'AI product leader', careerContext: '', targetRoles: ['Head of Product'], stretchRoles: [],
+    careerObjective: 'Become a CPO', country: 'France', workAuthorization: 'EU citizen',
+    locationPolicy: 'Remote EU', minimumCompensation: '€100k', targetCompensation: '€130k',
+    priorities: ['Technical / AI depth'], tradeoffs: '', sources: ['Public ATS feeds'],
+    routineMinutes: '45', routineTime: '09:15', maxDailyOpportunities: '5'
+  }
+  const priorPack = { ...CAREER_OS_PACK, version: '0.2.0', workflows: CAREER_OS_PACK.workflows.filter((workflow) => workflow.role !== 'profile') }
+  service.installPack(priorPack, setup)
+  const priorScout = service.list().workflows.find((workflow) => workflow.packRole === 'scout')
+  service.setEnabled(priorScout.id, false)
+
+  service.installPack(CAREER_OS_PACK, setup)
+  const snapshot = service.list()
+  const upgradedScout = snapshot.workflows.find((workflow) => workflow.packRole === 'scout')
+  assert.equal(snapshot.packs[0].version, CAREER_OS_PACK.version)
+  assert.equal(snapshot.workflows.filter((workflow) => workflow.packId === CAREER_OS_PACK.id).length, 5)
+  assert.ok(snapshot.workflows.some((workflow) => workflow.packRole === 'profile'))
+  assert.equal(upgradedScout.id, priorScout.id)
+  assert.equal(upgradedScout.enabled, false)
 })

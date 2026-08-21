@@ -82,6 +82,20 @@ function initialPackValues () {
 }
 
 function PackField ({ field, value, onChange }) {
+  const [choosing, setChoosing] = useState(false)
+  if (field.type === 'file') {
+    const name = String(value || '').split('/').filter(Boolean).at(-1)
+    const choose = async () => {
+      setChoosing(true)
+      try {
+        const selected = await window.controller.chooseCareerProfileFile(field.id === 'linkedinProfilePath' ? 'linkedin' : 'resume')
+        if (selected?.path) onChange(selected.path)
+      } finally {
+        setChoosing(false)
+      }
+    }
+    return <div className="career-pack-file" data-selected={Boolean(value)}><div><span>{field.label}{field.required && <i>Required</i>}</span><b>{name || (field.id === 'resumePath' ? 'PDF, DOCX, RTF, TXT, or Markdown' : 'Your LinkedIn “Save to PDF” export')}</b></div><button type="button" disabled={choosing} onClick={() => void choose()}>{choosing ? 'Choosing…' : name ? 'Replace' : field.buttonLabel || 'Choose file'}</button>{name && <button type="button" aria-label={`Remove ${name}`} onClick={() => onChange('')}>×</button>}</div>
+  }
   if (field.type === 'multi-select') {
     const selected = Array.isArray(value) ? value : []
     return <fieldset className="career-pack-choices"><legend>{field.label}{field.required && <i>Required</i>}</legend><div>{field.options.map((option) => {
@@ -95,7 +109,29 @@ function PackField ({ field, value, onChange }) {
   if (field.type === 'textarea') {
     return <label className="career-pack-field"><span>{field.label}{field.required && <i>Required</i>}</span><textarea rows="4" value={value} onChange={(event) => onChange(event.target.value)} placeholder={field.placeholder} /></label>
   }
-  return <label className="career-pack-field"><span>{field.label}{field.required && <i>Required</i>}</span><input type={['number', 'time'].includes(field.type) ? field.type : 'text'} value={value} onChange={(event) => onChange(event.target.value)} placeholder={field.placeholder} /></label>
+  return <label className="career-pack-field"><span>{field.label}{field.required && <i>Required</i>}</span><input type={['number', 'time', 'url'].includes(field.type) ? field.type : 'text'} value={value} onChange={(event) => onChange(event.target.value)} placeholder={field.placeholder} /></label>
+}
+
+function CareerMemoryImport ({ value, onChange }) {
+  const [memories, setMemories] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let disposed = false
+    Promise.resolve(window.ambientic?.memory?.list?.({ scope: 'user', status: 'active', limit: 24 }) || { memories: [] }).then((result) => {
+      if (!disposed) setMemories((result?.memories || []).filter((item) => item.status === 'active').slice(0, 12))
+    }).finally(() => { if (!disposed) setLoading(false) })
+    return () => { disposed = true }
+  }, [])
+
+  const selected = new Set(memories.filter((memory) => String(value || '').includes(memory.content)).map((memory) => memory.id))
+  const toggle = (memory) => {
+    const ids = new Set(selected)
+    if (ids.has(memory.id)) ids.delete(memory.id); else ids.add(memory.id)
+    onChange(memories.filter((item) => ids.has(item.id)).map((item) => `- ${item.content}`).join('\n'))
+  }
+
+  return <fieldset className="career-memory-import"><legend>Context Ambientic already knows <i>Optional</i></legend><p>Select only the reviewed memories that should inform your Career Profile. They are copied locally into this private workflow—not into the shared pack.</p>{loading ? <small>Reading reviewed local memory…</small> : memories.length ? <div>{memories.map((memory) => <button type="button" key={memory.id} data-selected={selected.has(memory.id)} onClick={() => toggle(memory)}><i>{selected.has(memory.id) ? '✓' : '+'}</i><span>{memory.content}</span><small>{memory.provenance?.provider || memory.kind || 'Ambientic memory'}</small></button>)}</div> : <aside><b>No reviewed Ambientic memories yet</b><span>Use Settings → Memory or replay provider-memory onboarding to import context your connected GPT and agent providers can safely expose.</span></aside>}</fieldset>
 }
 
 function CareerPackSetup ({ onClose, onInstall }) {
@@ -110,6 +146,14 @@ function CareerPackSetup ({ onClose, onInstall }) {
     const missing = stage.fields.filter((field) => field.required && (Array.isArray(values[field.id]) ? !values[field.id].length : !String(values[field.id] || '').trim()))
     if (missing.length) {
       setError(`Complete ${missing.map((field) => field.label.toLocaleLowerCase()).join(', ')} to continue.`)
+      return
+    }
+    if (stage.id === 'profile' && !String(values.resumePath || '').trim() && !String(values.careerProfile || '').trim()) {
+      setError('Upload your CV or enter your career manually to continue.')
+      return
+    }
+    if (stage.id === 'profile' && values.linkedinProfileUrl && !/^https:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/in\//i.test(values.linkedinProfileUrl)) {
+      setError('Enter a valid LinkedIn profile URL, or leave it empty and upload your LinkedIn PDF.')
       return
     }
     setError('')
@@ -129,8 +173,8 @@ function CareerPackSetup ({ onClose, onInstall }) {
       <main>
         <span>{stage.title} · {stageIndex + 1}/{CAREER_OS_PACK.setup.stages.length}</span>
         <h2 id="career-pack-title">{stage.prompt}</h2>
-        <p>{stage.id === 'profile' ? 'Your answers stay in Ambientic’s private local workflow store. The shared pack never contains your resume or personal state.' : stage.id === 'connect' ? 'Connections are optional and progressive. Selecting a private source records your intent; it does not claim the integration is already connected.' : 'Career OS uses this to spend your limited search time on higher-value opportunities.'}</p>
-        <div className="career-pack-fields">{stage.fields.map((field) => <PackField key={field.id} field={field} value={values[field.id]} onChange={(value) => { setValues((current) => ({ ...current, [field.id]: value })); setError('') }} />)}</div>
+        <p>{stage.id === 'profile' ? 'Career OS will mine only the evidence you choose, build a structured profile, and pause for your review. Files, memories, and extracted context stay in Ambientic’s private local stores.' : stage.id === 'connect' ? 'Connections are optional and progressive. Selecting a private source records your intent; it does not claim the integration is already connected.' : 'Career OS uses this to spend your limited search time on higher-value opportunities.'}</p>
+        <div className="career-pack-fields">{stage.fields.map((field) => field.type === 'memory-import' ? <CareerMemoryImport key={field.id} value={values[field.id]} onChange={(value) => { setValues((current) => ({ ...current, [field.id]: value })); setError('') }} /> : <PackField key={field.id} field={field} value={values[field.id]} onChange={(value) => { setValues((current) => ({ ...current, [field.id]: value })); setError('') }} />)}</div>
         {error && <div className="career-pack-error" role="alert">{error}</div>}
       </main>
       <footer>{stageIndex > 0 ? <button type="button" onClick={() => { setStageIndex((current) => current - 1); setError('') }}>Back</button> : <span />}<button className="primary" type="button" disabled={installing} onClick={() => void continueSetup()}>{installing ? 'Installing…' : isLast ? 'Install Career OS' : 'Continue'}</button></footer>
@@ -176,7 +220,7 @@ function CareerOpportunityCard ({ opportunity, onUpdate, onPass }) {
   </article>
 }
 
-function CareerOsHome ({ snapshot, onUpdate, onPass, onRunScout, onRunDaily, scoutActive, dailyActive }) {
+function CareerOsHome ({ snapshot, onUpdate, onPass, onRunScout, onRunDaily, onReviewProfile, scoutActive, dailyActive }) {
   const queueIds = new Set(snapshot.dailyQueue.items.map((item) => item.opportunityId))
   const opportunities = snapshot.opportunities.filter((opportunity) => queueIds.has(opportunity.id) && !['Archived', 'Rejected', 'Withdrawn'].includes(opportunity.status))
   const active = Object.entries(snapshot.pipeline).filter(([status]) => ['Saved', 'Pursuing', 'Application Ready', 'Applied', 'Recruiter Screen', 'Interview', 'Final Round'].includes(status)).reduce((sum, [, count]) => sum + count, 0)
@@ -184,6 +228,7 @@ function CareerOsHome ({ snapshot, onUpdate, onPass, onRunScout, onRunDaily, sco
 
   return <section className="career-home">
     <header><div><span>Career OS</span><h2>Good morning</h2><p><b>{snapshot.dailyQueue.minutes}-minute Career Daily</b> · {snapshot.dailyQueue.items.length ? `${snapshot.dailyQueue.items.length} high-value actions planned` : 'Your queue is waiting for its first market scan'}</p></div><button className="primary" type="button" disabled={dailyActive} onClick={onRunDaily}>{dailyActive ? 'Career Daily running' : 'Start Career Daily'}</button></header>
+    <div className="career-profile-state" data-status={snapshot.profile?.status || 'pending'}><div><span>Career Profile</span><b>{snapshot.profile?.headline || (snapshot.profile?.status === 'pending' ? 'Mining your CV and selected context…' : 'Ready for your review')}</b><small>{snapshot.profile?.sourceCoverage?.length ? `Built from ${snapshot.profile.sourceCoverage.join(', ')}` : 'CV, LinkedIn, manual evidence, and selected Ambientic memories remain private on this Mac.'}</small></div>{snapshot.profile?.strongestAreas?.length > 0 && <ul>{snapshot.profile.strongestAreas.slice(0, 5).map((area) => <li key={area}>{area}</li>)}</ul>}<button type="button" onClick={onReviewProfile}>{snapshot.profile?.status === 'reviewed' ? 'Inspect profile' : 'Review profile'}</button><i>{snapshot.profile?.status === 'reviewed' ? 'Reviewed' : snapshot.profile?.status === 'needs_review' ? 'Needs review' : 'Building'}</i></div>
     <div className="career-home__summary">
       <section><span>Today</span>{snapshot.dailyQueue.items.length ? <ol>{snapshot.dailyQueue.items.map((item) => <li key={item.id}><span>{item.label}</span><b>{item.minutes} min</b></li>)}</ol> : <div className="career-home__empty"><b>No ranked opportunities yet</b><p>Run the market scan to search canonical ATS postings, normalize eligibility, and prepare the first shortlist.</p><button type="button" disabled={scoutActive} onClick={onRunScout}>{scoutActive ? 'Market scan running' : 'Run first market scan'}</button></div>}</section>
       <aside><div><span>Market</span><b>{snapshot.market.processed || 0}</b><small>roles processed</small></div><div><span>Pipeline</span><b>{active}</b><small>active opportunities</small></div><div><span>Interviews</span><b>{interviewing}</b><small>processes moving</small></div></aside>
@@ -285,6 +330,7 @@ export function WorkflowStudio ({ onOpenThread }) {
 
   const careerScout = careerWorkflows.find((workflow) => workflow.packRole === 'scout')
   const careerDaily = careerWorkflows.find((workflow) => workflow.packRole === 'daily')
+  const careerProfile = careerWorkflows.find((workflow) => workflow.packRole === 'profile')
   const activeCareerRun = (workflow) => workflow && snapshot.runs.some((run) => run.workflowId === workflow.id && ACTIVE_STATUSES.has(run.status))
 
   if (selected) {
@@ -306,7 +352,7 @@ export function WorkflowStudio ({ onOpenThread }) {
       <main>
         <header className="workflow-library__header"><div><span>Workflow studio</span><h1>All workflows</h1><p>Reusable, provider-neutral routines that your agents can run on demand or on schedule.</p></div><button type="button" onClick={() => createWorkflow(createStarterWorkflow())}>＋ New workflow</button></header>
         <CareerPackCard installed={installedCareer} workflows={careerWorkflows} runs={snapshot.runs} onInstall={() => setShowCareerSetup(true)} onOpen={(workflow) => workflow && setSelectedId(workflow.id)} onRun={(workflow) => workflow && window.controller.runWorkflow(workflow.id)} onCopy={() => window.controller.copyText(JSON.stringify(portableWorkflowPack(CAREER_OS_PACK), null, 2))} />
-        {installedCareer && <CareerOsHome snapshot={career} onUpdate={(id, patch) => window.controller.careerUpdateOpportunity(id, patch)} onPass={(id, reason) => window.controller.careerPassOpportunity(id, reason)} onRunScout={() => careerScout && window.controller.runWorkflow(careerScout.id)} onRunDaily={() => careerDaily && window.controller.runWorkflow(careerDaily.id)} scoutActive={activeCareerRun(careerScout)} dailyActive={activeCareerRun(careerDaily)} />}
+        {installedCareer && <CareerOsHome snapshot={career} onUpdate={(id, patch) => window.controller.careerUpdateOpportunity(id, patch)} onPass={(id, reason) => window.controller.careerPassOpportunity(id, reason)} onRunScout={() => careerScout && window.controller.runWorkflow(careerScout.id)} onRunDaily={() => careerDaily && window.controller.runWorkflow(careerDaily.id)} onReviewProfile={() => careerProfile && setSelectedId(careerProfile.id)} scoutActive={activeCareerRun(careerScout)} dailyActive={activeCareerRun(careerDaily)} />}
         <form className="workflow-library__prompt" onSubmit={(event) => { event.preventDefault(); if (prompt.trim()) void createWorkflow(draftWorkflowFromPrompt(prompt)) }}>
           <span>✦</span><label><b>Build a new workflow with an agent</b><textarea rows="2" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Every weekday at 8:30, research competitor news, summarize it, let me approve, then email the brief…" /></label><button type="submit" disabled={!prompt.trim()}>Draft workflow ↑</button>
         </form>

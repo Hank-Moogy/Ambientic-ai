@@ -255,6 +255,7 @@ export class CapabilityGateway extends EventEmitter {
       if (!this.career) throw new Error('Career OS is not installed.')
       const snapshot = this.career.list()
       if (args.action === 'snapshot') return snapshot
+      if (args.action === 'profile') return snapshot.profile
       if (args.action === 'daily_queue') return snapshot.dailyQueue
       const opportunity = snapshot.opportunities.find((candidate) => candidate.id === args.opportunityId)
       if (!opportunity) throw new Error('Opportunity not found.')
@@ -266,6 +267,7 @@ export class CapabilityGateway extends EventEmitter {
     }
     if (tool === 'ambientic_career_update') {
       if (!this.career) throw new Error('Career OS is not installed.')
+      if (args.action === 'profile') return this.career.updateProfile(args.profile || {}, { actor: 'agent' })
       if (args.action === 'upsert') return this.career.upsertOpportunity(args.opportunity || {}, { actor: 'agent' })
       if (args.action === 'status') return this.career.updateOpportunity(args.opportunityId, { status: args.status, nextAction: args.nextAction }, { actor: 'agent' })
       if (args.action === 'pass') return this.career.passOpportunity(args.opportunityId, args.reason, args.note, { actor: 'agent' })

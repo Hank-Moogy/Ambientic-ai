@@ -40,6 +40,8 @@ export class CareerOsRepository extends ServiceRepository {
   list () { return this.service.list() }
   privateSnapshot () { return this.service.privateSnapshot() }
   configure (setup) { return this.service.configure(setup) }
+  updateProfile (input, options) { return this.service.updateProfile(input, options) }
+  reviewProfile (options) { return this.service.reviewProfile(options) }
   upsertOpportunity (input, options) { return this.service.upsertOpportunity(input, options) }
   updateOpportunity (id, patch, options) { return this.service.updateOpportunity(id, patch, options) }
   passOpportunity (id, reason, note, options) { return this.service.passOpportunity(id, reason, note, options) }

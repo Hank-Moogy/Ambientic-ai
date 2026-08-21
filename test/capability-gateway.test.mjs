@@ -25,7 +25,8 @@ function fixture ({ start = true, requestApproval } = {}) {
   const careerUpdates = []
   const discoveryCalls = []
   const career = {
-    list: () => ({ opportunities: [{ id: 'opportunity-1', company: 'Acme', roleTitle: 'Head of Product' }], dailyQueue: { items: [{ opportunityId: 'opportunity-1' }] } }),
+    list: () => ({ profile: { status: 'needs_review', headline: 'AI Product Leader' }, opportunities: [{ id: 'opportunity-1', company: 'Acme', roleTitle: 'Head of Product' }], dailyQueue: { items: [{ opportunityId: 'opportunity-1' }] } }),
+    updateProfile: (input) => { careerUpdates.push({ action: 'profile', input }); return { status: 'needs_review', ...input } },
     upsertOpportunity: (input) => { careerUpdates.push({ action: 'upsert', input }); return { id: 'opportunity-1', ...input } },
     updateOpportunity: (id, patch) => { careerUpdates.push({ action: 'status', id, patch }); return { id, ...patch } },
     passOpportunity: (id, reason) => { careerUpdates.push({ action: 'pass', id, reason }); return { id, status: 'Archived' } },
@@ -115,9 +116,13 @@ test('Career OS tools are hidden from ordinary sessions and available to scoped 
     assert.deepEqual(listed.tools.map((tool) => tool.name), ['ambientic_career_read', 'ambientic_jobs_discover', 'ambientic_career_update'])
     const queue = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_read', arguments: { action: 'daily_queue' } })
     assert.equal(queue.items[0].opportunityId, 'opportunity-1')
+    const profile = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_read', arguments: { action: 'profile' } })
+    assert.equal(profile.headline, 'AI Product Leader')
+    const built = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_update', arguments: { action: 'profile', profile: { headline: 'Product Executive' } } })
+    assert.equal(built.headline, 'Product Executive')
     const created = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_update', arguments: { action: 'upsert', opportunity: { company: 'Acme', roleTitle: 'Head of Product' } } })
     assert.equal(created.id, 'opportunity-1')
-    assert.equal(value.careerUpdates.length, 1)
+    assert.equal(value.careerUpdates.length, 2)
     const discovered = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_jobs_discover', arguments: { action: 'discover', source: 'himalayas', query: 'product' } })
     assert.equal(discovered.jobs[0].company, 'Remote Co')
     assert.equal(value.discoveryCalls.length, 1)

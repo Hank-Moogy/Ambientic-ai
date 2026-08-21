@@ -75,7 +75,7 @@ export const AMBIENTIC_TOOL_SCHEMAS = Object.freeze([
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['snapshot', 'opportunity', 'daily_queue'] },
+        action: { type: 'string', enum: ['snapshot', 'profile', 'opportunity', 'daily_queue'] },
         opportunityId: { type: 'string', maxLength: 120 }
       },
       required: ['action'],
@@ -108,7 +108,8 @@ export const AMBIENTIC_TOOL_SCHEMAS = Object.freeze([
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['upsert', 'status', 'pass', 'interview', 'market_scan'] },
+        action: { type: 'string', enum: ['profile', 'upsert', 'status', 'pass', 'interview', 'market_scan'] },
+        profile: { type: 'object' },
         opportunityId: { type: 'string', maxLength: 120 },
         opportunity: { type: 'object' },
         status: { type: 'string', enum: ['New', 'Saved', 'Pursuing', 'Application Ready', 'Applied', 'Recruiter Screen', 'Interview', 'Final Round', 'Offer', 'Rejected', 'Withdrawn', 'Archived'] },

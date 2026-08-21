@@ -36,12 +36,33 @@ function opportunity (overrides = {}) {
 
 test('persists private career configuration without returning it to renderer snapshots', () => {
   const { service, root } = fixture()
-  const snapshot = service.configure(setup())
+  const snapshot = service.configure({ ...setup(), resumePath: '/private/career/cv.pdf', linkedinProfilePath: '/private/career/linkedin.pdf', linkedinProfileUrl: 'https://linkedin.com/in/example?trk=profile', ambienticContext: '- Wants to build category-defining products' })
   assert.equal(snapshot.configured, true)
   assert.equal(snapshot.preferences.routineMinutes, 45)
   assert.equal(JSON.stringify(snapshot).includes('Product leader with eight years'), false)
+  assert.equal(JSON.stringify(snapshot).includes('/private/career'), false)
+  assert.equal(JSON.stringify(snapshot).includes('category-defining'), false)
+  assert.equal(service.privateSnapshot().profile.evidence.linkedinProfileUrl, 'https://linkedin.com/in/example')
   assert.match(readFileSync(join(root, 'career-os.json'), 'utf8'), /Product leader with eight years/)
   assert.equal(statSync(join(root, 'career-os.json')).mode & 0o777, 0o600)
+})
+
+test('builds a reviewable structured profile and preserves it when the user approves', () => {
+  const { service } = fixture()
+  service.configure(setup())
+  service.updateProfile({
+    headline: 'AI Product Leader', summary: 'Builds technical B2B products.', yearsExperience: 8,
+    strongestAreas: ['AI products', 'Infrastructure'], achievements: ['Reduced inference cost by 30%'],
+    skills: ['Product strategy'], careerNarrative: 'Private detailed narrative.', sourceCoverage: ['CV', 'LinkedIn PDF']
+  })
+  const before = service.list().profile
+  assert.equal(before.status, 'needs_review')
+  assert.equal(before.headline, 'AI Product Leader')
+  assert.equal(JSON.stringify(before).includes('Private detailed narrative'), false)
+  const reviewed = service.reviewProfile()
+  assert.equal(reviewed.status, 'reviewed')
+  assert.equal(reviewed.achievements[0], 'Reduced inference cost by 30%')
+  assert.equal(service.list().profile.status, 'reviewed')
 })
 
 test('normalizes and deduplicates canonical opportunities while preserving separate fit scores', () => {

@@ -81,6 +81,26 @@ function emptyState () {
   }
 }
 
+function emptyCareerProfile () {
+  return {
+    status: 'pending',
+    headline: '',
+    summary: '',
+    yearsExperience: null,
+    strongestAreas: [],
+    achievements: [],
+    skills: [],
+    projects: [],
+    leadership: [],
+    technologies: [],
+    domains: [],
+    careerNarrative: '',
+    uncertainties: [],
+    sourceCoverage: [],
+    updatedAt: null
+  }
+}
+
 export function calculateOpportunityScore ({ candidateFitScore, careerFitScore, urgencyScore = 50, estimatedEffortMinutes = 30, eligibility = 'unknown' }) {
   if (eligibility === 'ineligible') return 0
   const candidate = boundedNumber(candidateFitScore, 0, 100, 0)
@@ -242,7 +262,14 @@ export class CareerOsService extends EventEmitter {
       careerObjective: cleanText(setup.careerObjective, 4000),
       workAuthorization: cleanText(setup.workAuthorization, 1000),
       locationPolicy: cleanText(setup.locationPolicy, 3000),
-      compensation: { minimum: cleanText(setup.minimumCompensation, 500), target: cleanText(setup.targetCompensation, 500) }
+      compensation: { minimum: cleanText(setup.minimumCompensation, 500), target: cleanText(setup.targetCompensation, 500) },
+      evidence: {
+        resumePath: cleanText(setup.resumePath, 4000),
+        linkedinProfilePath: cleanText(setup.linkedinProfilePath, 4000),
+        linkedinProfileUrl: canonicalUrl(setup.linkedinProfileUrl),
+        ambienticContext: cleanText(setup.ambienticContext, 12000)
+      },
+      structured: emptyCareerProfile()
     }
     this.state.preferences = {
       targetRoles: cleanStringList(setup.targetRoles),
@@ -277,6 +304,17 @@ export class CareerOsService extends EventEmitter {
         routineTime: this.state.preferences.routineTime || '08:30',
         maxDailyOpportunities: maxNew
       },
+      profile: copy({
+        status: this.state.privateProfile?.structured?.status || 'pending',
+        headline: this.state.privateProfile?.structured?.headline || '',
+        summary: this.state.privateProfile?.structured?.summary || '',
+        yearsExperience: this.state.privateProfile?.structured?.yearsExperience ?? null,
+        strongestAreas: this.state.privateProfile?.structured?.strongestAreas || [],
+        achievements: this.state.privateProfile?.structured?.achievements || [],
+        sourceCoverage: this.state.privateProfile?.structured?.sourceCoverage || [],
+        uncertainties: this.state.privateProfile?.structured?.uncertainties || [],
+        updatedAt: this.state.privateProfile?.structured?.updatedAt || null
+      }),
       opportunities: copy(opportunities),
       pipeline: this.pipeline(),
       dailyQueue: buildCareerDailyQueue(opportunities, { minutes: routine, maxNew }),
@@ -288,6 +326,39 @@ export class CareerOsService extends EventEmitter {
 
   privateSnapshot () {
     return copy({ profile: this.state.privateProfile, preferences: this.state.preferences, opportunities: this.state.opportunities, interviews: this.state.interviews, market: this.state.market })
+  }
+
+  updateProfile (input = {}, { actor = 'agent' } = {}) {
+    const profile = {
+      status: input.status === 'reviewed' ? 'reviewed' : 'needs_review',
+      headline: cleanText(input.headline, 240),
+      summary: cleanText(input.summary, 3000),
+      yearsExperience: boundedNumber(input.yearsExperience, 0, 80, null),
+      strongestAreas: cleanStringList(input.strongestAreas, { maxItems: 12, maxLength: 160 }),
+      achievements: cleanStringList(input.achievements, { maxItems: 30, maxLength: 500 }),
+      skills: cleanStringList(input.skills, { maxItems: 80, maxLength: 120 }),
+      projects: cleanStringList(input.projects, { maxItems: 30, maxLength: 500 }),
+      leadership: cleanStringList(input.leadership, { maxItems: 30, maxLength: 500 }),
+      technologies: cleanStringList(input.technologies, { maxItems: 80, maxLength: 120 }),
+      domains: cleanStringList(input.domains, { maxItems: 40, maxLength: 160 }),
+      careerNarrative: cleanText(input.careerNarrative, 4000),
+      uncertainties: cleanStringList(input.uncertainties, { maxItems: 20, maxLength: 500 }),
+      sourceCoverage: cleanStringList(input.sourceCoverage, { maxItems: 12, maxLength: 160 }),
+      updatedAt: this.now()
+    }
+    this.state.privateProfile.structured = profile
+    this.record('career.profile.updated', 'career-profile', { status: profile.status, sourceCoverage: profile.sourceCoverage, strongestAreas: profile.strongestAreas }, actor)
+    this.persist()
+    return copy(profile)
+  }
+
+  reviewProfile ({ actor = 'human' } = {}) {
+    const existing = this.state.privateProfile?.structured
+    if (!existing?.headline && !existing?.summary) throw new Error('Build the Career Profile before approving it.')
+    this.state.privateProfile.structured = { ...existing, status: 'reviewed', updatedAt: this.now() }
+    this.record('career.profile.reviewed', 'career-profile', { sourceCoverage: existing.sourceCoverage || [] }, actor)
+    this.persist()
+    return copy(this.state.privateProfile.structured)
   }
 
   opportunity (opportunityId) {

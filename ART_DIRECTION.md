@@ -109,6 +109,8 @@ Installable workflow packs enter the Studio as complete outcomes, not as a wall 
 
 Career OS opens below its pack identity as a daily current, not a job-board grid. The first hierarchy is time available → actions worth taking → the few opportunities that justify attention. Opportunity cards keep Candidate Fit and Career Fit visibly separate, present uncertainty as confidence text, and reserve glow for current value rather than employer branding. Save, Pursue, and Pass remain quiet controls; passing unfolds lightweight reasons in place so learning does not become a form. Discovery setup groups sources by trust—canonical ATS, attributed remote feed, optional browser/alert—so adding reach still feels like choosing evidence quality rather than configuring a scraper.
 
+Career Profile setup treats identity as user-selected evidence, not invisible inference. CV and LinkedIn files appear as calm local document objects; reviewed Ambientic memories appear as individually selectable provenance cards. The resulting profile carries a visible Building → Needs review → Reviewed state, and its review action sits beside that state. No ranking glow or recommendation language should imply that an unreviewed portrait is already trusted.
+
 ## Memory: a quiet archive of continuity
 
 Memory should feel like a local field the user can inspect and prune, never like an invisible personality dossier. Memory lives inside Settings because it is a trust and control surface, not a daily navigation destination. It keeps the same deep, cool atmosphere while making origin and control unusually explicit.

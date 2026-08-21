@@ -11,7 +11,7 @@ export const CAREER_OS_PACK = {
   schema: 'ambientic.workflow-pack',
   schemaVersion: 1,
   id: 'ambientic.career-os',
-  version: '0.2.0',
+  version: '0.3.0',
   name: 'Career OS',
   tagline: 'A persistent career agent that decides where your time has the highest expected value.',
   description: 'Discover, rank, prepare, track, and learn through one calm 30–60 minute daily routine.',
@@ -24,9 +24,13 @@ export const CAREER_OS_PACK = {
       {
         id: 'profile',
         title: 'Profile',
-        prompt: 'What should Career OS know about your track record?',
+        prompt: 'Start with the evidence that represents you.',
         fields: [
-          { id: 'careerProfile', label: 'Resume or career summary', type: 'textarea', required: true, placeholder: 'Paste the relevant roles, achievements, metrics, skills, and domains from your resume.' },
+          { id: 'resumePath', label: 'Upload your CV', type: 'file', required: false, accept: ['pdf', 'doc', 'docx', 'rtf', 'txt', 'md'], buttonLabel: 'Choose CV' },
+          { id: 'linkedinProfilePath', label: 'LinkedIn profile PDF', type: 'file', required: false, accept: ['pdf'], buttonLabel: 'Choose LinkedIn PDF' },
+          { id: 'linkedinProfileUrl', label: 'LinkedIn profile URL', type: 'url', required: false, placeholder: 'https://www.linkedin.com/in/your-profile' },
+          { id: 'ambienticContext', label: 'Context Ambientic already knows', type: 'memory-import', required: false },
+          { id: 'careerProfile', label: 'Or enter your career manually', type: 'textarea', required: false, placeholder: 'Roles, achievements, metrics, skills, projects, and domains.' },
           { id: 'careerContext', label: 'Anything important that is not on your CV?', type: 'textarea', required: false, placeholder: 'Ambitions, important projects, constraints, or context.' }
         ]
       },
@@ -94,6 +98,17 @@ export const CAREER_OS_PACK = {
     northStar: 'Interview hours generated per job-search hour'
   },
   workflows: [
+    {
+      id: 'profile-build',
+      role: 'profile',
+      name: 'Career OS · Build career profile',
+      description: 'Mine user-provided career evidence and reviewed Ambientic memory into one truthful structured profile.',
+      enabled: false,
+      nodes: [
+        node('profile-mine', 'agent', 'Build your Career Profile', 'Read only the CV, LinkedIn PDF/profile URL, manual context, and reviewed Ambientic memories the user explicitly selected during setup. Use ambientic_recall only when Ambientic memory was selected. Extract roles, achievements, metrics, skills, projects, leadership, technologies, domains, ambitions, and constraints. Reconcile overlaps, preserve source coverage, distinguish fact from inference, and never fabricate. Then use ambientic_career_update with action profile to persist the structured Career Profile with status needs_review.', 'career.profile.mine', 160, 140, 'auto'),
+        node('profile-review', 'approval', 'Review what Career OS understood', 'Pause so the user can review the structured profile before Career OS treats it as trusted ranking context. The user can correct or add evidence; approval never submits or publishes anything.', 'human.approval', 560, 140)
+      ]
+    },
     {
       id: 'market-scan',
       role: 'scout',

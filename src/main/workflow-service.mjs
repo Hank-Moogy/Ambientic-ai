@@ -131,7 +131,7 @@ export function workflowExecutionPrompt ({ workflow, node, previousOutputs = [],
     `Current step: ${node.label}`,
     `Instruction: ${node.detail || node.label}`,
     `Capability: ${node.action}`,
-    workflow.packId === 'ambientic.career-os' ? 'Use ambientic_jobs_discover for supported public ATS and remote-job feeds, ambientic_career_read for the current private pipeline and daily queue, and ambientic_career_update to persist every normalized opportunity, market-scan total, status change, interview, or explicit pass reason instead of leaving Career OS state only in prose. Prefer canonical ATS results; retain attribution and mark unresolved aggregator links clearly.' : '',
+    workflow.packId === 'ambientic.career-os' ? 'Use ambientic_jobs_discover for supported public ATS and remote-job feeds, ambientic_recall only when the user selected Ambientic memory as profile evidence, ambientic_career_read for the current private profile/pipeline/daily queue, and ambientic_career_update to persist the structured Career Profile, every normalized opportunity, market-scan total, status change, interview, or explicit pass reason instead of leaving Career OS state only in prose. Treat the structured profile as ranking evidence only when its status is reviewed. Prefer canonical ATS results; retain attribution and mark unresolved aggregator links clearly.' : '',
     privateContext ? `Private local setup supplied by the user for this workflow pack:\n${cleanText(privateContext, 16000)}\n\nUse this only to complete the current workflow. Do not include private setup values in portable workflow definitions or public output.` : '',
     actionGuidance,
     context
@@ -217,7 +217,26 @@ export class WorkflowService extends EventEmitter {
     const existing = this.state.packs.find((candidate) => candidate.id === pack.id)
 
     if (existing) {
+      const workflowIds = []
+      for (const input of pack.workflows) {
+        const current = this.state.workflows.find((workflow) => workflow.packId === pack.id && workflow.packRole === input.role)
+        const edges = Array.isArray(input.edges) && input.edges.length
+          ? input.edges
+          : input.nodes.slice(1).map((candidate, index) => ({ id: `edge-${input.nodes[index].id}-${candidate.id}`, from: input.nodes[index].id, to: candidate.id }))
+        const workflow = sanitizeWorkflow(
+          { ...input, id: current?.id, enabled: current?.enabled ?? input.enabled, nodes: configuredScheduleNodes(input, setup), edges, packId: pack.id, packRole: input.role },
+          { id: current?.id || this.id(), createdAt: current?.createdAt || now, now }
+        )
+        const scheduleNode = workflow.nodes.find((candidate) => candidate.kind === 'schedule')
+        workflow.nextRunAt = workflow.enabled ? nextScheduleAt(scheduleNode?.detail, now) : null
+        if (current) this.state.workflows[this.state.workflows.indexOf(current)] = workflow
+        else this.state.workflows.push(workflow)
+        workflowIds.push(workflow.id)
+      }
       existing.version = cleanText(pack.version, 40)
+      existing.name = cleanText(pack.name, 120)
+      existing.description = cleanText(pack.description, 2000)
+      existing.workflowIds = workflowIds
       existing.setup = setup
       existing.privateContext = privateSetupSummary(pack, setup)
       existing.summary = Object.fromEntries((pack.setup.summaryFields || []).map((fieldId) => [fieldId, setup[fieldId]]))

@@ -43,8 +43,11 @@ test('workflow overview has a complete responsive visual system', () => {
 test('Workflow Studio can install Career OS through progressive private setup', () => {
   assert.match(studio, /Install Career OS/)
   assert.match(studio, /Start Career Daily/)
-  assert.match(studio, /private local workflow store/)
+  assert.match(studio, /private on this Mac/)
   assert.match(studio, /CareerPackSetup/)
+  assert.match(studio, /chooseCareerProfileFile/)
+  assert.match(studio, /CareerMemoryImport/)
+  assert.match(studio, /Review profile/)
   assert.match(workflowStyles, /\.career-pack-modal/)
   assert.match(workflowStyles, /\.career-pack-card/)
   assert.match(studio, /CareerOsHome/)
