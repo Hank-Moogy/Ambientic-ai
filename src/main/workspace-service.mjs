@@ -2,12 +2,12 @@ import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, extname, isAbsolute, join } from 'node:path'
+import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
-import { canInspectProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
-import { assembleProviderPrompt } from './context-assembler.mjs'
+import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, isBroadProjectRoot } from './project-scope.mjs'
+import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -16,7 +16,6 @@ const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes
 // rendered transcript on reload.
 const COMPACTION_HEADER = 'You are resuming a conversation that exceeded the model'
 const COMPACTION_BUDGET = 24000
-const AMBIENTIC_CONTEXT = /<(?:ambientic|agentbase)-context\b[^>]*>[\s\S]*?<\/(?:ambientic|agentbase)-context>\s*/i
 const CHAT_MODES = new Set(['build', 'plan', 'ask'])
 // Aliases Claude Code's `--model` accepts, plus the union of effort labels the
 // supported provider surfaces currently expose. Codex's exact per-model subset
@@ -80,10 +79,6 @@ function textContent (value) {
 
 function message (role, text, extra = {}) {
   return { id: extra.id || randomUUID(), role, text: String(text || ''), ...extra }
-}
-
-function stripAmbienticContext (text) {
-  return String(text || '').replace(AMBIENTIC_CONTEXT, '').trim()
 }
 
 // Claude's PermissionRequest hook reports only the tool name and its raw input,
@@ -209,7 +204,13 @@ function normalizePromptOptions (options = {}, provider = '') {
       })
     } catch {}
   }
-  return { mode, attachments, model, effort, projectContext }
+  const knownProjects = []
+  for (const item of Array.isArray(options.knownProjects) ? options.knownProjects.slice(0, 12) : []) {
+    const projectRoot = String(item?.cwd || '')
+    if (!isAbsolute(projectRoot)) continue
+    knownProjects.push({ cwd: projectRoot, name: String(item?.name || basename(projectRoot)).replace(/\s+/g, ' ').trim().slice(0, 100) })
+  }
+  return { mode, attachments, model, effort, projectContext, knownProjects }
 }
 
 function codexInputs (text, attachments) {
@@ -517,9 +518,27 @@ export class WorkspaceService extends EventEmitter {
         cwd,
         name: session.project || basename(cwd) || 'Local project'
       })
-      if (projects.size >= Math.max(1, Math.min(8, limit))) break
+      if (projects.size >= Math.max(1, Math.min(DISCOVERY_ROOT_LIMIT, limit))) break
     }
     return [...projects.values()]
+  }
+
+  // The projects this machine already works in, offered to a task as somewhere
+  // to look rather than something the user had to nominate up front. Returned
+  // as name + root so the same list can be granted and described: telling an
+  // agent about a folder it cannot read is worse than telling it nothing.
+  discoverableProjects (cwd = '') {
+    const registered = (this.contextEngine?.store?.listProjects?.() || [])
+      .map((project) => ({ cwd: project.rootPath, name: project.name }))
+    const named = new Map()
+    for (const item of [...this.recentProjects(DISCOVERY_ROOT_LIMIT), ...registered]) {
+      const root = String(item?.cwd || '').trim()
+      if (!root || !isAbsolute(root)) continue
+      const key = resolve(root)
+      if (!named.has(key)) named.set(key, item.name || basename(key) || 'Local project')
+    }
+    return discoveryToolRoots(cwd, [...named.keys()].map((root) => ({ cwd: root })))
+      .map((root) => ({ cwd: root, name: named.get(root) }))
   }
 
   async list ({ force = false } = {}) {
@@ -994,6 +1013,11 @@ export class WorkspaceService extends EventEmitter {
     if (!promptOptions.projectContext && !hasConversation && !this.activeTurns.has(id) && cwd && canInspectProjectRoot(cwd) && cwd !== this.taskWorkspaceRoot && !cwd.startsWith(`${this.taskWorkspaceRoot}/`)) {
       promptOptions.projectContext = { cwd, name: session.project || basename(cwd) }
     }
+    // Granted on every turn, described once. The grant has to be re-issued each
+    // turn because the provider is re-spawned; the description rides the opening
+    // turn and stays in the conversation from there.
+    const discoverable = contextSuppressed ? [] : this.discoverableProjects(cwd)
+    if (!hasConversation && !promptOptions.knownProjects.length) promptOptions.knownProjects = discoverable
     const pending = message('user', text, {
       pendingProvider: true,
       mode: promptOptions.mode,
@@ -1053,7 +1077,7 @@ export class WorkspaceService extends EventEmitter {
         : `${context.binding.capsuleText}\n\n${assembleProviderPrompt(text, promptOptions)}`
       void rpc.request('session/prompt', { sessionId: id, prompt: [{ type: 'text', text: hermesText }] }, 60 * 60 * 1000).then(() => this.finish(id)).catch((error) => this.fail(id, error))
     } else if (session.agent === 'claude') {
-      this.runClaude(session, assembleProviderPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort, context })
+      this.runClaude(session, assembleProviderPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort, context, additionalRoots: [...new Set([...additionalToolRoots(cwd, promptOptions.attachments), ...discoverable.map((item) => item.cwd)])] })
     } else throw new Error(`Managed prompts are not supported for ${session.agent}.`)
     return this.emitSnapshot(snapshot)
   }
@@ -1112,7 +1136,7 @@ export class WorkspaceService extends EventEmitter {
     throw new Error('Choose Codex, Claude Code, or Hermes.')
   }
 
-  runClaude (session, prompt, { compacted = false, mode = 'build', model = '', effort = '', context = null } = {}) {
+  runClaude (session, prompt, { compacted = false, mode = 'build', model = '', effort = '', context = null, additionalRoots = [] } = {}) {
     const path = this.connector('claude')?.path || 'claude'
     // Resume only once Claude has actually persisted this session's transcript.
     // A brand-new managed task carries a fresh UUID that Claude has never seen,
@@ -1126,12 +1150,16 @@ export class WorkspaceService extends EventEmitter {
     if (!this.contextSuppressedSessions.has(session.id)) context ||= this.ensureContext(session, { prompt })
     if (context?.capsulePath) args.push('--append-system-prompt-file', context.capsulePath)
     if (context?.mcpConfigPath) args.push('--mcp-config', context.mcpConfigPath, '--strict-mcp-config')
+    // Claude confines its file tools to the working directory. Anything the user
+    // attached from outside it is otherwise named in the prompt but unreadable,
+    // and -p mode has no way to ask for access, so the turn just reports failure.
+    for (const root of additionalRoots) args.push('--add-dir', root)
     // Only forward these when the user picked something; omitting them lets
     // Claude Code apply its own configured defaults.
     if (model) args.push('--model', model)
     if (effort) args.push('--effort', effort)
     args.push(started ? '--resume' : '--session-id', claudeId)
-    this.claudeAttempts.set(session.id, { prompt, compacted, mode, model, effort, resultError: '' })
+    this.claudeAttempts.set(session.id, { prompt, compacted, mode, model, effort, additionalRoots, resultError: '' })
     const child = this.spawnProcess(path, args, { cwd: session.cwd || homedir(), env: providerSpawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
@@ -1149,7 +1177,7 @@ export class WorkspaceService extends EventEmitter {
       // First time a resume overflows the context window, compact and retry once
       // so the user keeps going in the same thread instead of hitting a wall.
       if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(errorText) && !attempt.compacted) {
-        return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode, model: attempt.model, effort: attempt.effort })
+        return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode, model: attempt.model, effort: attempt.effort, additionalRoots: attempt.additionalRoots })
       }
       this.claudeAttempts.delete(session.id)
       // A failed turn is the single most common bug report ("chat just fails"),
@@ -1201,7 +1229,7 @@ export class WorkspaceService extends EventEmitter {
 
   // Start a fresh Claude session seeded with the compacted history, remap the UI
   // thread to it, and re-run the user's prompt so the thread continues in place.
-  compactClaudeAndRetry (id, prompt, { mode = 'build', model = '', effort = '' } = {}) {
+  compactClaudeAndRetry (id, prompt, { mode = 'build', model = '', effort = '', additionalRoots = [] } = {}) {
     const session = this.sessionFor(id)
     if (!session) { this.claudeAttempts.delete(id); return this.fail(id, new Error('This conversation is no longer available to compact.')) }
     const summary = this.compactClaudeContext(session)
@@ -1215,7 +1243,7 @@ export class WorkspaceService extends EventEmitter {
       snapshot.messages.push(message('activity', 'This conversation grew past the model context window. Ambientic compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
       this.emitSnapshot({ ...snapshot, running: true })
     }
-    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode, model, effort })
+    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode, model, effort, additionalRoots })
   }
 
   // Turn known Claude -p failures into guidance the user can act on. A resumed

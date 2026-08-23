@@ -560,3 +560,75 @@ test('approval titles stay short enough for the card', () => {
   assert.ok(title.length <= 120, `title was ${title.length} chars`)
   assert.ok(title.endsWith('\u2026'))
 })
+
+test('grants Claude the directories an out-of-project attachment needs', () => {
+  const spawned = []
+  const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [], {
+    spawnProcess: (path, args) => {
+      spawned.push({ path, args })
+      return { stdout: { on () {} }, stderr: { on () {} }, on () {} }
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+
+  service.runClaude({ id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }, 'Compare these.', {
+    additionalRoots: ['/tmp/elsewhere', '/tmp/other']
+  })
+
+  const { args } = spawned[0]
+  const granted = args.reduce((list, value, index) => (
+    args[index - 1] === '--add-dir' ? [...list, value] : list
+  ), [])
+  assert.deepEqual(granted, ['/tmp/elsewhere', '/tmp/other'])
+})
+
+test('a retried turn keeps the directory grants of the turn it is retrying', () => {
+  const spawned = []
+  const service = new WorkspaceService({ list: () => [{ id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }], ingest: () => {} }, () => [], {
+    spawnProcess: (path, args) => {
+      spawned.push(args)
+      return { stdout: { on () {} }, stderr: { on () {} }, on () {} }
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.compactClaudeContext = () => 'summary'
+
+  service.runClaude({ id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }, 'Compare these.', { additionalRoots: ['/tmp/elsewhere'] })
+  const attempt = service.claudeAttempts.get('thread-1')
+  service.compactClaudeAndRetry('thread-1', attempt.prompt, { ...attempt, additionalRoots: attempt.additionalRoots })
+
+  assert.equal(spawned[1].includes('--add-dir'), true)
+  assert.equal(spawned[1][spawned[1].indexOf('--add-dir') + 1], '/tmp/elsewhere')
+})
+
+test('a task launched without a project can still discover and reach the others', async () => {
+  const spawned = []
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/scratch', project: 'scratch' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: (path, args) => {
+      spawned.push(args)
+      return { stdout: { on () {} }, stderr: { on () {} }, on () {} }
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.read = async () => ({ id: 'thread-1', messages: [], artifacts: [], approvals: [] })
+  service.recentProjects = () => [
+    { cwd: '/Users/person/projects/ambientic', name: 'Ambientic' },
+    { cwd: '/Users/person/projects/memoli', name: 'Memoli' }
+  ]
+  service.emitSnapshot = (snapshot) => snapshot
+  service.ingestLifecycle = () => {}
+
+  await service.send('thread-1', 'Fix the router in memoli.')
+
+  const args = spawned[0]
+  const granted = args.reduce((list, value, index) => (args[index - 1] === '--add-dir' ? [...list, value] : list), [])
+  assert.deepEqual(granted, ['/Users/person/projects/ambientic', '/Users/person/projects/memoli'])
+  // A grant the agent is never told about is a grant it will not use.
+  const prompt = args[args.indexOf('-p') + 1]
+  assert.match(prompt, /already open to you/)
+  assert.match(prompt, /Memoli: \/Users\/person\/projects\/memoli/)
+})

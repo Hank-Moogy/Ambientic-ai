@@ -75,12 +75,13 @@ TERMINALS = {
 # to the local controller for its short task label.
 META_BLOCK = re.compile(
     r"<(system-reminder|task-notification|local-command-caveat|"
-    r"local-command-stdout|command-message|command-args)(?=[\s/>])[^>]*>.*?</\1>",
+    r"local-command-stdout|command-message|command-args|"
+    r"ambientic-context|agentbase-context)(?=[\s/>])[^>]*>.*?</\1>",
     re.DOTALL,
 )
 META_OPEN = re.compile(
     r"<(system-reminder|task-notification|local-command-caveat|"
-    r"local-command-stdout)(?=[\s/>])[^>]*>.*",
+    r"local-command-stdout|ambientic-context|agentbase-context)(?=[\s/>])[^>]*>.*",
     re.DOTALL,
 )
 CMD_NAME = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.DOTALL)

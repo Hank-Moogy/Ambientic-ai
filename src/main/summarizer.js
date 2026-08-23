@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { stripAmbienticContext } from './context-assembler.mjs'
 
 const WORKLOAD = 'thread-label'
 // An explicit override still wins, so a developer can pin one model without
@@ -6,7 +7,11 @@ const WORKLOAD = 'thread-label'
 const MODEL_OVERRIDE = process.env.AMBIENTIC_SUMMARY_MODEL || process.env.AGENTBASE_SUMMARY_MODEL || process.env.CLAUDE_CONTROLLER_SUMMARY_MODEL || ''
 
 function sourceText (value) {
-  return String(value || '')
+  // Managed tasks reach here as the assembled provider prompt, which opens with
+  // Ambientic's own context block. Strip that whole element first: dropping only
+  // its tags would leave the preamble behind, and every task launched into the
+  // same project would then be labelled from identical boilerplate.
+  return stripAmbienticContext(value)
     .replace(/<[^>]+>/g, ' ')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/https?:\/\/\S+/g, ' ')

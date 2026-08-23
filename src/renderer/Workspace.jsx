@@ -469,14 +469,14 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
           {(selectedModel?.description || effortOptions.find((item) => item.id === effort)?.description) && <small className="new-task-tuning-note">{[selectedModel?.description, effortOptions.find((item) => item.id === effort)?.description].filter(Boolean).join(' · ')}</small>}
         </section>
         <section className="new-task-work-area">
-          <div><span>Ambientic project</span><b>{selectedProject ? selectedProjectName : 'Scratch workspace'}</b><small>{cwd || (selectedProject ? 'Folderless project · the agent will run in a private Ambientic workspace.' : 'No durable project memory · the agent will run in a private Ambientic workspace.')}</small></div>
+          <div><span>Ambientic project</span><b>{selectedProject ? selectedProjectName : 'Scratch workspace'}</b><small>{cwd || (selectedProject ? 'Folderless project · the agent runs in a private Ambientic workspace and can still open your other projects.' : 'No durable project memory · the agent runs in a private Ambientic workspace and can open your other projects to find the work itself.')}</small></div>
           <button type="button" onClick={chooseFolder}>{selectedProject ? 'Change folder' : 'Add project'}</button>
         </section>
         {projects.length > 0 && <div className="new-task-recents"><span>Projects</span>{projects.slice(0, 8).map((project) => <button type="button" key={project.id} data-selected={selectedProjectId === project.id} title={project.rootPath || 'Folderless project'} onClick={() => chooseProject(project.id)}>{project.name}</button>)}</div>}
         {selectedProjectId && <button className="new-task-private" type="button" onClick={() => chooseProject('')}>Start without a linked project</button>}
         {launchAccess?.warning && <div className="new-task-access-note" data-risk={launchAccess.broad ? 'blocked' : 'notice'}><b>{launchAccess.broad ? 'Choose a narrower folder' : 'macOS access notice'}</b><span>{launchAccess.warning}</span></div>}
         <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} projectId={selectedProjectId} goalsSnapshot={goalsSnapshot} onProjectChange={chooseProject} onChange={setContextBinding} onCreateGoal={onCreateGoal} onCreateTask={onCreateTask} />
-        <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={cwd ? `What should the agent do in ${selectedProjectName}? (optional)` : 'What should this agent create? (optional)'} autoFocus /></label>
+        <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={cwd ? `What should the agent do in ${selectedProjectName}? (optional)` : 'What should the agent do? Name a project and it will find it. (optional)'} autoFocus /></label>
         {error && <div className="new-task__error" role="alert"><span>!</span><p>{error}</p></div>}
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !providerReady} type="submit">{busy ? 'Starting…' : providerReady ? 'Start task' : 'Connect a provider first'}</button></footer>
       </form>
