@@ -623,16 +623,13 @@ export class WorkspaceService extends EventEmitter {
     if (this.hasPendingApproval(id)) return 'attention'
     if (snapshot?.awaitingReply) return 'attention'
     if (session?.state === 'attention' || session?.state === 'waiting') return session.state
-    // Codex Desktop and hook-backed terminals own their provider process in a
-    // different runtime from Ambientic's passive transcript reader. A
-    // thread/read response from Ambientic's app-server can therefore be idle
-    // while the real Codex Desktop turn is working. Treat both live signals as
-    // a union: either one may promote to running, but a passive read may not
-    // demote an authoritative provider lifecycle.
+    // A provider-native turn/read result is authoritative. Discovery and hooks
+    // are still used when no provider turn status is available, but process
+    // liveness must never overrule an explicit idle result: providers commonly
+    // keep their process alive between turns.
     const hasAuthoritativeExternalLifecycle = Boolean(session?.tty) || session?.externalSource === 'codex-desktop'
-    if (hasAuthoritativeExternalLifecycle && (this.isRunning(id, snapshot) || session?.state === 'running')) return 'running'
-    if (hasAuthoritativeExternalLifecycle && snapshot?.turnStateKnown) return session?.history ? 'history' : (session?.state || 'idle')
     if (snapshot?.turnStateKnown) return this.isRunning(id, snapshot) ? 'running' : (session?.history ? 'history' : 'idle')
+    if (hasAuthoritativeExternalLifecycle && (this.isRunning(id, snapshot) || session?.state === 'running')) return 'running'
     if (this.isRunning(id, snapshot) || session?.state === 'running') return 'running'
     if (snapshot) return session?.history ? 'history' : 'idle'
     return session?.history ? 'history' : (session?.state || 'idle')
@@ -689,7 +686,7 @@ export class WorkspaceService extends EventEmitter {
         // Codex ended its last turn by asking the user a question, which
         // still needs a reply to move forward.
         if (snapshot.running) this.ingestLifecycle(id, 'tool')
-        else if (!session.history && !session.tty && session.externalSource !== 'codex-desktop') {
+        else if (!session.history && !session.tty) {
           this.ingestLifecycle(id, snapshot.awaitingReply ? 'notification' : 'stop_idle')
         }
       } else if (session.agent === 'claude') {

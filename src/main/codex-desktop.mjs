@@ -7,6 +7,10 @@ const MAX_DESKTOP_THREADS = 8
 const ACTIVE_LOOKBACK_DAYS = 7
 const ROLLOUT_TAIL_BYTES = 256 * 1024
 const RECENT_COMPLETION_MS = 15 * 60 * 1000
+// Interrupted or superseded Codex turns do not always append task_complete.
+// Treat an unmatched task_started as live only while the rollout/index is
+// still moving; otherwise that historical event would stay green forever.
+const ACTIVE_TURN_ACTIVITY_MS = 60 * 1000
 
 function run (file, args, timeout = 4000) {
   return new Promise((resolve, reject) => {
@@ -39,6 +43,7 @@ export function codexDesktopState (rolloutText, now = Date.now(), activityMs = 0
   let startedAt = 0
   let completedAt = 0
   let approvalAt = 0
+  let rolloutActivityAt = 0
 
   for (const line of String(rolloutText || '').split('\n')) {
     if (!line.trim()) continue
@@ -46,6 +51,7 @@ export function codexDesktopState (rolloutText, now = Date.now(), activityMs = 0
       const event = JSON.parse(line)
       const type = event?.payload?.type
       const timestamp = Date.parse(event?.timestamp || '') || 0
+      rolloutActivityAt = Math.max(rolloutActivityAt, timestamp)
       if (type === 'task_started') startedAt = Math.max(startedAt, timestamp)
       if (type === 'task_complete') completedAt = Math.max(completedAt, timestamp)
       if (/approval_request|request_approval/i.test(String(type || ''))) approvalAt = Math.max(approvalAt, timestamp)
@@ -53,13 +59,16 @@ export function codexDesktopState (rolloutText, now = Date.now(), activityMs = 0
   }
 
   if (approvalAt > completedAt && approvalAt >= startedAt) return 'attention'
+  const activeActivityAt = Math.max(rolloutActivityAt, Number(activityMs) || 0)
+  if (startedAt > completedAt) {
+    return activeActivityAt && now - activeActivityAt <= ACTIVE_TURN_ACTIVITY_MS ? 'running' : 'idle'
+  }
+  if (completedAt && now - completedAt <= RECENT_COMPLETION_MS) return 'waiting'
   // A long active turn can push its task_started event beyond the bounded tail
   // read. The Codex index is updated continuously, so newer recent activity is
   // a safe fallback that still avoids reading multi-megabyte rollouts every 5s.
   const lastLifecycleAt = Math.max(startedAt, completedAt)
-  if (activityMs > lastLifecycleAt + 2000 && now - activityMs < 60 * 1000) return 'running'
-  if (startedAt > completedAt) return 'running'
-  if (completedAt && now - completedAt <= RECENT_COMPLETION_MS) return 'waiting'
+  if (activityMs > lastLifecycleAt + 2000 && now - activityMs < ACTIVE_TURN_ACTIVITY_MS) return 'running'
   return 'idle'
 }
 
