@@ -323,6 +323,10 @@ export class SessionStore extends EventEmitter {
     this.emit('change', this.list())
   }
 
+  taskName (id) {
+    return this.map.get(id)?.task || ''
+  }
+
   taskFingerprint (id) {
     return this.map.get(id)?.taskFingerprint || ''
   }

@@ -175,6 +175,21 @@ export function reconcileProviderMessage (messages, incoming) {
   return list
 }
 
+// A Claude result event can report failure with an empty `result`. These are
+// the fields that still say why, in the order they are worth reading.
+function claudeErrorDetail (event = {}) {
+  const parts = [
+    event.api_error_status ? `API status ${event.api_error_status}` : '',
+    event.subtype && event.subtype !== 'success' ? `subtype ${event.subtype}` : '',
+    event.terminal_reason && event.terminal_reason !== 'completed' ? `terminal reason ${event.terminal_reason}` : '',
+    event.stop_reason ? `stop reason ${event.stop_reason}` : '',
+    Array.isArray(event.permission_denials) && event.permission_denials.length
+      ? `denied ${event.permission_denials.map((item) => item?.tool_name || 'tool').join(', ')}`
+      : ''
+  ].filter(Boolean)
+  return parts.length ? `Claude returned an error (${parts.join('; ')})` : 'Claude returned an error with no detail'
+}
+
 function normalizePromptOptions (options = {}, provider = '') {
   const mode = CHAT_MODES.has(options.mode) ? options.mode : 'build'
   // Model and effort come from the renderer's composer. Validate against the
@@ -1203,7 +1218,10 @@ export class WorkspaceService extends EventEmitter {
       // Record the failure; the process 'exit' handler decides whether to
       // compact-and-retry (context overflow) or surface the error.
       const attempt = this.claudeAttempts.get(id)
-      if (attempt) attempt.resultError = event.result || 'Claude returned an error'
+      // `result` is empty on whole classes of failure — API errors, refusals,
+      // limits — and "Claude returned an error" then hides the only fields that
+      // say what happened, leaving a bug report with nothing in it.
+      if (attempt) attempt.resultError = event.result || claudeErrorDetail(event)
       else this.fail(id, new Error(this.claudeResultError(id, event.result)))
     }
   }

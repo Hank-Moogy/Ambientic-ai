@@ -632,3 +632,30 @@ test('a task launched without a project can still discover and reach the others'
   assert.match(prompt, /already open to you/)
   assert.match(prompt, /Memoli: \/Users\/person\/projects\/memoli/)
 })
+
+test('a failed turn reports why, even when Claude sends an empty result', () => {
+  const failures = []
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => ({ stdout: { on () {} }, stderr: { on () {} }, on () {} })
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.fail = (id, error) => failures.push(error.message)
+  service.snapshots.set('thread-1', { id: 'thread-1', messages: [] })
+
+  service.runClaude(session, 'Do it.', {})
+  service.claudeEvent('thread-1', JSON.stringify({
+    type: 'result',
+    is_error: true,
+    result: '',
+    api_error_status: 429,
+    subtype: 'error_during_execution',
+    permission_denials: [{ tool_name: 'Read' }]
+  }))
+
+  const detail = service.claudeAttempts.get('thread-1').resultError
+  assert.match(detail, /API status 429/)
+  assert.match(detail, /subtype error_during_execution/)
+  assert.match(detail, /denied Read/)
+})

@@ -34,6 +34,26 @@ function tidyLabel (value, fallback) {
   return label || fallback
 }
 
+// "go", "ok", "continue", "yes do it" carry no signal about what the thread is
+// for. Naming a thread from one of those is how a workspace fills up with
+// unreadable labels, so hold the existing name and wait for a prompt that says
+// something. A thread with no name yet still takes one, since an unnamed thread
+// is worse than a vague one.
+// Anchored at both ends on purpose: the whole message has to be filler. A
+// prefix match would swallow "Please fix the terminal focus bug", which is
+// exactly the kind of prompt a thread should be named after.
+const LOW_SIGNAL = /^(?:go|ok(?:ay)?|yes|no|nope|sure|thanks?|thank you|hi|hey|next|continue|carry on|keep going|do it|try again|again|status|please|proceed|run it|fix it|and|\?+)[\s!.?]*$/i
+
+export function namesThread (text, existingName = '') {
+  // Named once, and it holds from there. Only an explicit user rename replaces
+  // it — that path does not come through here.
+  if (String(existingName || '').trim()) return false
+  const value = String(text || '').trim()
+  if (!value) return false
+  const words = value.split(/\s+/).filter(Boolean)
+  return words.length >= 2 && !LOW_SIGNAL.test(value)
+}
+
 function localLabel (text) {
   const simplified = sourceText(text)
     .replace(/^(please\s+|can you\s+|could you\s+|would you\s+|i want (?:you )?to\s+|we need to\s+|let(?:'s| us)\s+)/i, '')
@@ -70,6 +90,10 @@ export function createTaskSummarizer (store, { inference = null } = {}) {
   function enqueue (sessionId, rawText) {
     const text = sourceText(rawText)
     if (!sessionId || !text) return
+    // A thread is named once, from the prompt that establishes what it is for.
+    // Re-labelling on every message is what made names look random: one thread
+    // became "Pick up the task", then "Go", then "What do you mean".
+    if (!namesThread(text, store.taskName?.(sessionId) || '')) return
 
     const fingerprint = createHash('sha1').update(text).digest('hex')
     if (store.taskFingerprint(sessionId) === fingerprint) return
