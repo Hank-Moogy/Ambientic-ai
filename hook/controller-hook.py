@@ -194,10 +194,68 @@ def request_permission(body):
         return None
 
 
+def _permission_post(path, payload, timeout):
+    try:
+        request = urllib.request.Request(
+            URL.replace("/event", path),
+            data=payload.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read(256 * 1024).decode("utf-8"))
+    except Exception:
+        return None
+
+
+def request_tool_permission(hook):
+    """Ask Ambientic whether a tool may run.
+
+    Ambientic answers immediately with nothing for any session it does not
+    manage, so a terminal session never waits on this app. Only a managed
+    Ambientic thread can hold the connection open, and it does so because a
+    person is being asked a question.
+    """
+    payload = json.dumps({
+        "session_id": (hook.get("session_id") or "")[:120],
+        "cwd": hook.get("cwd") or os.getcwd(),
+        "tool_name": str(hook.get("tool_name") or "")[:200],
+        "tool_input": hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {},
+    })
+    verdict = _permission_post("/permission/claude", payload, 10)
+    if not isinstance(verdict, dict):
+        return None
+    decision = verdict.get("decision")
+    # Only a request that needs a person waits, and only after Ambientic has
+    # said so. The first call stays short so a stalled app cannot hold up a
+    # session it does not even manage.
+    if decision == "ask":
+        verdict = _permission_post("/permission/claude/wait", json.dumps({"id": verdict.get("id", "")}), 590) or {}
+        decision = verdict.get("decision")
+    if decision not in ("allow", "deny"):
+        return None
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+            "permissionDecisionReason": str(verdict.get("reason") or "Decided in Ambientic")[:500],
+        }
+    }
+
+
 def main(agent):
     try:
         hook = json.load(sys.stdin)
     except Exception:
+        return
+
+    # A tool is about to run and Ambientic may need to ask the user about it.
+    # This is the only path that can answer PreToolUse, so it runs before the
+    # lifecycle mapping below discards the event.
+    if agent == "claude" and hook.get("hook_event_name") == "PreToolUse" and hook.get("tool_name") not in CLAUDE_INPUT_TOOLS:
+        verdict = request_tool_permission(hook)
+        if verdict:
+            print(json.dumps(verdict))
         return
 
     event = event_for_hook(hook)

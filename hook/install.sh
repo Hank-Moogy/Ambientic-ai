@@ -66,7 +66,10 @@ EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification",
           "Stop", "SessionEnd"]
 CLAUDE_ATTENTION_HOOKS = [
     ("PermissionRequest", None),
-    ("PreToolUse", "AskUserQuestion|ExitPlanMode"),
+    # Every tool, not just the two that block for input: Ambientic answers
+    # PreToolUse to broker file and shell access for managed threads. Sessions
+    # it does not manage get an immediate empty answer and are unaffected.
+    ("PreToolUse", None),
 ]
 
 
@@ -129,19 +132,34 @@ def add_claude_attention_hooks(path, cmd):
         settings = json.load(f)
     hooks = settings.setdefault("hooks", {})
     changed = 0
+    # These wait on a person, so they need far longer than the default hook
+    # timeout and a line explaining why the agent has stopped.
+    waits_for_user = {"PermissionRequest", "PreToolUse"}
     for event, matcher in CLAUDE_ATTENTION_HOOKS:
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             continue
+        # Earlier versions registered PreToolUse only for the two tools that
+        # block for input. Widen that group in place rather than adding a second
+        # one, which would run the hook twice for those tools.
+        if matcher is None:
+            for group in groups:
+                if not isinstance(group, dict) or "matcher" not in group:
+                    continue
+                if any(isinstance(item, dict) and hook in str(item.get("command", ""))
+                       for item in (group.get("hooks") if isinstance(group.get("hooks"), list) else [])):
+                    del group["matcher"]
+                    changed += 1
+        # Match the intended matcher exactly: a group scoped to some tools is
+        # not the same registration as one that covers all of them.
         existing = next((
             item
-            for group in groups if isinstance(group, dict) and
-            (matcher is None or group.get("matcher") == matcher)
+            for group in groups if isinstance(group, dict) and group.get("matcher") == matcher
             for item in (group.get("hooks") if isinstance(group.get("hooks"), list) else [])
             if isinstance(item, dict) and hook in str(item.get("command", ""))
         ), None)
         if existing:
-            if event == "PermissionRequest":
+            if event in waits_for_user:
                 if existing.get("timeout") != 600:
                     existing["timeout"] = 600
                     changed += 1
@@ -150,7 +168,7 @@ def add_claude_attention_hooks(path, cmd):
                     changed += 1
             continue
         hook_spec = {"type": "command", "command": cmd}
-        if event == "PermissionRequest":
+        if event in waits_for_user:
             hook_spec["timeout"] = 600
             hook_spec["statusMessage"] = "Waiting for approval in Ambientic…"
         group = {"hooks": [hook_spec]}
