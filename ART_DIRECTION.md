@@ -18,7 +18,7 @@ The experience should suggest:
 
 1. **Calm by default.** Persistent motion is slow, low-contrast, and safe to ignore.
 2. **Responsive under the hand.** Direct actions answer immediately, then settle with soft easing.
-3. **Meaning survives the mood.** Green running, red needs-input, and blue idle remain unambiguous. Expressive sequences are temporary and always restore operational state.
+3. **Meaning survives the mood.** Green running, orange waiting on you, red needs-input, and blue idle remain unambiguous. Expressive sequences are temporary and always restore operational state.
 4. **Depth without fog.** Translucency, bloom, and gradients create atmosphere, but text and controls retain strong contrast.
 5. **Rhythm over spectacle.** Animation should have phrasing, rests, and variation. Avoid uniform loading-spinner motion.
 6. **One instrument.** MIDI light, on-screen motion, preview transitions, and future sound should share timing and color language.
@@ -47,6 +47,7 @@ Ambientic’s primary mark is the supplied orbital-circle artwork: nested paths 
 - Hardware expressions: layered waves at different speeds, sparse deterministic glitches, cool color fields, and a clean return to task-state lighting.
 - Prefer spatial waves, opacity drift, blur, and subtle parallax.
 - Respect reduced-motion preferences and never obscure an approval or urgent task state for long.
+- **Orange is a question addressed to the person.** A thread holding a pending approval lights its pad orange on every connected grid, overriding the lifecycle colour underneath, because that thread cannot move until it is answered and nothing else about it matters yet. The pad is held solid rather than blinking: an agent waiting for consent is patient, not alarmed, and blinking is already spoken for by unseen attention. The colour matches the quiet amber that carries consent in the interface, so permission reads the same on screen and under the hand. It clears the moment the approval is answered, cancelled, or times out.
 
 ## First expression: Vibe
 
@@ -125,6 +126,10 @@ Memory should feel like a local field the user can inspect and prune, never like
 - Forget, supersede, and destructive capability actions remain visually restrained but use plain language and confirmation; atmosphere never softens the permission boundary.
 - The session capsule is treated as a sealed object: its hash, age, and token size are quiet evidence of continuity, while recall activity appears as a small adjacent trail.
 - Compact layouts move the project/activity rail below the memory cards instead of squeezing the reading column. Reduced motion changes nothing essential because the workspace communicates through depth and hierarchy, not animation.
+
+## Inference: a quiet utility account
+
+Hosted inference belongs in Settings as an Ambientic utility, visually and conceptually separate from the agent accounts that own threads. Provider cards should make connection, endpoint, selected model, and key provenance legible without turning model catalogs into a primary workspace. Routing stays workload-first and explicit: automatic selection, a named connected provider, and local-only handling are peer choices. Provider color communicates identity; green is reserved for verified connection truth. Credential boundaries and local fallback remain visible in plain language, with no animated urgency or suggestion that an inference account gains project, thread, or tool access.
 
 ## Hardware: the programmable instrument field
 

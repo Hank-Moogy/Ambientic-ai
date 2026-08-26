@@ -127,6 +127,7 @@ export class SessionStore extends EventEmitter {
         taskFingerprint: '',
         taskSource: '',
         unseen: false,
+        awaitingApproval: false,
         discovered: false
       }
       this.map.set(id, s)
@@ -341,6 +342,24 @@ export class SessionStore extends EventEmitter {
     if (!s || !next || s.contextText === next) return
     s.contextText = next
     this.emit('change', this.list())
+  }
+
+  // An approval is a question addressed to the person, not a state the agent
+  // moved through, so it rides alongside the lifecycle state rather than
+  // replacing it: the pad still knows whether the thread was running or idle
+  // underneath.
+  setApprovalPending (id, pending) {
+    const s = this.map.get(id)
+    if (!s) return false
+    const next = Boolean(pending)
+    if (s.awaitingApproval === next) return false
+    s.awaitingApproval = next
+    this.emit('change', this.list())
+    return true
+  }
+
+  taskName (id) {
+    return this.map.get(id)?.task || ''
   }
 
   taskFingerprint (id) {
