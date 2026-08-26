@@ -659,3 +659,56 @@ test('a failed turn reports why, even when Claude sends an empty result', () => 
   assert.match(detail, /subtype error_during_execution/)
   assert.match(detail, /denied Read/)
 })
+
+function brokerService (session, projects = []) {
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.recentProjects = () => projects
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: session.id, messages: [] })
+  return service
+}
+
+test('a terminal session is never brokered, so it can never wait on Ambientic', async () => {
+  const terminal = { id: 'sess-1', agent: 'claude', cwd: '/Users/person/projects/app', tty: 'ttys004' }
+  const service = brokerService(terminal)
+  assert.equal(await service.requestToolPermission({ sessionId: 'sess-1', tool: 'Read', input: { file_path: '/etc/hosts' } }), null)
+
+  const history = { id: 'sess-2', agent: 'claude', cwd: '/Users/person/projects/app', history: true }
+  assert.equal(await brokerService(history).requestToolPermission({ sessionId: 'sess-2', tool: 'Read', input: { file_path: '/etc/hosts' } }), null)
+})
+
+test('a managed thread is answered at once for anything already in scope', async () => {
+  const managed = { id: 'sess-3', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = brokerService(managed)
+  const verdict = await service.requestToolPermission({
+    sessionId: 'sess-3', tool: 'Read', input: { file_path: '/Users/person/projects/app/src/index.js' }
+  })
+  assert.equal(verdict.decision, 'allow')
+  assert.equal(service.pendingApprovals.size, 0)
+})
+
+test('an out-of-scope tool asks, waits for the answer, and remembers the folder', async () => {
+  const managed = { id: 'sess-4', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = brokerService(managed)
+  const asked = await service.requestToolPermission({
+    sessionId: 'sess-4', tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' }
+  })
+  assert.equal(asked.decision, 'ask')
+  assert.equal(service.pendingApprovals.size, 1)
+
+  const waiting = service.awaitToolPermission(asked.id)
+  await service.resolveApproval(asked.id, true, true)
+  assert.equal((await waiting).decision, 'allow')
+
+  // Remembering grants the folder, so the next file beside it does not re-ask.
+  assert.deepEqual(service.rememberedRoots('sess-4'), ['/Users/person/notes'])
+  const second = await service.requestToolPermission({
+    sessionId: 'sess-4', tool: 'Read', input: { file_path: '/Users/person/notes/other.md' }
+  })
+  assert.equal(second.decision, 'allow')
+})
+
+test('an approval nobody is holding open resolves instead of hanging the caller', async () => {
+  const service = brokerService({ id: 'sess-5', agent: 'claude', cwd: '/tmp/x' })
+  assert.equal(await service.awaitToolPermission('tool:does-not-exist'), null)
+})

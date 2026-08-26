@@ -1581,6 +1581,14 @@ app.whenReady().then(() => {
     port: explicitStateDirectory ? 0 : undefined,
     focusById: queueFocus,
     onApprovalRequest: (event, sessionId) => workspace.requestExternalApproval('claude', event, sessionId),
+    onToolPermission: (event) => workspace.requestToolPermission({
+      provider: 'claude',
+      sessionId: String(event?.session_id || ''),
+      cwd: String(event?.cwd || ''),
+      tool: String(event?.tool_name || ''),
+      input: event?.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {}
+    }),
+    onToolPermissionWait: (event) => workspace.awaitToolPermission(String(event?.id || '')),
     onTaskText: (id, text) => {
       store.updateContext(id, text)
       summarizer.enqueue(id, text)

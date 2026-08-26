@@ -2,12 +2,13 @@ import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, extname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
 import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
+import { decideToolPermission } from './permission-policy.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -188,6 +189,12 @@ function claudeErrorDetail (event = {}) {
       : ''
   ].filter(Boolean)
   return parts.length ? `Claude returned an error (${parts.join('; ')})` : 'Claude returned an error with no detail'
+}
+
+// A path that no longer exists is treated as a file, so a remembered grant
+// covers its folder rather than the missing path itself.
+function statSyncKind (path) {
+  try { return statSync(path).isDirectory() ? 'folder' : 'file' } catch { return 'file' }
 }
 
 function normalizePromptOptions (options = {}, provider = '') {
@@ -438,6 +445,10 @@ export class WorkspaceService extends EventEmitter {
     this.contextArtifactRoot = contextArtifactRoot
     this.spawnProcess = spawnProcess
     this.gatewayRuntime = new Map()
+    // sessionId -> Set of roots the user approved for that thread, this run only.
+    this.threadGrants = new Map()
+    // approvalId -> promise of the user's answer, awaited by the provider bridge.
+    this.pendingToolDecisions = new Map()
     // Memory-export sessions are deliberately isolated from Ambientic's own
     // context so an import can never echo the local capsule back into itself.
     this.contextSuppressedSessions = new Set()
@@ -971,9 +982,101 @@ export class WorkspaceService extends EventEmitter {
     return cancelled
   }
 
+  // A thread only remembers roots the user explicitly approved for it, and only
+  // for as long as the app is running. Nothing here is written to disk: a
+  // standing grant is a decision the user should make deliberately, not one
+  // that accumulates from clicking through prompts.
+  rememberedRoots (sessionId) {
+    return [...(this.threadGrants.get(sessionId) || [])]
+  }
+
+  isManagedThread (session) {
+    return Boolean(session) && !session.tty && !session.history
+  }
+
+  // One entry point for every provider's "may I?" question. Returns null when
+  // Ambientic has no opinion, which is what keeps a terminal session running its
+  // own native permission flow instead of waiting on this app.
+  async requestToolPermission ({ provider = 'claude', sessionId: providerSessionId = '', cwd = '', tool = '', input = {} } = {}) {
+    const sessionId = this.uiSessionId(provider, providerSessionId)
+    const session = this.sessionFor(sessionId)
+    if (!this.isManagedThread(session)) return null
+    const verdict = decideToolPermission({
+      tool,
+      input,
+      cwd: cwd || session.cwd || '',
+      projectRoots: this.discoverableProjects(cwd || session.cwd || '').map((item) => item.cwd),
+      remembered: this.rememberedRoots(sessionId)
+    })
+    if (verdict.decision !== 'ask') return { decision: verdict.decision, reason: verdict.reason }
+
+    const id = `tool:${randomUUID()}`
+    const approval = {
+      id,
+      provider,
+      sessionId,
+      kind: 'tool-permission',
+      method: 'ToolPermission',
+      title: describeApprovalRequest(tool, input),
+      tool: String(tool || ''),
+      detail: verdict.reason,
+      scope: verdict.scope,
+      options: [],
+      canRemember: Boolean(verdict.scope)
+    }
+    // Answered in two steps on purpose. This call returns at once, so a caller
+    // can discover cheaply whether Ambientic even wants a say; only a request
+    // that genuinely needs a person waits, and it waits in `awaitToolPermission`.
+    // One long-blocking call would mean a stalled Ambientic could hold up every
+    // Claude session on the machine, managed or not.
+    const decided = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.pendingApprovals.has(id)) return
+        this.pendingApprovals.delete(id)
+        this.pendingToolDecisions.delete(id)
+        const current = this.snapshots.get(sessionId)
+        if (current) this.emitSnapshot({ ...current })
+        resolve({ decision: 'deny', reason: 'Ambientic timed out waiting for your approval.' })
+      }, 9 * 60 * 1000)
+      timer.unref?.()
+      this.pendingApprovals.set(id, { ...approval, resolve, timer })
+    })
+    this.pendingToolDecisions.set(id, decided)
+    const snapshot = this.snapshots.get(sessionId) || this.baseSnapshot(session)
+    this.emitSnapshot({ ...snapshot })
+    return { decision: 'ask', id, reason: verdict.reason }
+  }
+
+  // Resolves once the user answers the approval this id refers to. An id nobody
+  // is holding open resolves immediately rather than hanging the caller.
+  awaitToolPermission (id) {
+    return this.pendingToolDecisions.get(id) || Promise.resolve(null)
+  }
+
   async resolveApproval (approvalId, allow, remember = false) {
     const approval = this.pendingApprovals.get(approvalId)
     if (!approval) return false
+    if (approval.kind === 'tool-permission') {
+      if (approval.timer) clearTimeout(approval.timer)
+      // Remembering grants the containing folder, not the single file: the next
+      // file in that folder is the same decision, and asking again for it is
+      // what makes people stop reading these prompts.
+      if (allow && remember && approval.scope) {
+        const root = statSyncKind(approval.scope) === 'folder' ? approval.scope : dirname(approval.scope)
+        const grants = this.threadGrants.get(approval.sessionId) || new Set()
+        grants.add(root)
+        this.threadGrants.set(approval.sessionId, grants)
+      }
+      approval.resolve({
+        decision: allow ? 'allow' : 'deny',
+        reason: allow ? 'You approved this in Ambientic.' : 'You declined this in Ambientic.'
+      })
+      this.pendingApprovals.delete(approvalId)
+      this.pendingToolDecisions.delete(approvalId)
+      const snapshot = this.snapshots.get(approval.sessionId)
+      if (snapshot) this.emitSnapshot({ ...snapshot })
+      return true
+    }
     if (approval.provider === 'ambientic') {
       if (approval.timer) clearTimeout(approval.timer)
       approval.resolve({ allowed: Boolean(allow), remember: Boolean(allow && remember && !approval.destructive), outcome: allow ? 'approved' : 'rejected' })
