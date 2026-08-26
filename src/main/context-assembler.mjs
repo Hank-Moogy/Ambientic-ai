@@ -11,7 +11,7 @@ export function assembleProviderPrompt (text, { mode = 'build', attachments = []
   // granted, so the agent should open them rather than report that a request
   // falls outside its folder — which is what it does when it is told nothing.
   const discovery = knownProjects.length
-    ? `Other local projects on this machine, already open to you — read them directly, do not ask for access:\n${knownProjects.map((item) => `- ${item.name}: ${item.cwd}`).join('\n')}\nIf the request is about one of these, work there. Only report a path as unavailable after actually trying to read it.`
+    ? `Other local projects on this machine you can open — read them directly, do not ask first:\n${knownProjects.map((item) => `- ${item.name}: ${item.cwd}`).join('\n')}\nIf the request is about one of these, work there. Changing files, and reaching anywhere not listed here, prompts the user for permission and then proceeds — so attempt the work rather than declining it. Only report a path as unavailable after actually trying to read it.`
     : ''
   if (!guidance && !attachments.length && !project && !discovery) return text
   const paths = attachments.length

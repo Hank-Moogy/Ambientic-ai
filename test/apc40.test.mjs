@@ -76,3 +76,14 @@ test('limits a controller page to the 40 physical pads', () => {
   assert.equal(gridSessions(sessions).length, 40)
   assert.equal(gridSessions(sessions).at(-1).id, 39)
 })
+
+test('a thread waiting on the user lights orange, whatever it was doing underneath', () => {
+  for (const state of ['running', 'idle', 'waiting', 'attention']) {
+    const led = ledForSession({ state, awaitingApproval: true })
+    assert.equal(led.color, APC40.COLOR.ORANGE)
+    // Held, not blinking: a question waiting patiently is not an alarm.
+    assert.equal(led.channel, APC40.ANIMATION.SOLID)
+  }
+  // Unseen attention still blinks red once the approval is answered.
+  assert.equal(ledForSession({ state: 'attention', unseen: true }).color, APC40.COLOR.RED)
+})

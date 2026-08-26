@@ -8,6 +8,7 @@ export const APC40 = {
   COLOR: {
     OFF: 0,
     RED: 5,
+    ORANGE: 9,
     DIM_RED: 7,
     YELLOW: 13,
     GREEN: 21,
@@ -63,6 +64,14 @@ export function noteForPad (pad) {
 
 export function ledForSession (session) {
   if (!session) return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.OFF }
+
+  // An approval outranks the lifecycle colour beneath it: the thread cannot
+  // move until the person answers, so that is the only thing the pad needs to
+  // say. Held solid rather than blinking — this is a question waiting patiently,
+  // not an alarm.
+  if (session.awaitingApproval) {
+    return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.ORANGE }
+  }
 
   switch (session.state) {
     case 'running':
