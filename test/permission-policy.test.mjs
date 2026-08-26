@@ -19,12 +19,32 @@ test('anything outside the project asks rather than failing', () => {
   assert.equal(result.scope, '/Users/person/notes/spec.md')
 })
 
-test('writes are confirmed, and a remembered folder stops asking for every file in it', () => {
+test('writes are confirmed, and a grant stops asking for every file in the folder', () => {
   const file = '/Users/person/projects/ambientic/src/main/index.js'
   assert.equal(decideToolPermission({ ...base, tool: 'Edit', input: { file_path: file } }).decision, 'ask')
-  const remembered = ['/Users/person/projects/ambientic']
-  assert.equal(decideToolPermission({ ...base, tool: 'Edit', input: { file_path: file }, remembered }).decision, 'allow')
-  assert.equal(decideToolPermission({ ...base, tool: 'Write', input: { file_path: '/Users/person/projects/ambientic/deep/new.js' }, remembered }).decision, 'allow')
+  const grants = [{ scope: 'session', threadId: 't', tool: '', root: '/Users/person/projects/ambientic/src/main', write: true }]
+  assert.equal(decideToolPermission({ ...base, tool: 'Edit', input: { file_path: file }, grants }).decision, 'allow')
+  // A read-only grant must never quietly authorise a change.
+  const readOnly = [{ scope: 'always', tool: '', root: '/Users/person/notes', write: false }]
+  assert.equal(decideToolPermission({ ...base, tool: 'Read', input: { file_path: '/Users/person/notes/a.md' }, grants: readOnly }).decision, 'allow')
+  assert.equal(decideToolPermission({ ...base, tool: 'Write', input: { file_path: '/Users/person/notes/a.md' }, grants: readOnly }).decision, 'ask')
+})
+
+test('a shell command can be remembered, so it stops asking on every call', () => {
+  // Without a scope the card offers no way to remember, which is what made a
+  // shell command prompt on every single invocation.
+  const asked = decideToolPermission({ ...base, tool: 'Bash', input: { command: 'npm test' } })
+  assert.equal(asked.decision, 'ask')
+  assert.equal(asked.scope, base.cwd)
+  const grants = [{ scope: 'always', tool: 'Bash', root: base.cwd, write: true }]
+  assert.equal(decideToolPermission({ ...base, tool: 'Bash', input: { command: 'npm test' }, grants }).decision, 'allow')
+  // That grant is for Bash in this project, not Bash everywhere.
+  assert.equal(decideToolPermission({ ...base, cwd: '/Users/person/other', tool: 'Bash', input: { command: 'rm -rf .' }, grants }).decision, 'ask')
+})
+
+test('a standing grant can never widen into the home folder', () => {
+  const grants = [{ scope: 'always', tool: '', root: '/Users/person', write: true }]
+  assert.equal(decideToolPermission({ ...base, tool: 'Read', input: { file_path: '/Users/person/Documents' }, grants }).decision, 'deny')
 })
 
 test('a shell command is never auto-granted from its arguments', () => {

@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { isAbsolute, resolve, sep } from 'node:path'
 import { canGrantToolRoot } from './project-scope.mjs'
+import { matchingGrant } from './permission-grants.mjs'
 
 // One policy for every provider. A Claude PreToolUse hook, a Codex JSON-RPC
 // permission request, and a Hermes one all describe the same thing — a tool is
@@ -39,29 +40,42 @@ export function grantedBy (roots = [], target = '') {
   return roots.map((root) => resolve(String(root || ''))).find((root) => root && within(root, target)) || ''
 }
 
-// `remembered` holds roots the user already approved for this thread, so a
-// second file in a folder they just allowed does not ask again.
+// `grants` are the standing answers the user has already given — for this
+// thread or for good. They are checked before anything else except the refusals
+// nothing should ever override, because re-asking a question already answered is
+// what turns a permission prompt into noise people click through.
 export function decideToolPermission ({
   tool = '',
   input = {},
   cwd = '',
   projectRoots = [],
-  remembered = [],
+  grants = [],
   home = homedir()
 } = {}) {
   const trusted = [cwd, ...projectRoots].filter(Boolean)
   const paths = toolPaths(input)
 
-  // A remembered root is a full grant: the user said yes to this folder for
-  // this thread, so reads and writes inside it both stop asking. Without this,
-  // "remember" would silence the first prompt and then ask again on the next
-  // file, which is the behaviour that makes people turn approvals off.
-  if (paths.length && paths.every((target) => grantedBy(remembered, target))) {
-    return { decision: 'allow', reason: 'You already approved this folder for this thread.', scope: '' }
+  // A path nothing should ever hold is refused even with a grant behind it, so a
+  // standing permission cannot widen into the home folder by accident.
+  const forbidden = paths.find((target) => !canGrantToolRoot(target, home))
+  if (forbidden) {
+    return { decision: 'deny', reason: `${forbidden} is your home folder or a whole protected collection, which Ambientic never grants.`, scope: '' }
+  }
+
+  const granted = matchingGrant(grants, { tool, paths, cwd })
+  if (granted) {
+    return {
+      decision: 'allow',
+      reason: granted.scope === 'always' ? 'You allowed this permanently.' : 'You allowed this for this thread.',
+      scope: ''
+    }
   }
 
   if (OPAQUE_TOOLS.has(tool)) {
-    return { decision: 'ask', reason: `${tool || 'This tool'} can reach outside the project, so it is not granted automatically.`, scope: '' }
+    // Anchored to where it runs, not to nothing: without a scope the approval
+    // card could offer no way to remember the answer, so a shell command asked
+    // again on every single call.
+    return { decision: 'ask', reason: `${tool || 'This tool'} can reach outside the project, so it is confirmed before it runs.`, scope: cwd || '' }
   }
 
   if (!paths.length) {
@@ -74,14 +88,9 @@ export function decideToolPermission ({
 
   const outside = paths.filter((target) => !grantedBy(trusted, target))
   if (outside.length) {
-    const target = outside[0]
-    // Refusing outright is worse than asking: the user can still say yes, and
-    // an unanswerable denial is the failure mode this whole broker exists to
-    // remove. Only a root nothing should ever hold is refused.
-    if (!canGrantToolRoot(target, home)) {
-      return { decision: 'deny', reason: `${target} is your home folder or a whole protected collection, which Ambientic never grants.`, scope: '' }
-    }
-    return { decision: 'ask', reason: `${target} is outside this task's project.`, scope: target }
+    // Refusing outright is worse than asking: the user can still say yes, and an
+    // unanswerable denial is the failure mode this whole broker exists to remove.
+    return { decision: 'ask', reason: `${outside[0]} is outside this task's project.`, scope: outside[0] }
   }
 
   if (READ_ONLY_TOOLS.has(tool)) {

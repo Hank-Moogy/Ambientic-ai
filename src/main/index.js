@@ -963,6 +963,12 @@ ipcMain.handle('send-thread-prompt', (_event, id, text, options = {}) => workspa
 ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))
 ipcMain.handle('resolve-approval', (_event, id, allow, remember) => workspace.resolveApproval(id, allow, remember))
+ipcMain.handle('list-permission-grants', () => workspace.listGrants())
+ipcMain.handle('revoke-permission-grant', (_event, grantId) => {
+  const revoked = workspace.revokeGrant(String(grantId || ''))
+  if (revoked) sendToWindows('permission-grants', workspace.listGrants())
+  return revoked
+})
 ipcMain.handle('copy-text', (_event, text) => {
   clipboard.writeText(String(text || '').slice(0, 2 * 1024 * 1024))
   return true
@@ -1500,6 +1506,8 @@ app.whenReady().then(() => {
   workspace = new WorkspaceService(store, () => connectors, {
     aliases: prefs.threadAliases,
     onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases }),
+    grants: prefs.permissionGrants,
+    onGrantsChange: (permissionGrants) => savePrefs({ ...loadPrefs(), permissionGrants }),
     contextEngine,
     capabilityGateway,
     gatewayExecutable: process.execPath,

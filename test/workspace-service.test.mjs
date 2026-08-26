@@ -659,8 +659,8 @@ test('an out-of-scope tool asks, waits for the answer, and remembers the folder'
   await service.resolveApproval(asked.id, true, true)
   assert.equal((await waiting).decision, 'allow')
 
-  // Remembering grants the folder, so the next file beside it does not re-ask.
-  assert.deepEqual(service.rememberedRoots('sess-4'), ['/Users/person/notes'])
+  // A bare `true` is the older boolean caller and still means "this thread".
+  assert.deepEqual(service.listGrants().map((grant) => [grant.scope, grant.root]), [['session', '/Users/person/notes']])
   const second = await service.requestToolPermission({
     sessionId: 'sess-4', tool: 'Read', input: { file_path: '/Users/person/notes/other.md' }
   })
@@ -721,4 +721,60 @@ test('a file the user attached is not then asked about', async () => {
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('Always allow survives into other threads; Allow for this thread does not', async () => {
+  const persisted = []
+  const session = { id: 'sess-8', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const other = { id: 'sess-9', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session, other], ingest: () => {} }, () => [], {
+    onGrantsChange: (list) => persisted.push(list.length)
+  })
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = (s) => ({ id: s.id, messages: [] })
+
+  const read = { tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' } }
+  const first = await service.requestToolPermission({ sessionId: 'sess-8', ...read })
+  await service.resolveApproval(first.id, true, 'session')
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-8', ...read })).decision, 'allow')
+  // A thread grant is that thread's alone.
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-9', ...read })).decision, 'ask')
+  assert.deepEqual(persisted, [], 'a thread grant must never be written to disk')
+
+  const second = await service.requestToolPermission({ sessionId: 'sess-9', ...read })
+  await service.resolveApproval(second.id, true, 'always')
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-9', ...read })).decision, 'allow')
+  assert.deepEqual(persisted, [1], 'an always grant is persisted once')
+})
+
+test('a shell command stops asking once allowed, which is what made it unbearable', async () => {
+  const session = { id: 'sess-10', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: 'sess-10', messages: [] })
+
+  const bash = { tool: 'Bash', input: { command: 'npm test' } }
+  const asked = await service.requestToolPermission({ sessionId: 'sess-10', ...bash })
+  assert.equal(asked.decision, 'ask')
+  // The card has to offer a way to remember, or the answer cannot stick.
+  assert.equal(service.pendingApprovals.get(asked.id).canRemember, true)
+  await service.resolveApproval(asked.id, true, 'session')
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-10', ...bash })).decision, 'allow')
+})
+
+test('revoking a standing permission takes effect immediately', async () => {
+  const session = { id: 'sess-11', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: 'sess-11', messages: [] })
+
+  const read = { tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' } }
+  const asked = await service.requestToolPermission({ sessionId: 'sess-11', ...read })
+  await service.resolveApproval(asked.id, true, 'always')
+  const [grant] = service.listGrants()
+  assert.equal(service.revokeGrant(grant.id), true)
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-11', ...read })).decision, 'ask')
 })

@@ -9,6 +9,7 @@ import { providerSpawnEnv } from './env-path.mjs'
 import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
 import { decideToolPermission } from './permission-policy.mjs'
+import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -432,6 +433,8 @@ function execJson (file, args) {
 export class WorkspaceService extends EventEmitter {
   constructor (store, getConnectors, {
     aliases = {},
+    grants = [],
+    onGrantsChange = null,
     onAliasesChange,
     taskWorkspaceRoot = join(homedir(), '.ambientic', 'workspaces'),
     contextEngine = null,
@@ -470,7 +473,11 @@ export class WorkspaceService extends EventEmitter {
     this.spawnProcess = spawnProcess
     this.gatewayRuntime = new Map()
     // sessionId -> Set of roots the user approved for that thread, this run only.
-    this.threadGrants = new Map()
+    // Every standing answer the user has given. 'always' grants are persisted by
+    // the host; 'session' grants live only as long as this process, because a
+    // "for this session" that survived a restart would be a promise broken.
+    this.grants = Array.isArray(grants) ? grants.filter((grant) => grant?.scope === 'always') : []
+    this.onGrantsChange = onGrantsChange
     // approvalId -> promise of the user's answer, awaited by the provider bridge.
     this.pendingToolDecisions = new Map()
     // Memory-export sessions are deliberately isolated from Ambientic's own
@@ -1010,8 +1017,27 @@ export class WorkspaceService extends EventEmitter {
   // for as long as the app is running. Nothing here is written to disk: a
   // standing grant is a decision the user should make deliberately, not one
   // that accumulates from clicking through prompts.
-  rememberedRoots (sessionId) {
-    return [...(this.threadGrants.get(sessionId) || [])]
+  grantsFor (sessionId) {
+    return applicableGrants(this.grants, sessionId)
+  }
+
+  addGrant (grant) {
+    if (!grant) return null
+    this.grants = [...this.grants, grant]
+    if (grant.scope === 'always') this.onGrantsChange?.(persistableGrants(this.grants))
+    return grant
+  }
+
+  revokeGrant (grantId) {
+    const next = this.grants.filter((grant) => grant.id !== grantId)
+    if (next.length === this.grants.length) return false
+    this.grants = next
+    this.onGrantsChange?.(persistableGrants(this.grants))
+    return true
+  }
+
+  listGrants () {
+    return this.grants.map((grant) => ({ ...grant }))
   }
 
   // Keeps the session store's approval flag in step with what is actually
@@ -1038,7 +1064,7 @@ export class WorkspaceService extends EventEmitter {
       input,
       cwd: cwd || session.cwd || '',
       projectRoots: this.discoverableProjects(cwd || session.cwd || '').map((item) => item.cwd),
-      remembered: this.rememberedRoots(sessionId)
+      grants: this.grantsFor(sessionId)
     })
     if (verdict.decision !== 'ask') return { decision: verdict.decision, reason: verdict.reason }
 
@@ -1051,6 +1077,7 @@ export class WorkspaceService extends EventEmitter {
       method: 'ToolPermission',
       title: describeApprovalRequest(tool, input),
       tool: String(tool || ''),
+      cwd: cwd || session.cwd || '',
       detail: verdict.reason,
       scope: verdict.scope,
       options: [],
@@ -1085,19 +1112,27 @@ export class WorkspaceService extends EventEmitter {
     return this.pendingToolDecisions.get(id) || Promise.resolve(null)
   }
 
+  // `remember` is either a boolean (older callers: false = once, true = this
+  // thread) or one of 'once' | 'session' | 'always'. The string form is what the
+  // approval card sends, so the user's three choices survive the trip intact
+  // instead of collapsing into a yes/no.
   async resolveApproval (approvalId, allow, remember = false) {
     const approval = this.pendingApprovals.get(approvalId)
     if (!approval) return false
+    const scope = remember === true ? 'session' : (remember === false ? 'once' : String(remember || 'once'))
     if (approval.kind === 'tool-permission') {
       if (approval.timer) clearTimeout(approval.timer)
-      // Remembering grants the containing folder, not the single file: the next
-      // file in that folder is the same decision, and asking again for it is
-      // what makes people stop reading these prompts.
-      if (allow && remember && approval.scope) {
-        const root = statSyncKind(approval.scope) === 'folder' ? approval.scope : dirname(approval.scope)
-        const grants = this.threadGrants.get(approval.sessionId) || new Set()
-        grants.add(root)
-        this.threadGrants.set(approval.sessionId, grants)
+      if (allow && scope !== 'once') {
+        this.addGrant(grantForRequest({
+          tool: approval.tool,
+          // An opaque tool's scope is the folder it runs in, not a file it
+          // named, so it must anchor a tool grant rather than a path grant.
+          paths: approval.scope && approval.scope !== (approval.cwd || '') ? [approval.scope] : [],
+          cwd: approval.cwd || '',
+          scope,
+          threadId: approval.sessionId,
+          isDirectory: (path) => statSyncKind(path) === 'folder'
+        }))
       }
       approval.resolve({
         decision: allow ? 'allow' : 'deny',
@@ -1172,9 +1207,7 @@ export class WorkspaceService extends EventEmitter {
     // thread so the broker does not turn around and ask permission for the very
     // thing they just handed over.
     for (const root of additionalToolRoots(cwd, promptOptions.attachments)) {
-      const grants = this.threadGrants.get(id) || new Set()
-      grants.add(root)
-      this.threadGrants.set(id, grants)
+      this.addGrant({ id: randomUUID(), scope: 'session', threadId: id, tool: '', root, write: true })
     }
     const pending = message('user', text, {
       pendingProvider: true,

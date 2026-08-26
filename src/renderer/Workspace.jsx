@@ -322,10 +322,14 @@ function Approval ({ approval, onResolve }) {
       {/* Lead with what is being requested — the user decides yes/no from this
           line — and keep the tool name as secondary context. */}
       <div><b>{approval.title || 'Permission requested'}</b><span>{context.join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
+      {/* Three answers, widest last, each saying plainly how far it reaches. A
+          destructive action is only ever allowed once — a standing yes to
+          something irreversible is not a choice worth offering. */}
       <div className="approval__actions">
-        <button type="button" onClick={() => onResolve(approval.id, false)}>Deny</button>
-        <button type="button" className="primary" onClick={() => onResolve(approval.id, true)}>Allow once</button>
-        {approval.canRemember && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, true)}>Allow for session</button>}
+        <button type="button" onClick={() => onResolve(approval.id, false, 'once')}>Deny</button>
+        <button type="button" className="primary" onClick={() => onResolve(approval.id, true, 'once')}>Allow once</button>
+        {approval.canRemember && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, 'session')} title={approval.scope ? `Stops asking for ${approval.scope} in this thread` : ''}>Allow for this thread</button>}
+        {approval.canRemember && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, 'always')} title={approval.scope ? `Stops asking for ${approval.scope} in every thread, until you revoke it in Settings` : ''}>Always allow</button>}
       </div>
     </section>
   )
@@ -1028,10 +1032,49 @@ const settingsSections = [
   { id: 'inference', title: 'Inference providers', label: 'Inference', hint: 'Hosted models for Ambientic', assurance: 'Your account, your keys', assuranceNote: 'Ambientic stores each inference API key in your macOS keychain and uses it only for the workloads you route through it.' },
   { id: 'memory', title: 'Memory', label: 'Memory', hint: 'Profile, projects, and history', assurance: 'Local and reviewable', assuranceNote: 'Imported and learned context stays on this Mac. You can edit, supersede, exclude, or forget it at any time.' },
   { id: 'tools', title: 'Apps & tools', label: 'Apps & Tools', hint: 'Shared MCP capabilities', assurance: 'One permission boundary', assuranceNote: 'Ambientic brokers capabilities and approvals so agents never receive third-party credentials.' },
+  { id: 'permissions', title: 'Standing permissions', label: 'Permissions', hint: 'What agents may reach', assurance: 'Yours to revoke', assuranceNote: 'Every standing permission was granted by you from an approval, applies to every provider, and stops applying the moment you revoke it here.' },
   { id: 'usage', title: 'Usage & billing', label: 'Usage & Billing', hint: 'Limits, resets, and spend', assurance: 'Measured honestly', assuranceNote: 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' },
   { id: 'ambient', title: 'Ambient mode', label: 'Ambient Mode', hint: 'Sleep prevention and safety', assurance: 'Temporary and reversible', assuranceNote: 'Ambient mode is always user-controlled and releases its assertion when the app quits.' },
   { id: 'midi', title: 'MIDI hardware', label: 'MIDI Hardware', hint: 'Controller and native mode', assurance: 'One controller at a time', assuranceNote: 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.' }
 ]
+
+function PermissionSettings () {
+  const [grants, setGrants] = useState([])
+  const [loaded, setLoaded] = useState(false)
+  const refresh = () => window.controller.listPermissionGrants().then((list) => {
+    setGrants(Array.isArray(list) ? list : [])
+    setLoaded(true)
+  }).catch(() => setLoaded(true))
+  useEffect(() => {
+    refresh()
+    return window.controller.onPermissionGrants?.((list) => setGrants(Array.isArray(list) ? list : []))
+  }, [])
+  // Only standing grants belong here. A "for this thread" answer expires on its
+  // own, and listing it as something to manage would overstate what it is.
+  const standing = grants.filter((grant) => grant.scope === 'always')
+  return (
+    <div className="permission-settings">
+      <div className="provider-settings__intro">
+        <span className="eyebrow"><i /> Standing permissions</span>
+        <h2>What you have told agents they may reach.</h2>
+        <p>Each of these came from an approval where you chose <b>Always allow</b>. They apply to every thread and every provider. Anything not listed here is still asked for, every time.</p>
+      </div>
+      {!loaded ? <div className="permission-empty">Reading permissions…</div>
+        : standing.length === 0
+          ? <div className="permission-empty">No standing permissions. Every request outside a task's own project is confirmed with you.</div>
+          : <ul className="permission-list">{standing.map((grant) => (
+            <li key={grant.id}>
+              <div>
+                <b>{grant.tool ? grant.tool : grant.write ? 'Read and change files' : 'Read files'}</b>
+                <code>{grant.root || 'Anywhere'}</code>
+                <small>{grant.write ? 'Includes changing files' : 'Reading only'}</small>
+              </div>
+              <button type="button" onClick={() => window.controller.revokePermissionGrant(grant.id).then(refresh)}>Revoke</button>
+            </li>
+          ))}</ul>}
+    </div>
+  )
+}
 
 function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, midi, ambientMode, buildInfo, initialSection = 'providers', onRefresh, onRefreshUsage, onConnect, onInstallHooks, onMidiProfile, onAmbientToggle, onAmbientCheckIn, onReplayOnboarding }) {
   const [checking, setChecking] = useState(false)
@@ -1110,7 +1153,7 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
       <div className="settings-scroll">
         <aside className="settings-sections"><span>Workspace</span>{settingsSections.map((item) => <button type="button" key={item.id} data-selected={section === item.id} onClick={() => setSection(item.id)}><b>{item.label}</b><small>{item.hint}</small></button>)}<button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart provider-memory setup</small></button><div><b>{active.assurance}</b><p>{active.assuranceNote}</p></div><footer className="settings-build"><span>Installed build</span><b>Ambientic {buildInfo?.version || 'development'}</b><code>{buildInfo?.commit === 'development' ? 'Development' : buildInfo?.commit?.slice(0, 8)}</code>{buildInfo?.builtAt && <small>{buildInfo.branch} · {new Date(buildInfo.builtAt).toLocaleString()}{buildInfo.dirty ? ' · modified' : ''}</small>}</footer></aside>
         <main className="provider-settings">
-          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'ambient' ? <AmbientModeSettings ambientMode={ambientMode} onToggle={onAmbientToggle} onCheckInChange={onAmbientCheckIn} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : section === 'memory' ? <MemoryWorkspace /> : section === 'tools' ? <AppsToolsSettings /> : section === 'inference' ? <InferenceProviderSettings /> : <>
+          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'ambient' ? <AmbientModeSettings ambientMode={ambientMode} onToggle={onAmbientToggle} onCheckInChange={onAmbientCheckIn} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : section === 'memory' ? <MemoryWorkspace /> : section === 'tools' ? <AppsToolsSettings /> : section === 'permissions' ? <PermissionSettings /> : section === 'inference' ? <InferenceProviderSettings /> : <>
           <div className="provider-settings__intro"><span className="eyebrow"><i /> Local account bridge</span><h2>Connect the agents you already use.</h2><p>Each provider keeps ownership of authentication. Ambientic checks the installed CLI, opens its official login flow, and uses that existing local session.</p></div>
           {notice && <div className="settings-notice"><span>i</span>{notice}</div>}
           <div className="provider-account-list">
