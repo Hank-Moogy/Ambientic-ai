@@ -1168,6 +1168,14 @@ export class WorkspaceService extends EventEmitter {
     // turn and stays in the conversation from there.
     const discoverable = contextSuppressed ? [] : this.discoverableProjects(cwd)
     if (!hasConversation && !promptOptions.knownProjects.length) promptOptions.knownProjects = discoverable
+    // Attaching a file is the user choosing it. Record that as a grant for this
+    // thread so the broker does not turn around and ask permission for the very
+    // thing they just handed over.
+    for (const root of additionalToolRoots(cwd, promptOptions.attachments)) {
+      const grants = this.threadGrants.get(id) || new Set()
+      grants.add(root)
+      this.threadGrants.set(id, grants)
+    }
     const pending = message('user', text, {
       pendingProvider: true,
       mode: promptOptions.mode,
@@ -1227,7 +1235,7 @@ export class WorkspaceService extends EventEmitter {
         : `${context.binding.capsuleText}\n\n${assembleProviderPrompt(text, promptOptions)}`
       void rpc.request('session/prompt', { sessionId: id, prompt: [{ type: 'text', text: hermesText }] }, 60 * 60 * 1000).then(() => this.finish(id)).catch((error) => this.fail(id, error))
     } else if (session.agent === 'claude') {
-      this.runClaude(session, assembleProviderPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort, context, additionalRoots: [...new Set([...additionalToolRoots(cwd, promptOptions.attachments), ...discoverable.map((item) => item.cwd)])] })
+      this.runClaude(session, assembleProviderPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort, context })
     } else throw new Error(`Managed prompts are not supported for ${session.agent}.`)
     return this.emitSnapshot(snapshot)
   }
@@ -1286,7 +1294,7 @@ export class WorkspaceService extends EventEmitter {
     throw new Error('Choose Codex, Claude Code, or Hermes.')
   }
 
-  runClaude (session, prompt, { compacted = false, mode = 'build', model = '', effort = '', context = null, additionalRoots = [] } = {}) {
+  runClaude (session, prompt, { compacted = false, mode = 'build', model = '', effort = '', context = null } = {}) {
     const path = this.connector('claude')?.path || 'claude'
     // Resume only once Claude has actually persisted this session's transcript.
     // A brand-new managed task carries a fresh UUID that Claude has never seen,
@@ -1300,16 +1308,12 @@ export class WorkspaceService extends EventEmitter {
     if (!this.contextSuppressedSessions.has(session.id)) context ||= this.ensureContext(session, { prompt })
     if (context?.capsulePath) args.push('--append-system-prompt-file', context.capsulePath)
     if (context?.mcpConfigPath) args.push('--mcp-config', context.mcpConfigPath, '--strict-mcp-config')
-    // Claude confines its file tools to the working directory. Anything the user
-    // attached from outside it is otherwise named in the prompt but unreadable,
-    // and -p mode has no way to ask for access, so the turn just reports failure.
-    for (const root of additionalRoots) args.push('--add-dir', root)
     // Only forward these when the user picked something; omitting them lets
     // Claude Code apply its own configured defaults.
     if (model) args.push('--model', model)
     if (effort) args.push('--effort', effort)
     args.push(started ? '--resume' : '--session-id', claudeId)
-    this.claudeAttempts.set(session.id, { prompt, compacted, mode, model, effort, additionalRoots, resultError: '' })
+    this.claudeAttempts.set(session.id, { prompt, compacted, mode, model, effort, resultError: '' })
     const child = this.spawnProcess(path, args, { cwd: session.cwd || homedir(), env: providerSpawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
     let buffer = ''
@@ -1327,7 +1331,7 @@ export class WorkspaceService extends EventEmitter {
       // First time a resume overflows the context window, compact and retry once
       // so the user keeps going in the same thread instead of hitting a wall.
       if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(errorText) && !attempt.compacted) {
-        return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode, model: attempt.model, effort: attempt.effort, additionalRoots: attempt.additionalRoots })
+        return void this.compactClaudeAndRetry(session.id, attempt.prompt, { mode: attempt.mode, model: attempt.model, effort: attempt.effort })
       }
       this.claudeAttempts.delete(session.id)
       // A failed turn is the single most common bug report ("chat just fails"),
@@ -1382,7 +1386,7 @@ export class WorkspaceService extends EventEmitter {
 
   // Start a fresh Claude session seeded with the compacted history, remap the UI
   // thread to it, and re-run the user's prompt so the thread continues in place.
-  compactClaudeAndRetry (id, prompt, { mode = 'build', model = '', effort = '', additionalRoots = [] } = {}) {
+  compactClaudeAndRetry (id, prompt, { mode = 'build', model = '', effort = '' } = {}) {
     const session = this.sessionFor(id)
     if (!session) { this.claudeAttempts.delete(id); return this.fail(id, new Error('This conversation is no longer available to compact.')) }
     const summary = this.compactClaudeContext(session)
@@ -1396,7 +1400,7 @@ export class WorkspaceService extends EventEmitter {
       snapshot.messages.push(message('activity', 'This conversation grew past the model context window. Ambientic compressed its history so you can keep going in this thread.', { kind: 'system', title: 'Auto-compacted conversation' }))
       this.emitSnapshot({ ...snapshot, running: true })
     }
-    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode, model, effort, additionalRoots })
+    this.runClaude(session, `${summary}\n\n=== The user's next message (respond to this) ===\n${prompt}`, { compacted: true, mode, model, effort })
   }
 
   // Turn known Claude -p failures into guidance the user can act on. A resumed

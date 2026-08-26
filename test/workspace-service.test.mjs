@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkspaceService, createPrivateTaskWorkspace, describeApprovalRequest } from '../src/main/workspace-service.mjs'
@@ -561,48 +561,6 @@ test('approval titles stay short enough for the card', () => {
   assert.ok(title.endsWith('\u2026'))
 })
 
-test('grants Claude the directories an out-of-project attachment needs', () => {
-  const spawned = []
-  const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [], {
-    spawnProcess: (path, args) => {
-      spawned.push({ path, args })
-      return { stdout: { on () {} }, stderr: { on () {} }, on () {} }
-    }
-  })
-  service.claudeTranscriptFor = () => ''
-  service.ensureContext = () => null
-
-  service.runClaude({ id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }, 'Compare these.', {
-    additionalRoots: ['/tmp/elsewhere', '/tmp/other']
-  })
-
-  const { args } = spawned[0]
-  const granted = args.reduce((list, value, index) => (
-    args[index - 1] === '--add-dir' ? [...list, value] : list
-  ), [])
-  assert.deepEqual(granted, ['/tmp/elsewhere', '/tmp/other'])
-})
-
-test('a retried turn keeps the directory grants of the turn it is retrying', () => {
-  const spawned = []
-  const service = new WorkspaceService({ list: () => [{ id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }], ingest: () => {} }, () => [], {
-    spawnProcess: (path, args) => {
-      spawned.push(args)
-      return { stdout: { on () {} }, stderr: { on () {} }, on () {} }
-    }
-  })
-  service.claudeTranscriptFor = () => ''
-  service.ensureContext = () => null
-  service.compactClaudeContext = () => 'summary'
-
-  service.runClaude({ id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }, 'Compare these.', { additionalRoots: ['/tmp/elsewhere'] })
-  const attempt = service.claudeAttempts.get('thread-1')
-  service.compactClaudeAndRetry('thread-1', attempt.prompt, { ...attempt, additionalRoots: attempt.additionalRoots })
-
-  assert.equal(spawned[1].includes('--add-dir'), true)
-  assert.equal(spawned[1][spawned[1].indexOf('--add-dir') + 1], '/tmp/elsewhere')
-})
-
 test('a task launched without a project can still discover and reach the others', async () => {
   const spawned = []
   const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/scratch', project: 'scratch' }
@@ -624,13 +582,14 @@ test('a task launched without a project can still discover and reach the others'
 
   await service.send('thread-1', 'Fix the router in memoli.')
 
+  // Scope is no longer pre-granted through the sandbox; the agent is told what
+  // exists and the broker decides each request. Naming them is what makes them
+  // reachable at all, so that is what this asserts.
   const args = spawned[0]
-  const granted = args.reduce((list, value, index) => (args[index - 1] === '--add-dir' ? [...list, value] : list), [])
-  assert.deepEqual(granted, ['/Users/person/projects/ambientic', '/Users/person/projects/memoli'])
-  // A grant the agent is never told about is a grant it will not use.
+  assert.equal(args.includes('--add-dir'), false)
   const prompt = args[args.indexOf('-p') + 1]
-  assert.match(prompt, /already open to you/)
   assert.match(prompt, /Memoli: \/Users\/person\/projects\/memoli/)
+  assert.match(prompt, /Ambientic: \/Users\/person\/projects\/ambientic/)
 })
 
 test('a failed turn reports why, even when Claude sends an empty result', () => {
@@ -732,4 +691,34 @@ test('the hardware light follows pending approvals without each call site saying
 
   await service.resolveApproval(asked.id, true, false)
   assert.deepEqual(flags.at(-1), { id: 'sess-6', pending: false })
+})
+
+test('a file the user attached is not then asked about', async () => {
+  const session = { id: 'sess-7', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => ({ stdout: { on () {} }, stderr: { on () {} }, on () {} })
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.recentProjects = () => []
+  service.read = async () => ({ id: 'sess-7', messages: [], artifacts: [], approvals: [] })
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: 'sess-7', messages: [] })
+  service.ingestLifecycle = () => {}
+
+  // Attachments are stat-checked before they are trusted, so this needs a file
+  // that is really there.
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-attach-'))
+  const attached = join(directory, 'spec.md')
+  writeFileSync(attached, 'spec')
+  try {
+    await service.send('sess-7', 'Compare this.', { attachments: [{ path: attached }] })
+    // Attaching is the user choosing it, so reading it is already decided.
+    const verdict = await service.requestToolPermission({
+      sessionId: 'sess-7', tool: 'Read', input: { file_path: attached }
+    })
+    assert.equal(verdict.decision, 'allow')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
