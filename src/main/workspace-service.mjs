@@ -2,12 +2,13 @@ import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, extname, isAbsolute, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
-import { canInspectProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
-import { assembleProviderPrompt } from './context-assembler.mjs'
+import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, isBroadProjectRoot } from './project-scope.mjs'
+import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
+import { decideToolPermission } from './permission-policy.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -16,7 +17,6 @@ const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes
 // rendered transcript on reload.
 const COMPACTION_HEADER = 'You are resuming a conversation that exceeded the model'
 const COMPACTION_BUDGET = 24000
-const AMBIENTIC_CONTEXT = /<(?:ambientic|agentbase)-context\b[^>]*>[\s\S]*?<\/(?:ambientic|agentbase)-context>\s*/i
 const CHAT_MODES = new Set(['build', 'plan', 'ask'])
 // Aliases Claude Code's `--model` accepts, plus the union of effort labels the
 // supported provider surfaces currently expose. Codex's exact per-model subset
@@ -80,10 +80,6 @@ function textContent (value) {
 
 function message (role, text, extra = {}) {
   return { id: extra.id || randomUUID(), role, text: String(text || ''), ...extra }
-}
-
-function stripAmbienticContext (text) {
-  return String(text || '').replace(AMBIENTIC_CONTEXT, '').trim()
 }
 
 // Claude's PermissionRequest hook reports only the tool name and its raw input,
@@ -180,6 +176,51 @@ export function reconcileProviderMessage (messages, incoming) {
   return list
 }
 
+// A Claude result event can report failure with an empty `result`. These are
+// the fields that still say why, in the order they are worth reading.
+function claudeErrorDetail (event = {}) {
+  const parts = [
+    event.api_error_status ? `API status ${event.api_error_status}` : '',
+    event.subtype && event.subtype !== 'success' ? `subtype ${event.subtype}` : '',
+    event.terminal_reason && event.terminal_reason !== 'completed' ? `terminal reason ${event.terminal_reason}` : '',
+    event.stop_reason ? `stop reason ${event.stop_reason}` : '',
+    Array.isArray(event.permission_denials) && event.permission_denials.length
+      ? `denied ${event.permission_denials.map((item) => item?.tool_name || 'tool').join(', ')}`
+      : ''
+  ].filter(Boolean)
+  return parts.length ? `Claude returned an error (${parts.join('; ')})` : 'Claude returned an error with no detail'
+}
+
+// A path that no longer exists is treated as a file, so a remembered grant
+// covers its folder rather than the missing path itself.
+function statSyncKind (path) {
+  try { return statSync(path).isDirectory() ? 'folder' : 'file' } catch { return 'file' }
+}
+
+// Approvals are created and cleared from a dozen places — timeouts, user
+// answers, cancellations, each provider's own bridge. Watching the collection
+// itself is what keeps the hardware light truthful; a notification bolted onto
+// each of those call sites would be one edit away from going stale.
+class ApprovalRegistry extends Map {
+  constructor (onSessionChange) {
+    super()
+    this.onSessionChange = onSessionChange
+  }
+
+  set (key, value) {
+    const result = super.set(key, value)
+    this.onSessionChange?.(value?.sessionId)
+    return result
+  }
+
+  delete (key) {
+    const sessionId = this.get(key)?.sessionId
+    const removed = super.delete(key)
+    if (removed) this.onSessionChange?.(sessionId)
+    return removed
+  }
+}
+
 function normalizePromptOptions (options = {}, provider = '') {
   const mode = CHAT_MODES.has(options.mode) ? options.mode : 'build'
   // Model and effort come from the renderer's composer. Validate against the
@@ -209,7 +250,13 @@ function normalizePromptOptions (options = {}, provider = '') {
       })
     } catch {}
   }
-  return { mode, attachments, model, effort, projectContext }
+  const knownProjects = []
+  for (const item of Array.isArray(options.knownProjects) ? options.knownProjects.slice(0, 12) : []) {
+    const projectRoot = String(item?.cwd || '')
+    if (!isAbsolute(projectRoot)) continue
+    knownProjects.push({ cwd: projectRoot, name: String(item?.name || basename(projectRoot)).replace(/\s+/g, ' ').trim().slice(0, 100) })
+  }
+  return { mode, attachments, model, effort, projectContext, knownProjects }
 }
 
 function codexInputs (text, attachments) {
@@ -398,7 +445,7 @@ export class WorkspaceService extends EventEmitter {
     this.store = store
     this.getConnectors = getConnectors
     this.snapshots = new Map()
-    this.pendingApprovals = new Map()
+    this.pendingApprovals = new ApprovalRegistry((sessionId) => this.syncApprovalLight(sessionId))
     this.codex = null
     this.hermes = null
     this.codexReady = null
@@ -422,6 +469,10 @@ export class WorkspaceService extends EventEmitter {
     this.contextArtifactRoot = contextArtifactRoot
     this.spawnProcess = spawnProcess
     this.gatewayRuntime = new Map()
+    // sessionId -> Set of roots the user approved for that thread, this run only.
+    this.threadGrants = new Map()
+    // approvalId -> promise of the user's answer, awaited by the provider bridge.
+    this.pendingToolDecisions = new Map()
     // Memory-export sessions are deliberately isolated from Ambientic's own
     // context so an import can never echo the local capsule back into itself.
     this.contextSuppressedSessions = new Set()
@@ -517,9 +568,27 @@ export class WorkspaceService extends EventEmitter {
         cwd,
         name: session.project || basename(cwd) || 'Local project'
       })
-      if (projects.size >= Math.max(1, Math.min(8, limit))) break
+      if (projects.size >= Math.max(1, Math.min(DISCOVERY_ROOT_LIMIT, limit))) break
     }
     return [...projects.values()]
+  }
+
+  // The projects this machine already works in, offered to a task as somewhere
+  // to look rather than something the user had to nominate up front. Returned
+  // as name + root so the same list can be granted and described: telling an
+  // agent about a folder it cannot read is worse than telling it nothing.
+  discoverableProjects (cwd = '') {
+    const registered = (this.contextEngine?.store?.listProjects?.() || [])
+      .map((project) => ({ cwd: project.rootPath, name: project.name }))
+    const named = new Map()
+    for (const item of [...this.recentProjects(DISCOVERY_ROOT_LIMIT), ...registered]) {
+      const root = String(item?.cwd || '').trim()
+      if (!root || !isAbsolute(root)) continue
+      const key = resolve(root)
+      if (!named.has(key)) named.set(key, item.name || basename(key) || 'Local project')
+    }
+    return discoveryToolRoots(cwd, [...named.keys()].map((root) => ({ cwd: root })))
+      .map((root) => ({ cwd: root, name: named.get(root) }))
   }
 
   async list ({ force = false } = {}) {
@@ -937,9 +1006,109 @@ export class WorkspaceService extends EventEmitter {
     return cancelled
   }
 
+  // A thread only remembers roots the user explicitly approved for it, and only
+  // for as long as the app is running. Nothing here is written to disk: a
+  // standing grant is a decision the user should make deliberately, not one
+  // that accumulates from clicking through prompts.
+  rememberedRoots (sessionId) {
+    return [...(this.threadGrants.get(sessionId) || [])]
+  }
+
+  // Keeps the session store's approval flag in step with what is actually
+  // pending, so the APC grid shows a thread waiting on the user as waiting.
+  syncApprovalLight (sessionId) {
+    if (!sessionId) return
+    const pending = [...this.pendingApprovals.values()].some((item) => item.sessionId === sessionId)
+    this.store.setApprovalPending?.(sessionId, pending)
+  }
+
+  isManagedThread (session) {
+    return Boolean(session) && !session.tty && !session.history
+  }
+
+  // One entry point for every provider's "may I?" question. Returns null when
+  // Ambientic has no opinion, which is what keeps a terminal session running its
+  // own native permission flow instead of waiting on this app.
+  async requestToolPermission ({ provider = 'claude', sessionId: providerSessionId = '', cwd = '', tool = '', input = {} } = {}) {
+    const sessionId = this.uiSessionId(provider, providerSessionId)
+    const session = this.sessionFor(sessionId)
+    if (!this.isManagedThread(session)) return null
+    const verdict = decideToolPermission({
+      tool,
+      input,
+      cwd: cwd || session.cwd || '',
+      projectRoots: this.discoverableProjects(cwd || session.cwd || '').map((item) => item.cwd),
+      remembered: this.rememberedRoots(sessionId)
+    })
+    if (verdict.decision !== 'ask') return { decision: verdict.decision, reason: verdict.reason }
+
+    const id = `tool:${randomUUID()}`
+    const approval = {
+      id,
+      provider,
+      sessionId,
+      kind: 'tool-permission',
+      method: 'ToolPermission',
+      title: describeApprovalRequest(tool, input),
+      tool: String(tool || ''),
+      detail: verdict.reason,
+      scope: verdict.scope,
+      options: [],
+      canRemember: Boolean(verdict.scope)
+    }
+    // Answered in two steps on purpose. This call returns at once, so a caller
+    // can discover cheaply whether Ambientic even wants a say; only a request
+    // that genuinely needs a person waits, and it waits in `awaitToolPermission`.
+    // One long-blocking call would mean a stalled Ambientic could hold up every
+    // Claude session on the machine, managed or not.
+    const decided = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.pendingApprovals.has(id)) return
+        this.pendingApprovals.delete(id)
+        this.pendingToolDecisions.delete(id)
+        const current = this.snapshots.get(sessionId)
+        if (current) this.emitSnapshot({ ...current })
+        resolve({ decision: 'deny', reason: 'Ambientic timed out waiting for your approval.' })
+      }, 9 * 60 * 1000)
+      timer.unref?.()
+      this.pendingApprovals.set(id, { ...approval, resolve, timer })
+    })
+    this.pendingToolDecisions.set(id, decided)
+    const snapshot = this.snapshots.get(sessionId) || this.baseSnapshot(session)
+    this.emitSnapshot({ ...snapshot })
+    return { decision: 'ask', id, reason: verdict.reason }
+  }
+
+  // Resolves once the user answers the approval this id refers to. An id nobody
+  // is holding open resolves immediately rather than hanging the caller.
+  awaitToolPermission (id) {
+    return this.pendingToolDecisions.get(id) || Promise.resolve(null)
+  }
+
   async resolveApproval (approvalId, allow, remember = false) {
     const approval = this.pendingApprovals.get(approvalId)
     if (!approval) return false
+    if (approval.kind === 'tool-permission') {
+      if (approval.timer) clearTimeout(approval.timer)
+      // Remembering grants the containing folder, not the single file: the next
+      // file in that folder is the same decision, and asking again for it is
+      // what makes people stop reading these prompts.
+      if (allow && remember && approval.scope) {
+        const root = statSyncKind(approval.scope) === 'folder' ? approval.scope : dirname(approval.scope)
+        const grants = this.threadGrants.get(approval.sessionId) || new Set()
+        grants.add(root)
+        this.threadGrants.set(approval.sessionId, grants)
+      }
+      approval.resolve({
+        decision: allow ? 'allow' : 'deny',
+        reason: allow ? 'You approved this in Ambientic.' : 'You declined this in Ambientic.'
+      })
+      this.pendingApprovals.delete(approvalId)
+      this.pendingToolDecisions.delete(approvalId)
+      const snapshot = this.snapshots.get(approval.sessionId)
+      if (snapshot) this.emitSnapshot({ ...snapshot })
+      return true
+    }
     if (approval.provider === 'ambientic') {
       if (approval.timer) clearTimeout(approval.timer)
       approval.resolve({ allowed: Boolean(allow), remember: Boolean(allow && remember && !approval.destructive), outcome: allow ? 'approved' : 'rejected' })
@@ -993,6 +1162,19 @@ export class WorkspaceService extends EventEmitter {
     const cwd = String(session.cwd || '')
     if (!promptOptions.projectContext && !hasConversation && !this.activeTurns.has(id) && cwd && canInspectProjectRoot(cwd) && cwd !== this.taskWorkspaceRoot && !cwd.startsWith(`${this.taskWorkspaceRoot}/`)) {
       promptOptions.projectContext = { cwd, name: session.project || basename(cwd) }
+    }
+    // Granted on every turn, described once. The grant has to be re-issued each
+    // turn because the provider is re-spawned; the description rides the opening
+    // turn and stays in the conversation from there.
+    const discoverable = contextSuppressed ? [] : this.discoverableProjects(cwd)
+    if (!hasConversation && !promptOptions.knownProjects.length) promptOptions.knownProjects = discoverable
+    // Attaching a file is the user choosing it. Record that as a grant for this
+    // thread so the broker does not turn around and ask permission for the very
+    // thing they just handed over.
+    for (const root of additionalToolRoots(cwd, promptOptions.attachments)) {
+      const grants = this.threadGrants.get(id) || new Set()
+      grants.add(root)
+      this.threadGrants.set(id, grants)
     }
     const pending = message('user', text, {
       pendingProvider: true,
@@ -1175,7 +1357,10 @@ export class WorkspaceService extends EventEmitter {
       // Record the failure; the process 'exit' handler decides whether to
       // compact-and-retry (context overflow) or surface the error.
       const attempt = this.claudeAttempts.get(id)
-      if (attempt) attempt.resultError = event.result || 'Claude returned an error'
+      // `result` is empty on whole classes of failure — API errors, refusals,
+      // limits — and "Claude returned an error" then hides the only fields that
+      // say what happened, leaving a bug report with nothing in it.
+      if (attempt) attempt.resultError = event.result || claudeErrorDetail(event)
       else this.fail(id, new Error(this.claudeResultError(id, event.result)))
     }
   }

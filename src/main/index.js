@@ -10,6 +10,7 @@ import { startServer } from './server.js'
 import { focusSession, pasteClipboardImage, pasteClipboardText, submitTerminalPrompt } from './focus.js'
 import { startDiscovery } from './discovery.js'
 import { createTaskSummarizer } from './summarizer.js'
+import { createInferenceService } from './inference-service.mjs'
 import { createUsageService } from './usage.js'
 import { createConsumptionLedger } from './consumption-ledger.mjs'
 import { createCompanionService } from './companions.js'
@@ -86,7 +87,10 @@ const MIN_HEIGHT = 220
 const MARGIN = 16
 const ZOOM_STEPS = [0.9, 1, 1.15, 1.3, 1.5, 1.75]
 const store = new SessionStore()
-const summarizer = createTaskSummarizer(store)
+// Hosted inference for Ambientic's own small workloads. Keys live in the
+// keychain; only the routing choice is stored beside the app's other state.
+const inference = createInferenceService({ stateDirectory: app.getPath('userData') })
+const summarizer = createTaskSummarizer(store, { inference })
 const usage = createUsageService()
 const companions = createCompanionService(store)
 
@@ -806,6 +810,13 @@ ipcMain.handle('tools-test-connection', (_event, id) => requireContextService(ca
 ipcMain.handle('tools-disable-connection', (_event, id, options = {}) => requireContextService(capabilityGateway).disableConnection(String(id || ''), Boolean(options.disabled)))
 ipcMain.handle('tools-disconnect', (_event, id) => requireContextService(capabilityGateway).disconnect(String(id || '')))
 ipcMain.handle('tools-list-capabilities', (_event, connectionId = '') => ({ capabilities: contextStore?.listCapabilities({ connectionId: String(connectionId || '') }) || [] }))
+ipcMain.handle('inference-snapshot', () => inference.snapshot())
+ipcMain.handle('inference-save-key', (_event, id, key) => inference.saveKey(String(id || ''), String(key || '')))
+ipcMain.handle('inference-remove-key', (_event, id) => inference.removeKey(String(id || '')))
+ipcMain.handle('inference-test', (_event, id) => inference.test(String(id || '')))
+ipcMain.handle('inference-list-models', async (_event, id) => ({ models: await inference.listModels(String(id || '')) }))
+ipcMain.handle('inference-update-provider', (_event, id, patch = {}) => inference.updateProvider(String(id || ''), patch))
+ipcMain.handle('inference-set-route', (_event, workload, providerId) => inference.setRoute(String(workload || ''), String(providerId || 'auto')))
 ipcMain.handle('audit-list', (_event, options = {}) => ({ events: requireContextService(contextStore).listAudit({ limit: options.limit || 200, bindingId: options.bindingId || '', category: options.category || '' }).map((item) => ({ ...item, type: item.eventType, title: item.eventType.replaceAll('.', ' ') })) }))
 ipcMain.handle('get-usage', () => usage.getState())
 ipcMain.handle('get-consumption-ledger', () => consumptionLedger?.getState() || null)
@@ -1569,6 +1580,14 @@ app.whenReady().then(() => {
     port: explicitStateDirectory ? 0 : undefined,
     focusById: queueFocus,
     onApprovalRequest: (event, sessionId) => workspace.requestExternalApproval('claude', event, sessionId),
+    onToolPermission: (event) => workspace.requestToolPermission({
+      provider: 'claude',
+      sessionId: String(event?.session_id || ''),
+      cwd: String(event?.cwd || ''),
+      tool: String(event?.tool_name || ''),
+      input: event?.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {}
+    }),
+    onToolPermissionWait: (event) => workspace.awaitToolPermission(String(event?.id || '')),
     onTaskText: (id, text) => {
       store.updateContext(id, text)
       summarizer.enqueue(id, text)

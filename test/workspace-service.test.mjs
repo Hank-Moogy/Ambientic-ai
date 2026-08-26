@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkspaceService, createPrivateTaskWorkspace, describeApprovalRequest } from '../src/main/workspace-service.mjs'
@@ -559,4 +559,166 @@ test('approval titles stay short enough for the card', () => {
   const title = describeApprovalRequest('Bash', { command: 'echo ' + 'x'.repeat(500) })
   assert.ok(title.length <= 120, `title was ${title.length} chars`)
   assert.ok(title.endsWith('\u2026'))
+})
+
+test('a task launched without a project can still discover and reach the others', async () => {
+  const spawned = []
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/scratch', project: 'scratch' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: (path, args) => {
+      spawned.push(args)
+      return { stdout: { on () {} }, stderr: { on () {} }, on () {} }
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.read = async () => ({ id: 'thread-1', messages: [], artifacts: [], approvals: [] })
+  service.recentProjects = () => [
+    { cwd: '/Users/person/projects/ambientic', name: 'Ambientic' },
+    { cwd: '/Users/person/projects/memoli', name: 'Memoli' }
+  ]
+  service.emitSnapshot = (snapshot) => snapshot
+  service.ingestLifecycle = () => {}
+
+  await service.send('thread-1', 'Fix the router in memoli.')
+
+  // Scope is no longer pre-granted through the sandbox; the agent is told what
+  // exists and the broker decides each request. Naming them is what makes them
+  // reachable at all, so that is what this asserts.
+  const args = spawned[0]
+  assert.equal(args.includes('--add-dir'), false)
+  const prompt = args[args.indexOf('-p') + 1]
+  assert.match(prompt, /Memoli: \/Users\/person\/projects\/memoli/)
+  assert.match(prompt, /Ambientic: \/Users\/person\/projects\/ambientic/)
+})
+
+test('a failed turn reports why, even when Claude sends an empty result', () => {
+  const failures = []
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => ({ stdout: { on () {} }, stderr: { on () {} }, on () {} })
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.fail = (id, error) => failures.push(error.message)
+  service.snapshots.set('thread-1', { id: 'thread-1', messages: [] })
+
+  service.runClaude(session, 'Do it.', {})
+  service.claudeEvent('thread-1', JSON.stringify({
+    type: 'result',
+    is_error: true,
+    result: '',
+    api_error_status: 429,
+    subtype: 'error_during_execution',
+    permission_denials: [{ tool_name: 'Read' }]
+  }))
+
+  const detail = service.claudeAttempts.get('thread-1').resultError
+  assert.match(detail, /API status 429/)
+  assert.match(detail, /subtype error_during_execution/)
+  assert.match(detail, /denied Read/)
+})
+
+function brokerService (session, projects = []) {
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.recentProjects = () => projects
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: session.id, messages: [] })
+  return service
+}
+
+test('a terminal session is never brokered, so it can never wait on Ambientic', async () => {
+  const terminal = { id: 'sess-1', agent: 'claude', cwd: '/Users/person/projects/app', tty: 'ttys004' }
+  const service = brokerService(terminal)
+  assert.equal(await service.requestToolPermission({ sessionId: 'sess-1', tool: 'Read', input: { file_path: '/etc/hosts' } }), null)
+
+  const history = { id: 'sess-2', agent: 'claude', cwd: '/Users/person/projects/app', history: true }
+  assert.equal(await brokerService(history).requestToolPermission({ sessionId: 'sess-2', tool: 'Read', input: { file_path: '/etc/hosts' } }), null)
+})
+
+test('a managed thread is answered at once for anything already in scope', async () => {
+  const managed = { id: 'sess-3', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = brokerService(managed)
+  const verdict = await service.requestToolPermission({
+    sessionId: 'sess-3', tool: 'Read', input: { file_path: '/Users/person/projects/app/src/index.js' }
+  })
+  assert.equal(verdict.decision, 'allow')
+  assert.equal(service.pendingApprovals.size, 0)
+})
+
+test('an out-of-scope tool asks, waits for the answer, and remembers the folder', async () => {
+  const managed = { id: 'sess-4', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = brokerService(managed)
+  const asked = await service.requestToolPermission({
+    sessionId: 'sess-4', tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' }
+  })
+  assert.equal(asked.decision, 'ask')
+  assert.equal(service.pendingApprovals.size, 1)
+
+  const waiting = service.awaitToolPermission(asked.id)
+  await service.resolveApproval(asked.id, true, true)
+  assert.equal((await waiting).decision, 'allow')
+
+  // Remembering grants the folder, so the next file beside it does not re-ask.
+  assert.deepEqual(service.rememberedRoots('sess-4'), ['/Users/person/notes'])
+  const second = await service.requestToolPermission({
+    sessionId: 'sess-4', tool: 'Read', input: { file_path: '/Users/person/notes/other.md' }
+  })
+  assert.equal(second.decision, 'allow')
+})
+
+test('an approval nobody is holding open resolves instead of hanging the caller', async () => {
+  const service = brokerService({ id: 'sess-5', agent: 'claude', cwd: '/tmp/x' })
+  assert.equal(await service.awaitToolPermission('tool:does-not-exist'), null)
+})
+
+test('the hardware light follows pending approvals without each call site saying so', async () => {
+  const session = { id: 'sess-6', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const flags = []
+  const service = new WorkspaceService({
+    list: () => [session],
+    ingest: () => {},
+    setApprovalPending: (id, pending) => flags.push({ id, pending })
+  }, () => [])
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: session.id, messages: [] })
+
+  const asked = await service.requestToolPermission({
+    sessionId: 'sess-6', tool: 'Read', input: { file_path: '/Users/person/elsewhere/x.md' }
+  })
+  assert.deepEqual(flags.at(-1), { id: 'sess-6', pending: true })
+
+  await service.resolveApproval(asked.id, true, false)
+  assert.deepEqual(flags.at(-1), { id: 'sess-6', pending: false })
+})
+
+test('a file the user attached is not then asked about', async () => {
+  const session = { id: 'sess-7', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => ({ stdout: { on () {} }, stderr: { on () {} }, on () {} })
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.recentProjects = () => []
+  service.read = async () => ({ id: 'sess-7', messages: [], artifacts: [], approvals: [] })
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: 'sess-7', messages: [] })
+  service.ingestLifecycle = () => {}
+
+  // Attachments are stat-checked before they are trusted, so this needs a file
+  // that is really there.
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-attach-'))
+  const attached = join(directory, 'spec.md')
+  writeFileSync(attached, 'spec')
+  try {
+    await service.send('sess-7', 'Compare this.', { attachments: [{ path: attached }] })
+    // Attaching is the user choosing it, so reading it is already decided.
+    const verdict = await service.requestToolPermission({
+      sessionId: 'sess-7', tool: 'Read', input: { file_path: attached }
+    })
+    assert.equal(verdict.decision, 'allow')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })

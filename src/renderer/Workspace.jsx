@@ -13,6 +13,7 @@ import { GoalsWorkspace } from './Goals.jsx'
 import { WorkflowStudio } from './WorkflowStudio.jsx'
 import { HardwareWorkspace } from './HardwareWorkspace.jsx'
 import { AppsToolsSettings, LaunchContext, MemoryWorkspace, ThreadContextPanel } from './ContextMemory.jsx'
+import { InferenceProviderSettings } from './InferenceProviders.jsx'
 import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
@@ -345,6 +346,7 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [contextBinding, setContextBinding] = useState({})
+  const [advanced, setAdvanced] = useState(false)
   const projectChoiceMade = useRef(false)
   const selectedConnector = taskConnectors.find((item) => item.id === provider)
   const providerReady = Boolean(selectedConnector?.installed && selectedConnector.manageable !== false)
@@ -352,6 +354,13 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
   const selectedProjectName = selectedProject?.name || cwd.split(/[\\/]/).filter(Boolean).at(-1) || 'Existing project'
   const selectedModel = taskOptions.models.find((item) => item.id === model)
   const effortOptions = selectedModel?.efforts?.length ? selectedModel.efforts : taskOptions.efforts
+  // Collapsed settings still have values. Naming them is what keeps this a
+  // disclosure rather than a place where decisions go to hide.
+  const linkedGoal = (goalsSnapshot?.goals || []).find((goal) => goal.id === contextBinding.goalId)
+  const advancedSummary = [
+    selectedProject ? selectedProjectName : 'No linked project',
+    linkedGoal ? `Goal: ${linkedGoal.outcome || linkedGoal.title}` : ''
+  ].filter(Boolean).join(' · ')
   useEffect(() => {
     if (providerReady) return
     const fallback = taskConnectors.find((item) => item.installed && item.manageable !== false)
@@ -467,15 +476,25 @@ function NewTask ({ connectors, goalsSnapshot, initialProvider, onClose, onCreat
           </div> : <div className="new-task-tuning-empty">{loadingOptions ? 'Loading model choices…' : `${selectedConnector?.label || 'This provider'} manages its own model settings.`}</div>}
           {(selectedModel?.description || effortOptions.find((item) => item.id === effort)?.description) && <small className="new-task-tuning-note">{[selectedModel?.description, effortOptions.find((item) => item.id === effort)?.description].filter(Boolean).join(' · ')}</small>}
         </section>
-        <section className="new-task-work-area">
-          <div><span>Ambientic project</span><b>{selectedProject ? selectedProjectName : 'Scratch workspace'}</b><small>{cwd || (selectedProject ? 'Folderless project · the agent will run in a private Ambientic workspace.' : 'No durable project memory · the agent will run in a private Ambientic workspace.')}</small></div>
-          <button type="button" onClick={chooseFolder}>{selectedProject ? 'Change folder' : 'Add project'}</button>
+        <section className="new-task-advanced" data-open={advanced || undefined}>
+          <button type="button" className="new-task-advanced__toggle" aria-expanded={advanced} onClick={() => setAdvanced((value) => !value)}><span>Advanced settings</span><small>{advancedSummary}</small><i aria-hidden="true">{advanced ? '−' : '+'}</i></button>
+          {/* Hidden rather than unmounted: LaunchContext is what infers the
+              project and goal binding, so dropping it from the tree would
+              quietly strip a task of its context instead of tidying the form. */}
+          <div className="new-task-advanced__body" hidden={!advanced}>
+            <section className="new-task-work-area">
+              <div><span>Ambientic project</span><b>{selectedProject ? selectedProjectName : 'Scratch workspace'}</b><small>{cwd || (selectedProject ? 'Folderless project · the agent runs in a private Ambientic workspace and can still open your other projects.' : 'No durable project memory · the agent runs in a private Ambientic workspace and can open your other projects to find the work itself.')}</small></div>
+              <button type="button" onClick={chooseFolder}>{selectedProject ? 'Change folder' : 'Add project'}</button>
+            </section>
+            {projects.length > 0 && <div className="new-task-recents"><span>Projects</span>{projects.slice(0, 8).map((project) => <button type="button" key={project.id} data-selected={selectedProjectId === project.id} title={project.rootPath || 'Folderless project'} onClick={() => chooseProject(project.id)}>{project.name}</button>)}</div>}
+            {selectedProjectId && <button className="new-task-private" type="button" onClick={() => chooseProject('')}>Start without a linked project</button>}
+            <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} projectId={selectedProjectId} goalsSnapshot={goalsSnapshot} onProjectChange={chooseProject} onChange={setContextBinding} onCreateGoal={onCreateGoal} onCreateTask={onCreateTask} />
+          </div>
         </section>
-        {projects.length > 0 && <div className="new-task-recents"><span>Projects</span>{projects.slice(0, 8).map((project) => <button type="button" key={project.id} data-selected={selectedProjectId === project.id} title={project.rootPath || 'Folderless project'} onClick={() => chooseProject(project.id)}>{project.name}</button>)}</div>}
-        {selectedProjectId && <button className="new-task-private" type="button" onClick={() => chooseProject('')}>Start without a linked project</button>}
-        {launchAccess?.warning && <div className="new-task-access-note" data-risk={launchAccess.broad ? 'blocked' : 'notice'}><b>{launchAccess.broad ? 'Choose a narrower folder' : 'macOS access notice'}</b><span>{launchAccess.warning}</span></div>}
-        <LaunchContext provider={provider} cwd={cwd.trim()} prompt={prompt} projectId={selectedProjectId} goalsSnapshot={goalsSnapshot} onProjectChange={chooseProject} onChange={setContextBinding} onCreateGoal={onCreateGoal} onCreateTask={onCreateTask} />
-        <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={cwd ? `What should the agent do in ${selectedProjectName}? (optional)` : 'What should this agent create? (optional)'} autoFocus /></label>
+        {/* A blocking folder choice stays visible even when collapsed: the task
+            refuses to start, and its only explanation would be folded away. */}
+        {launchAccess?.warning && (launchAccess.broad || advanced) && <div className="new-task-access-note" data-risk={launchAccess.broad ? 'blocked' : 'notice'}><b>{launchAccess.broad ? 'Choose a narrower folder' : 'macOS access notice'}</b><span>{launchAccess.warning}</span></div>}
+        <label>First prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={cwd ? `What should the agent do in ${selectedProjectName}? (optional)` : 'What should the agent do? Name a project and it will find it. (optional)'} autoFocus /></label>
         {error && <div className="new-task__error" role="alert"><span>!</span><p>{error}</p></div>}
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" disabled={busy || !providerReady} type="submit">{busy ? 'Starting…' : providerReady ? 'Start task' : 'Connect a provider first'}</button></footer>
       </form>
@@ -1001,6 +1020,19 @@ function Onboarding ({ state, connectors, providerAuth, midi, memoryBootstrap, o
   )
 }
 
+// Settings sections in sidebar order. Agent accounts and inference accounts are
+// deliberately separate: one runs your threads, the other runs Ambientic's own
+// small workloads.
+const settingsSections = [
+  { id: 'providers', title: 'AI provider accounts', label: 'AI Providers', hint: 'Accounts and local CLIs', assurance: 'Credentials stay private', assuranceNote: 'Ambientic delegates sign-in to each provider and never reads or stores your password, token, or API key.' },
+  { id: 'inference', title: 'Inference providers', label: 'Inference', hint: 'Hosted models for Ambientic', assurance: 'Your account, your keys', assuranceNote: 'Ambientic stores each inference API key in your macOS keychain and uses it only for the workloads you route through it.' },
+  { id: 'memory', title: 'Memory', label: 'Memory', hint: 'Profile, projects, and history', assurance: 'Local and reviewable', assuranceNote: 'Imported and learned context stays on this Mac. You can edit, supersede, exclude, or forget it at any time.' },
+  { id: 'tools', title: 'Apps & tools', label: 'Apps & Tools', hint: 'Shared MCP capabilities', assurance: 'One permission boundary', assuranceNote: 'Ambientic brokers capabilities and approvals so agents never receive third-party credentials.' },
+  { id: 'usage', title: 'Usage & billing', label: 'Usage & Billing', hint: 'Limits, resets, and spend', assurance: 'Measured honestly', assuranceNote: 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' },
+  { id: 'ambient', title: 'Ambient mode', label: 'Ambient Mode', hint: 'Sleep prevention and safety', assurance: 'Temporary and reversible', assuranceNote: 'Ambient mode is always user-controlled and releases its assertion when the app quits.' },
+  { id: 'midi', title: 'MIDI hardware', label: 'MIDI Hardware', hint: 'Controller and native mode', assurance: 'One controller at a time', assuranceNote: 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.' }
+]
+
 function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, midi, ambientMode, buildInfo, initialSection = 'providers', onRefresh, onRefreshUsage, onConnect, onInstallHooks, onMidiProfile, onAmbientToggle, onAmbientCheckIn, onReplayOnboarding }) {
   const [checking, setChecking] = useState(false)
   const [connecting, setConnecting] = useState('')
@@ -1070,13 +1102,15 @@ function ProviderSettings ({ connectors, providerAuth, sessions, usage, ledger, 
     if (result.status === 'failed') setNotice(result.error || 'Claude Code login was not completed.')
   }, [providerAuth?.claude?.updatedAt])
 
+  const active = settingsSections.find((item) => item.id === section) || settingsSections[0]
+
   return (
     <section className="settings-page">
-      <header className="settings-topbar"><div><span>Settings</span><h1>{section === 'providers' ? 'AI provider accounts' : section === 'memory' ? 'Memory' : section === 'tools' ? 'Apps & tools' : section === 'usage' ? 'Usage & billing' : section === 'ambient' ? 'Ambient mode' : 'MIDI hardware'}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
+      <header className="settings-topbar"><div><span>Settings</span><h1>{active.title}</h1></div>{section === 'providers' && <button type="button" data-refreshing={checking} onClick={() => refresh(true)}>{checking ? 'Checking…' : 'Check connections'}</button>}{section === 'usage' && <button type="button" data-refreshing={Boolean(usage?.refreshing)} onClick={onRefreshUsage}>{usage?.refreshing ? 'Refreshing…' : 'Refresh usage'}</button>}</header>
       <div className="settings-scroll">
-        <aside className="settings-sections"><span>Workspace</span><button type="button" data-selected={section === 'providers'} onClick={() => setSection('providers')}><b>AI Providers</b><small>Accounts and local CLIs</small></button><button type="button" data-selected={section === 'memory'} onClick={() => setSection('memory')}><b>Memory</b><small>Profile, projects, and history</small></button><button type="button" data-selected={section === 'tools'} onClick={() => setSection('tools')}><b>Apps &amp; Tools</b><small>Shared MCP capabilities</small></button><button type="button" data-selected={section === 'usage'} onClick={() => setSection('usage')}><b>Usage & Billing</b><small>Limits, resets, and spend</small></button><button type="button" data-selected={section === 'ambient'} onClick={() => setSection('ambient')}><b>Ambient Mode</b><small>Sleep prevention and safety</small></button><button type="button" data-selected={section === 'midi'} onClick={() => setSection('midi')}><b>MIDI Hardware</b><small>Controller and native mode</small></button><button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart provider-memory setup</small></button><div><b>{section === 'providers' ? 'Credentials stay private' : section === 'memory' ? 'Local and reviewable' : section === 'tools' ? 'One permission boundary' : section === 'usage' ? 'Measured honestly' : section === 'ambient' ? 'Temporary and reversible' : 'One controller at a time'}</b><p>{section === 'providers' ? 'Ambientic delegates sign-in to each provider and never reads or stores your password, token, or API key.' : section === 'memory' ? 'Imported and learned context stays on this Mac. You can edit, supersede, exclude, or forget it at any time.' : section === 'tools' ? 'Ambientic brokers capabilities and approvals so agents never receive third-party credentials.' : section === 'usage' ? 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' : section === 'ambient' ? 'Ambient mode is always user-controlled and releases its assertion when the app quits.' : 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.'}</p></div><footer className="settings-build"><span>Installed build</span><b>Ambientic {buildInfo?.version || 'development'}</b><code>{buildInfo?.commit === 'development' ? 'Development' : buildInfo?.commit?.slice(0, 8)}</code>{buildInfo?.builtAt && <small>{buildInfo.branch} · {new Date(buildInfo.builtAt).toLocaleString()}{buildInfo.dirty ? ' · modified' : ''}</small>}</footer></aside>
+        <aside className="settings-sections"><span>Workspace</span>{settingsSections.map((item) => <button type="button" key={item.id} data-selected={section === item.id} onClick={() => setSection(item.id)}><b>{item.label}</b><small>{item.hint}</small></button>)}<button className="settings-replay-onboarding" type="button" onClick={onReplayOnboarding}><b>Replay onboarding</b><small>Restart provider-memory setup</small></button><div><b>{active.assurance}</b><p>{active.assuranceNote}</p></div><footer className="settings-build"><span>Installed build</span><b>Ambientic {buildInfo?.version || 'development'}</b><code>{buildInfo?.commit === 'development' ? 'Development' : buildInfo?.commit?.slice(0, 8)}</code>{buildInfo?.builtAt && <small>{buildInfo.branch} · {new Date(buildInfo.builtAt).toLocaleString()}{buildInfo.dirty ? ' · modified' : ''}</small>}</footer></aside>
         <main className="provider-settings">
-          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'ambient' ? <AmbientModeSettings ambientMode={ambientMode} onToggle={onAmbientToggle} onCheckInChange={onAmbientCheckIn} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : section === 'memory' ? <MemoryWorkspace /> : section === 'tools' ? <AppsToolsSettings /> : <>
+          {section === 'midi' ? <MidiHardwareSettings midi={midi} onSelect={onMidiProfile} /> : section === 'ambient' ? <AmbientModeSettings ambientMode={ambientMode} onToggle={onAmbientToggle} onCheckInChange={onAmbientCheckIn} /> : section === 'usage' ? <UsageSettings sessions={sessions} usage={usage} ledger={ledger} onRefresh={onRefreshUsage} /> : section === 'memory' ? <MemoryWorkspace /> : section === 'tools' ? <AppsToolsSettings /> : section === 'inference' ? <InferenceProviderSettings /> : <>
           <div className="provider-settings__intro"><span className="eyebrow"><i /> Local account bridge</span><h2>Connect the agents you already use.</h2><p>Each provider keeps ownership of authentication. Ambientic checks the installed CLI, opens its official login flow, and uses that existing local session.</p></div>
           {notice && <div className="settings-notice"><span>i</span>{notice}</div>}
           <div className="provider-account-list">
