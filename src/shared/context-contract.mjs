@@ -70,6 +70,81 @@ export const AMBIENTIC_TOOL_SCHEMAS = Object.freeze([
     }
   },
   {
+    name: 'ambientic_career_read',
+    description: 'Read the private local Career OS opportunity pipeline or today’s deterministic action queue. Available only to Career OS workflow sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['snapshot', 'profile', 'opportunity', 'daily_queue'] },
+        opportunityId: { type: 'string', maxLength: 120 }
+      },
+      required: ['action'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'ambientic_jobs_discover',
+    description: 'Discover current jobs from supported public ATS APIs and remote-job feeds. Use catalog first, prefer canonical ATS sources, preserve source attribution, and resolve aggregator results back to an employer ATS when possible. Available only to Career OS workflow sessions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['catalog', 'discover'] },
+        source: { type: 'string', enum: ['greenhouse', 'ashby', 'lever', 'himalayas', 'remotive', 'jobicy', 'remoteok', 'weworkremotely', 'welcome'] },
+        board: { type: 'string', maxLength: 120 },
+        company: { type: 'string', maxLength: 160 },
+        region: { type: 'string', enum: ['global', 'eu'] },
+        query: { type: 'string', maxLength: 120 },
+        country: { type: 'string', maxLength: 80 },
+        worldwide: { type: 'boolean' },
+        limit: { type: 'integer', minimum: 1, maximum: 50 }
+      },
+      required: ['action'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'ambientic_career_update',
+    description: 'Persist normalized Career OS profile proposals, opportunities, pipeline changes, interviews, pass feedback, or market-scan totals. Profile proposals use flat string arrays and remain needs_review until the user approves them in Career OS. Available only to Career OS workflow sessions and audited locally.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['profile', 'upsert', 'status', 'pass', 'interview', 'market_scan'] },
+        profile: {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: ['needs_review'] },
+            headline: { type: 'string', maxLength: 240 },
+            summary: { type: 'string', maxLength: 3000 },
+            yearsExperience: { type: 'number', minimum: 0, maximum: 80 },
+            strongestAreas: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 160 } },
+            achievements: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 500 } },
+            skills: { type: 'array', maxItems: 80, items: { type: 'string', maxLength: 120 } },
+            projects: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 500 } },
+            leadership: { type: 'array', maxItems: 30, items: { type: 'string', maxLength: 500 } },
+            technologies: { type: 'array', maxItems: 80, items: { type: 'string', maxLength: 120 } },
+            domains: { type: 'array', maxItems: 40, items: { type: 'string', maxLength: 160 } },
+            careerNarrative: { type: 'string', maxLength: 4000 },
+            uncertainties: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 500 } },
+            sourceCoverage: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 160 } }
+          },
+          additionalProperties: false
+        },
+        opportunityId: { type: 'string', maxLength: 120 },
+        opportunity: { type: 'object' },
+        status: { type: 'string', enum: ['New', 'Saved', 'Pursuing', 'Application Ready', 'Applied', 'Recruiter Screen', 'Interview', 'Final Round', 'Offer', 'Rejected', 'Withdrawn', 'Archived'] },
+        nextAction: { type: 'string', maxLength: 500 },
+        reason: { type: 'string', maxLength: 80 },
+        note: { type: 'string', maxLength: 1000 },
+        interview: { type: 'object' },
+        processed: { type: 'integer', minimum: 0, maximum: 1000000 },
+        matched: { type: 'integer', minimum: 0, maximum: 1000000 },
+        idempotencyKey: { type: 'string', maxLength: 160 }
+      },
+      required: ['action'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'ambientic_capability',
     description: 'Search connected tool capabilities or invoke one through Ambientic permissions and audit.',
     inputSchema: {

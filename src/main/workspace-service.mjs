@@ -504,7 +504,7 @@ export class WorkspaceService extends EventEmitter {
     return session.id
   }
 
-  prepareContext ({ provider, providerSessionId, cwd = '', prompt = '', contextBinding = {} }) {
+  prepareContext ({ provider, providerSessionId, cwd = '', prompt = '', contextBinding = {}, gatewayScopes = null }) {
     if (!this.contextEngine) return null
     const prepared = this.contextEngine.prepareSession({
       provider,
@@ -515,7 +515,7 @@ export class WorkspaceService extends EventEmitter {
       goalId: contextBinding.goalId,
       taskId: contextBinding.taskId
     })
-    return this.contextFiles(prepared.binding)
+    return this.contextFiles(prepared.binding, { gatewayScopes })
   }
 
   ensureContext (session, { prompt = '', contextBinding = {} } = {}) {
@@ -526,14 +526,14 @@ export class WorkspaceService extends EventEmitter {
     return this.prepareContext({ provider: session.agent, providerSessionId, cwd: session.cwd || '', prompt, contextBinding })
   }
 
-  contextFiles (binding) {
+  contextFiles (binding, { gatewayScopes = null } = {}) {
     if (!binding || !this.capabilityGateway || !this.gatewayShimPath) return binding ? { binding, capsule: binding.capsuleText, mcp: null } : null
     let runtime = this.gatewayRuntime.get(binding.id)
     if (!runtime) {
       // Starting a fresh shim runtime reauthorizes this binding. Revoke any
       // token left by an earlier app process before issuing the replacement.
       this.capabilityGateway.revokeBinding(binding.id)
-      const session = this.capabilityGateway.issueSession(binding.id)
+      const session = this.capabilityGateway.issueSession(binding.id, gatewayScopes?.length ? { scopes: gatewayScopes } : undefined)
       const mcp = this.capabilityGateway.configurationFor(session, { executable: this.gatewayExecutable, shimPath: this.gatewayShimPath })
       mkdirSync(this.contextArtifactRoot, { recursive: true, mode: 0o700 })
       const safeId = String(binding.id).replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -692,16 +692,13 @@ export class WorkspaceService extends EventEmitter {
     if (this.hasPendingApproval(id)) return 'attention'
     if (snapshot?.awaitingReply) return 'attention'
     if (session?.state === 'attention' || session?.state === 'waiting') return session.state
-    // Codex Desktop and hook-backed terminals own their provider process in a
-    // different runtime from Ambientic's passive transcript reader. A
-    // thread/read response from Ambientic's app-server can therefore be idle
-    // while the real Codex Desktop turn is working. Treat both live signals as
-    // a union: either one may promote to running, but a passive read may not
-    // demote an authoritative provider lifecycle.
+    // A provider-native turn/read result is authoritative. Discovery and hooks
+    // are still used when no provider turn status is available, but process
+    // liveness must never overrule an explicit idle result: providers commonly
+    // keep their process alive between turns.
     const hasAuthoritativeExternalLifecycle = Boolean(session?.tty) || session?.externalSource === 'codex-desktop'
-    if (hasAuthoritativeExternalLifecycle && (this.isRunning(id, snapshot) || session?.state === 'running')) return 'running'
-    if (hasAuthoritativeExternalLifecycle && snapshot?.turnStateKnown) return session?.history ? 'history' : (session?.state || 'idle')
     if (snapshot?.turnStateKnown) return this.isRunning(id, snapshot) ? 'running' : (session?.history ? 'history' : 'idle')
+    if (hasAuthoritativeExternalLifecycle && (this.isRunning(id, snapshot) || session?.state === 'running')) return 'running'
     if (this.isRunning(id, snapshot) || session?.state === 'running') return 'running'
     if (snapshot) return session?.history ? 'history' : 'idle'
     return session?.history ? 'history' : (session?.state || 'idle')
@@ -758,7 +755,7 @@ export class WorkspaceService extends EventEmitter {
         // Codex ended its last turn by asking the user a question, which
         // still needs a reply to move forward.
         if (snapshot.running) this.ingestLifecycle(id, 'tool')
-        else if (!session.history && !session.tty && session.externalSource !== 'codex-desktop') {
+        else if (!session.history && !session.tty) {
           this.ingestLifecycle(id, snapshot.awaitingReply ? 'notification' : 'stop_idle')
         }
       } else if (session.agent === 'claude') {
@@ -1153,7 +1150,13 @@ export class WorkspaceService extends EventEmitter {
     if (!session) throw new Error('This session is no longer available.')
     const contextSuppressed = Boolean(options.skipAmbienticContext || this.contextSuppressedSessions.has(id))
     if (contextSuppressed) this.contextSuppressedSessions.add(id)
-    const snapshot = await this.read(id)
+    const newCodexThread = session.agent === 'codex' && this.codexStartedThreads.has(this.codexThreadId(session)) && !this.activeTurns.has(id)
+    // Codex cannot serve includeTurns between thread/start and the first
+    // turn/start. Building the empty local snapshot here prevents that normal
+    // pre-turn state from being emitted as a fatal managed-workflow error.
+    const snapshot = newCodexThread
+      ? { ...this.baseSnapshot(session), ...(this.snapshots.get(id) || {}), messages: [], error: '', running: false, turnStateKnown: false }
+      : await this.read(id)
     const promptOptions = normalizePromptOptions(options, session.agent)
     const context = contextSuppressed ? null : this.ensureContext(session, { prompt: text, contextBinding: options.contextBinding || {} })
     const startsTurn = !this.activeTurns.has(id)
@@ -1240,7 +1243,7 @@ export class WorkspaceService extends EventEmitter {
     return this.emitSnapshot(snapshot)
   }
 
-  async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build', contextBinding = {}, skipAmbienticContext = false }) {
+  async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build', contextBinding = {}, skipAmbienticContext = false, gatewayScopes = null }) {
     const requestedDirectory = String(cwd || '').trim()
     const workingDirectory = requestedDirectory || createPrivateTaskWorkspace(this.taskWorkspaceRoot, prompt)
     if (!isAbsolute(workingDirectory)) throw new Error('The selected project folder is not available.')
@@ -1255,7 +1258,7 @@ export class WorkspaceService extends EventEmitter {
     if (provider === 'codex') {
       const rpc = await this.codexClient()
       const normalized = normalizePromptOptions({ model, effort, mode }, provider)
-      const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
+      const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding, gatewayScopes })
       const result = await rpc.request('thread/start', {
         cwd: workingDirectory,
         ...(normalized.model ? { model: normalized.model } : {}),
@@ -1273,7 +1276,7 @@ export class WorkspaceService extends EventEmitter {
     }
     if (provider === 'hermes') {
       const rpc = await this.hermesClient()
-      const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
+      const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding, gatewayScopes })
       const result = await rpc.request('session/new', { cwd: workingDirectory, mcpServers: context?.mcp ? [{ name: 'ambientic', ...context.mcp }] : [] })
       const id = result.sessionId
       if (skipAmbienticContext) this.contextSuppressedSessions.add(id)
@@ -1286,7 +1289,7 @@ export class WorkspaceService extends EventEmitter {
       if (this.connector('claude')?.manageable === false) throw new Error('Claude Code is not logged in. Run `claude /login` in a terminal, then refresh Ambientic connectors.')
       const id = randomUUID()
       if (skipAmbienticContext) this.contextSuppressedSessions.add(id)
-      else this.prepareContext({ provider, providerSessionId: id, cwd: workingDirectory, prompt, contextBinding })
+      else this.prepareContext({ provider, providerSessionId: id, cwd: workingDirectory, prompt, contextBinding, gatewayScopes })
       this.store.ingest({ event: 'session_start', session_id: id, agent: 'claude', project: basename(workingDirectory), cwd: workingDirectory, summary: 'New Claude task' })
       if (prompt) await this.send(id, prompt, { mode, model, effort, contextBinding, skipAmbienticContext, projectContext: requestedDirectory ? { cwd: workingDirectory, name: basename(workingDirectory) } : null })
       return id

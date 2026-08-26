@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
-import { join, dirname, resolve, sep } from 'node:path'
+import { join, dirname, resolve, sep, extname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
@@ -27,13 +27,15 @@ import { ensureEnhancedPath } from './env-path.mjs'
 import { initFileLogging, logFilePath } from './logging.mjs'
 import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-mode.mjs'
 import { readBuildInfo } from './build-info.mjs'
-import { createGoalsRepository, createWorkflowsRepository } from './repositories.mjs'
+import { createCareerOsRepository, createGoalsRepository, createWorkflowsRepository } from './repositories.mjs'
 import { createContextStore } from './context-store.mjs'
 import { createContextEngine } from './context-engine.mjs'
 import { createCapabilityGateway } from './capability-gateway.mjs'
+import { discoverCareerJobs } from './career-job-sources.mjs'
 import { createMemoryBootstrapService } from './memory-bootstrap-service.mjs'
 import { createHardwareProfileService } from './hardware-profile-service.mjs'
 import { projectLaunchAccess } from './project-scope.mjs'
+import { CAREER_OS_PACK } from '../shared/career-os-pack.mjs'
 
 // Apply disposable state before logging and before Electron derives the
 // single-instance lock. This lets a clean-profile developer smoke coexist with
@@ -85,6 +87,7 @@ const DEFAULT_WIDTH = 232
 const MIN_WIDTH = 232
 const MIN_HEIGHT = 220
 const MARGIN = 16
+const CAREER_OS_GATEWAY_SCOPES = ['context:read', 'memory:read', 'memory:write', 'goals:read', 'tasks:write', 'capabilities:invoke', 'career:read', 'career:discover', 'career:write']
 const ZOOM_STEPS = [0.9, 1, 1.15, 1.3, 1.5, 1.75]
 const store = new SessionStore()
 // Hosted inference for Ambientic's own small workloads. Keys live in the
@@ -117,6 +120,7 @@ let claudeAuth = null
 let ambientMode = null
 let goals = null
 let workflows = null
+let career = null
 let hardwareProfiles = null
 let contextStore = null
 let contextEngine = null
@@ -702,14 +706,62 @@ ipcMain.handle('create-goal', (_event, input) => goals.createGoal(input || {}))
 ipcMain.handle('update-goal', (_event, goalId, patch) => goals.updateGoal(goalId, patch || {}))
 ipcMain.handle('create-goal-task', (_event, goalId, input) => goals.createTask(goalId, input || {}))
 ipcMain.handle('update-goal-task', (_event, taskId, patch) => goals.updateTask(taskId, patch || {}))
-ipcMain.handle('get-workflows', () => workflows?.list() || { version: 1, workflows: [], runs: [], updatedAt: null })
+ipcMain.handle('get-workflows', () => workflows?.list() || { version: 2, workflows: [], runs: [], packs: [], updatedAt: null })
+ipcMain.handle('choose-career-profile-file', async (_event, kind = 'resume') => {
+  const linkedin = kind === 'linkedin'
+  const result = await dialog.showOpenDialog(workspaceWin || win, {
+    title: linkedin ? 'Choose your LinkedIn profile PDF' : 'Choose your CV',
+    buttonLabel: linkedin ? 'Use LinkedIn PDF' : 'Use this CV',
+    properties: ['openFile'],
+    filters: linkedin
+      ? [{ name: 'LinkedIn PDF', extensions: ['pdf'] }]
+      : [{ name: 'CV documents', extensions: ['pdf', 'doc', 'docx', 'rtf', 'txt', 'md'] }]
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+  const path = await realpath(result.filePaths[0])
+  const details = await stat(path)
+  const allowed = linkedin ? new Set(['.pdf']) : new Set(['.pdf', '.doc', '.docx', '.rtf', '.txt', '.md'])
+  if (!details.isFile() || !allowed.has(extname(path).toLocaleLowerCase())) throw new Error('Choose a supported career document.')
+  if (details.size > 20 * 1024 * 1024) throw new Error('Career documents must be smaller than 20 MB.')
+  return { path, name: basename(path), size: details.size }
+})
+ipcMain.handle('install-career-os', async (_event, rawSetup) => {
+  const setup = { ...(rawSetup || {}) }
+  for (const [field, linkedin] of [['resumePath', false], ['linkedinProfilePath', true]]) {
+    if (!setup[field]) continue
+    const path = await realpath(String(setup[field]))
+    const details = await stat(path)
+    const allowed = linkedin ? new Set(['.pdf']) : new Set(['.pdf', '.doc', '.docx', '.rtf', '.txt', '.md'])
+    if (!details.isFile() || !allowed.has(extname(path).toLocaleLowerCase()) || details.size > 20 * 1024 * 1024) throw new Error(`The selected ${linkedin ? 'LinkedIn profile' : 'CV'} is unavailable or unsupported.`)
+    setup[field] = path
+  }
+  if (!String(setup.resumePath || '').trim() && !String(setup.careerProfile || '').trim()) throw new Error('Upload your CV or enter your career manually.')
+  const installed = workflows.installPack(CAREER_OS_PACK, setup)
+  career.configure(setup)
+  const profileWorkflow = workflows.list().workflows.find((workflow) => workflow.packId === CAREER_OS_PACK.id && workflow.packRole === 'profile')
+  const profileRun = profileWorkflow ? workflows.startRun(profileWorkflow.id) : null
+  return { ...installed, profileRunId: profileRun?.id || '' }
+})
+ipcMain.handle('get-career-os', () => career?.list() || { version: 1, configured: false, opportunities: [], pipeline: {}, dailyQueue: { minutes: 45, plannedMinutes: 0, remainingMinutes: 45, items: [] }, market: {}, feedbackSummary: {}, updatedAt: null })
+ipcMain.handle('career-update-profile', (_event, profile) => career.updateProfile(profile || {}, { actor: 'human' }))
+ipcMain.handle('career-review-profile', () => career.reviewProfile({ actor: 'human' }))
+ipcMain.handle('career-update-preferences', (_event, preferences) => career.updatePreferences(preferences || {}, { actor: 'human' }))
+ipcMain.handle('career-update-opportunity', (_event, opportunityId, patch) => career.updateOpportunity(String(opportunityId || ''), patch || {}, { actor: 'human' }))
+ipcMain.handle('career-pass-opportunity', (_event, opportunityId, reason, note) => career.passOpportunity(String(opportunityId || ''), reason, note, { actor: 'human' }))
 ipcMain.handle('create-workflow', (_event, input) => workflows.create(input || {}))
 ipcMain.handle('update-workflow', (_event, workflowId, input) => workflows.update(workflowId, input || {}))
 ipcMain.handle('duplicate-workflow', (_event, workflowId) => workflows.duplicate(workflowId))
 ipcMain.handle('delete-workflow', (_event, workflowId) => workflows.remove(workflowId))
 ipcMain.handle('set-workflow-enabled', (_event, workflowId, enabled) => workflows.setEnabled(workflowId, enabled))
 ipcMain.handle('run-workflow', (_event, workflowId) => workflows.startRun(workflowId))
-ipcMain.handle('approve-workflow-run', (_event, runId, allow) => workflows.approve(runId, allow))
+ipcMain.handle('approve-workflow-run', (_event, runId, allow) => {
+  const before = workflows.list()
+  const run = before.runs.find((candidate) => candidate.id === runId)
+  const workflow = run && before.workflows.find((candidate) => candidate.id === run.workflowId)
+  if (allow && run?.status === 'awaiting_approval' && workflow?.packId === CAREER_OS_PACK.id && workflow.packRole === 'profile') career.reviewProfile({ actor: 'human' })
+  const approved = workflows.approve(runId, allow)
+  return approved
+})
 ipcMain.handle('cancel-workflow-run', (_event, runId) => workflows.cancel(runId))
 ipcMain.handle('get-hardware-profiles', () => hardwareProfiles?.snapshot() || { version: 1, templates: [], activeTemplateId: '', activeViewId: '', mode: 'play', actions: [] })
 ipcMain.handle('hardware-create-template', (_event, input = {}) => hardwareProfiles.create(input))
@@ -1476,17 +1528,22 @@ app.whenReady().then(() => {
   const loginItem = ensureLaunchAtLoginPreference()
   goals = createGoalsRepository({ file: join(app.getPath('userData'), 'goals.json') })
   goals.on('change', (snapshot) => sendToWindows('goals', snapshot))
+  career = createCareerOsRepository({ file: join(app.getPath('userData'), 'career-os.json') })
+  career.on('change', (snapshot) => sendToWindows('career-os', snapshot))
   try {
     contextStore = createContextStore({ file: join(app.getPath('userData'), 'ambientic-context.db') })
     contextEngine = createContextEngine({
       store: contextStore,
       goals,
+      career,
       consent: () => Boolean(loadPrefs().onboarding?.memoryConsent)
     })
     capabilityGateway = createCapabilityGateway({
       store: contextStore,
       contextEngine,
       goals,
+      career,
+      jobDiscovery: discoverCareerJobs,
       workflows: () => workflows?.list(),
       socketPath: join(app.getPath('userData'), 'ambientic-gateway.sock'),
       requestApproval: (request) => workspace?.requestGatewayApproval(request) || false
@@ -1511,11 +1568,17 @@ app.whenReady().then(() => {
   workflows = createWorkflowsRepository({
     file: join(app.getPath('userData'), 'workflows.json'),
     connectors: () => connectors,
-    executeAgentStep: async ({ provider, prompt }) => ({
-      sessionId: await workspace.create({ provider, prompt })
+    canStartWorkflow: (workflow) => workflow.packId !== CAREER_OS_PACK.id || workflow.packRole === 'profile' || career.list().profile.status === 'reviewed'
+      ? true
+      : { allowed: false, message: 'Review and approve your Career Profile before running other Career OS workflows.' },
+    executeAgentStep: async ({ provider, prompt, workflow }) => ({
+      sessionId: await workspace.create({ provider, prompt, gatewayScopes: workflow.packId === CAREER_OS_PACK.id ? CAREER_OS_GATEWAY_SCOPES : null })
     })
   })
   workflows.on('change', (snapshot) => sendToWindows('workflows', snapshot))
+  const existingCareerSetup = workflows.packSetup(CAREER_OS_PACK.id)
+  if (existingCareerSetup) workflows.installPack(CAREER_OS_PACK, existingCareerSetup)
+  if (!career.list().configured && existingCareerSetup) career.configure(existingCareerSetup)
   hardwareProfiles = createHardwareProfileService({
     file: join(app.getPath('userData'), 'hardware-profiles.json'),
     invoke: invokeHardwareAssignment

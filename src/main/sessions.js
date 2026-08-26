@@ -27,6 +27,11 @@ const TRANSITION = {
 // Sessions untouched for this long are reaped (terminal closed without a clean
 // SessionEnd, machine slept, etc.).
 const STALE_MS = 1000 * 60 * 60 * 4
+// A hook-backed provider can be interrupted or killed before its Stop hook
+// runs. Process discovery proves the terminal is alive, not that a turn is
+// still executing, so expire only stale RUNNING states while retaining the
+// session and any WAITING/ATTENTION signal that genuinely needs the user.
+const STALE_RUNNING_MS = 1000 * 60 * 15
 
 function isTransientAgentCwd (cwd) {
   const value = String(cwd || '')
@@ -227,7 +232,22 @@ export class SessionStore extends EventEmitter {
       }
     }
 
+    if (this.reconcileStaleRunning(now)) changed = true
+
     if (changed) this.emit('change', this.list())
+  }
+
+  reconcileStaleRunning (now = Date.now()) {
+    let changed = false
+    for (const session of this.map.values()) {
+      if (session.discovered || session.externalSource || !session.tty) continue
+      if (session.state !== STATE.RUNNING || now - session.lastSeen <= STALE_RUNNING_MS) continue
+      session.state = STATE.IDLE
+      session.since = now
+      session.unseen = false
+      changed = true
+    }
+    return changed
   }
 
   syncExternal (source, sessions) {
@@ -360,7 +380,7 @@ export class SessionStore extends EventEmitter {
 
   reap () {
     const now = Date.now()
-    let changed = false
+    let changed = this.reconcileStaleRunning(now)
     for (const [id, s] of this.map) {
       if (now - s.lastSeen > STALE_MS) { this.map.delete(id); changed = true }
     }

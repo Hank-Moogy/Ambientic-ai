@@ -2,8 +2,9 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { privateSetupSummary, sanitizePackSetup, validateWorkflowPack } from '../shared/workflow-pack.mjs'
 
-const VERSION = 1
+const VERSION = 2
 const MAX_RUNS = 200
 const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'awaiting_approval', 'needs_attention'])
 const EXECUTABLE_KINDS = new Set(['web', 'agent', 'inbox', 'calendar', 'tool'])
@@ -13,17 +14,33 @@ function copy (value) {
   return JSON.parse(JSON.stringify(value))
 }
 
+function publicPack (pack) {
+  const { privateContext, setup, ...safe } = pack
+  return copy(safe)
+}
+
 function cleanText (value, max = 4000) {
   return String(value || '').replace(/\r\n/g, '\n').trim().slice(0, max)
 }
 
 function emptyState () {
-  return { version: VERSION, workflows: [], runs: [], updatedAt: null }
+  return { version: VERSION, workflows: [], runs: [], packs: [], updatedAt: null }
 }
 
 function safeTimestamp (value, fallback = null) {
   const timestamp = Number(value)
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : fallback
+}
+
+function configuredScheduleNodes (workflow, setup) {
+  const schedule = workflow?.schedule
+  if (!schedule?.fromSetup) return workflow.nodes
+  const match = String(setup[schedule.fromSetup] || '').match(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  if (!match) return workflow.nodes
+  const minutesInDay = 24 * 60
+  const shifted = (Number(match[1]) * 60 + Number(match[2]) + Number(schedule.offsetMinutes || 0) + minutesInDay) % minutesInDay
+  const time = `${String(Math.floor(shifted / 60)).padStart(2, '0')}:${String(shifted % 60).padStart(2, '0')}`
+  return workflow.nodes.map((node) => node.kind === 'schedule' ? { ...node, detail: `${cleanText(schedule.recurrence, 80) || 'Every day'} · ${time}` } : node)
 }
 
 function sanitizeNode (node, index) {
@@ -56,6 +73,8 @@ function sanitizeWorkflow (input, { id, createdAt, now }) {
     id,
     name: cleanText(input?.name, 120) || 'Untitled workflow',
     description: cleanText(input?.description, 2000),
+    packId: cleanText(input?.packId, 120),
+    packRole: cleanText(input?.packRole, 80),
     nodes,
     edges,
     enabled: Boolean(input?.enabled),
@@ -94,7 +113,7 @@ export function nextScheduleAt (recurrence, from = Date.now()) {
   return next.getTime()
 }
 
-export function workflowExecutionPrompt ({ workflow, node, previousOutputs = [] }) {
+export function workflowExecutionPrompt ({ workflow, node, previousOutputs = [], privateContext = '' }) {
   const context = previousOutputs
     .filter(Boolean)
     .slice(-3)
@@ -112,6 +131,8 @@ export function workflowExecutionPrompt ({ workflow, node, previousOutputs = [] 
     `Current step: ${node.label}`,
     `Instruction: ${node.detail || node.label}`,
     `Capability: ${node.action}`,
+    workflow.packId === 'ambientic.career-os' ? 'Use ambientic_jobs_discover for supported public ATS and remote-job feeds, ambientic_recall only when the user selected Ambientic memory as profile evidence, ambientic_career_read for the current private profile/pipeline/daily queue, and ambientic_career_update to persist the structured Career Profile, every normalized opportunity, market-scan total, status change, interview, or explicit pass reason instead of leaving Career OS state only in prose. Treat the structured profile as ranking evidence only when its status is reviewed. Prefer canonical ATS results; retain attribution and mark unresolved aggregator links clearly.' : '',
+    privateContext ? `Private local setup supplied by the user for this workflow pack:\n${cleanText(privateContext, 16000)}\n\nUse this only to complete the current workflow. Do not include private setup values in portable workflow definitions or public output.` : '',
     actionGuidance,
     context
   ].filter(Boolean).join('\n\n')
@@ -124,6 +145,7 @@ export class WorkflowService extends EventEmitter {
     id = () => randomUUID(),
     connectors = () => [],
     executeAgentStep,
+    canStartWorkflow = () => true,
     schedule = setInterval,
     cancelSchedule = clearInterval
   }) {
@@ -133,6 +155,7 @@ export class WorkflowService extends EventEmitter {
     this.id = id
     this.connectors = connectors
     this.executeAgentStep = executeAgentStep
+    this.canStartWorkflow = canStartWorkflow
     this.schedule = schedule
     this.cancelSchedule = cancelSchedule
     this.timer = null
@@ -145,8 +168,10 @@ export class WorkflowService extends EventEmitter {
       return {
         ...emptyState(),
         ...parsed,
+        version: VERSION,
         workflows: Array.isArray(parsed.workflows) ? parsed.workflows : [],
-        runs: Array.isArray(parsed.runs) ? parsed.runs.slice(-MAX_RUNS) : []
+        runs: Array.isArray(parsed.runs) ? parsed.runs.slice(-MAX_RUNS) : [],
+        packs: Array.isArray(parsed.packs) ? parsed.packs : []
       }
     } catch {
       return emptyState()
@@ -174,6 +199,7 @@ export class WorkflowService extends EventEmitter {
           runCount: recentRuns.filter((run) => run.workflowId === workflow.id).length
         }))),
       runs: copy(recentRuns.slice(0, 100)),
+      packs: this.state.packs.map(publicPack),
       updatedAt: this.state.updatedAt
     }
   }
@@ -182,9 +208,80 @@ export class WorkflowService extends EventEmitter {
     return this.state.workflows.find((workflow) => workflow.id === workflowId)
   }
 
+  packSetup (packId) {
+    return copy(this.state.packs.find((pack) => pack.id === packId)?.setup || null)
+  }
+
+  installPack (pack, setupValues = {}) {
+    validateWorkflowPack(pack)
+    const setup = sanitizePackSetup(pack, setupValues)
+    const now = this.now()
+    const existing = this.state.packs.find((candidate) => candidate.id === pack.id)
+
+    if (existing) {
+      const workflowIds = []
+      for (const input of pack.workflows) {
+        const current = this.state.workflows.find((workflow) => workflow.packId === pack.id && workflow.packRole === input.role)
+        const edges = Array.isArray(input.edges) && input.edges.length
+          ? input.edges
+          : input.nodes.slice(1).map((candidate, index) => ({ id: `edge-${input.nodes[index].id}-${candidate.id}`, from: input.nodes[index].id, to: candidate.id }))
+        const workflow = sanitizeWorkflow(
+          { ...input, id: current?.id, enabled: current?.enabled ?? input.enabled, nodes: configuredScheduleNodes(input, setup), edges, packId: pack.id, packRole: input.role },
+          { id: current?.id || this.id(), createdAt: current?.createdAt || now, now }
+        )
+        const scheduleNode = workflow.nodes.find((candidate) => candidate.kind === 'schedule')
+        workflow.nextRunAt = workflow.enabled ? nextScheduleAt(scheduleNode?.detail, now) : null
+        if (current) this.state.workflows[this.state.workflows.indexOf(current)] = workflow
+        else this.state.workflows.push(workflow)
+        workflowIds.push(workflow.id)
+      }
+      existing.version = cleanText(pack.version, 40)
+      existing.name = cleanText(pack.name, 120)
+      existing.description = cleanText(pack.description, 2000)
+      existing.workflowIds = workflowIds
+      existing.setup = setup
+      existing.privateContext = privateSetupSummary(pack, setup)
+      existing.summary = Object.fromEntries((pack.setup.summaryFields || []).map((fieldId) => [fieldId, setup[fieldId]]))
+      existing.updatedAt = now
+      this.persist()
+      return publicPack(existing)
+    }
+
+    const workflowIds = []
+    for (const input of pack.workflows) {
+      const edges = Array.isArray(input.edges) && input.edges.length
+        ? input.edges
+        : input.nodes.slice(1).map((candidate, index) => ({ id: `edge-${input.nodes[index].id}-${candidate.id}`, from: input.nodes[index].id, to: candidate.id }))
+      const workflow = sanitizeWorkflow(
+        { ...input, nodes: configuredScheduleNodes(input, setup), edges, packId: pack.id, packRole: input.role },
+        { id: this.id(), createdAt: now, now }
+      )
+      const scheduleNode = workflow.nodes.find((candidate) => candidate.kind === 'schedule')
+      workflow.nextRunAt = workflow.enabled ? nextScheduleAt(scheduleNode?.detail, now) : null
+      this.state.workflows.push(workflow)
+      workflowIds.push(workflow.id)
+    }
+
+    const installed = {
+      id: cleanText(pack.id, 120),
+      version: cleanText(pack.version, 40),
+      name: cleanText(pack.name, 120),
+      description: cleanText(pack.description, 2000),
+      workflowIds,
+      setup,
+      privateContext: privateSetupSummary(pack, setup),
+      summary: Object.fromEntries((pack.setup.summaryFields || []).map((fieldId) => [fieldId, setup[fieldId]])),
+      installedAt: now,
+      updatedAt: now
+    }
+    this.state.packs.push(installed)
+    this.persist()
+    return publicPack(installed)
+  }
+
   create (input = {}) {
     const now = this.now()
-    const workflow = sanitizeWorkflow(input, { id: this.id(), createdAt: now, now })
+    const workflow = sanitizeWorkflow({ ...input, packId: '', packRole: '' }, { id: this.id(), createdAt: now, now })
     const scheduleNode = workflow.nodes.find((node) => node.kind === 'schedule')
     workflow.nextRunAt = workflow.enabled ? nextScheduleAt(scheduleNode?.detail, now) : null
     this.state.workflows.push(workflow)
@@ -197,7 +294,7 @@ export class WorkflowService extends EventEmitter {
     if (index < 0) throw new Error('Workflow not found.')
     const existing = this.state.workflows[index]
     const workflow = sanitizeWorkflow(
-      { ...existing, ...input },
+      { ...existing, ...input, packId: existing.packId, packRole: existing.packRole },
       { id: existing.id, createdAt: existing.createdAt, now: this.now() }
     )
     const scheduleNode = workflow.nodes.find((node) => node.kind === 'schedule')
@@ -210,7 +307,7 @@ export class WorkflowService extends EventEmitter {
   duplicate (workflowId) {
     const workflow = this.workflow(workflowId)
     if (!workflow) throw new Error('Workflow not found.')
-    return this.create({ ...workflow, name: `${workflow.name} copy`, enabled: false })
+    return this.create({ ...workflow, packId: '', packRole: '', name: `${workflow.name} copy`, enabled: false })
   }
 
   remove (workflowId) {
@@ -245,6 +342,8 @@ export class WorkflowService extends EventEmitter {
   async startRun (workflowId, { source = 'manual' } = {}) {
     const workflow = this.workflow(workflowId)
     if (!workflow) throw new Error('Workflow not found.')
+    const start = this.canStartWorkflow(workflow, { source })
+    if (start === false || start?.allowed === false) throw new Error(start?.message || 'This workflow is not ready to run.')
     const active = this.state.runs.find((run) => run.workflowId === workflowId && ACTIVE_RUN_STATUSES.has(run.status))
     if (active) return copy(active)
     const now = this.now()
@@ -342,7 +441,8 @@ export class WorkflowService extends EventEmitter {
         prompt: workflowExecutionPrompt({
           workflow,
           node,
-          previousOutputs: run.steps.slice(0, stepIndex).map((candidate) => candidate.output)
+          previousOutputs: run.steps.slice(0, stepIndex).map((candidate) => candidate.output),
+          privateContext: this.state.packs.find((pack) => pack.id === workflow.packId)?.privateContext || ''
         })
       })
       step.sessionId = cleanText(result?.sessionId, 160)
@@ -407,6 +507,7 @@ export class WorkflowService extends EventEmitter {
     if (!run) return false
     const step = run.steps.find((candidate) => candidate.status === 'running' && candidate.sessionId === snapshot.id)
     if (snapshot.error) {
+      if (/not materialized yet|before first user message/i.test(snapshot.error)) return false
       this.failRun(run, step, new Error(snapshot.error))
       return true
     }
@@ -452,7 +553,7 @@ export class WorkflowService extends EventEmitter {
       if (workflow.nextRunAt && workflow.nextRunAt <= at) {
         workflow.nextRunAt = nextScheduleAt(scheduleNode.detail, at + 1000)
         this.persist()
-        await this.startRun(workflow.id, { source: 'schedule' })
+        try { await this.startRun(workflow.id, { source: 'schedule' }) } catch (error) { console.error(`[ambientic] scheduled workflow skipped: ${error.message}`) }
       }
     }
   }

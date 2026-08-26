@@ -98,6 +98,24 @@ The Workflow Builder is an infinite spatial field where intent moves through cle
 - Inbox, calendar, web, and other consequential capabilities always expose their permission boundary before a real run.
 - Portable sharing is visible from the beginning, but the field stays private and local until the user explicitly exports it.
 
+### Workflow packs: outcomes before topology
+
+Installable workflow packs enter the Studio as complete outcomes, not as a wall of agent nodes. Career OS establishes the pattern: one prominent atmospheric object explains the routine, privacy boundary, and next human action; its internal workflows remain inspectable only after the user asks for them.
+
+Workflow Studio separates ownership from discovery. **Your workflows** comes first and keeps installed routines, run state, and results together; the **Workflow catalog** follows as a quieter shelf of outcomes that can be installed. An installed pack is one top-level card—not a spray of internal routines. Opening it leads with the latest run and outcome surface, then reveals its related workflows below for inspection or direct execution. A pack may remain visible in the catalog after installation, but its controls point back to that single owned group instead of creating a second operational home.
+
+- Setup advances through one calm question field at a time, with a thin progress current rather than a configuration sidebar.
+- Shared logic and private state are visually separated in plain language before installation. Copying a pack copies only the portable manifest.
+- An installed pack leads with operational truth—whether its first scheduled work has run and the action the user can take now—rather than counts of agents or prompts.
+- Pack identity may have its own restrained light motif, but it stays inside Ambientic's cool mist, strong-contrast, reduced-motion language and never becomes a separate mini-brand.
+- Consequential outcomes keep the same amber approval boundary as ordinary workflows; a polished pack cannot imply permission the user has not granted.
+
+Career OS opens below its installed workflows as a daily current, not a job-board grid. The first hierarchy is time available → actions worth taking → ranked market evidence. The daily queue stays deliberately small, while a separate Market results section retains every discovered role (or any explicit user-selected display limit) so ranking never becomes hidden filtering. Opportunity cards keep Candidate Fit and Career Fit visibly separate, present uncertainty as confidence text, expose the canonical or attributed job link as a first-class action, and reserve glow for current value rather than employer branding. Save, Pursue, and Pass remain quiet controls; passing unfolds lightweight reasons in place so learning does not become a form. Discovery setup groups sources by trust—canonical ATS, attributed remote feed, optional browser/alert—so adding reach still feels like choosing evidence quality rather than configuring a scraper.
+
+Career Profile setup treats identity as user-selected evidence, not invisible inference. CV and LinkedIn files appear as calm local document objects; reviewed Ambientic memories appear as individually selectable provenance cards. The resulting profile carries a visible Building → Needs review → Reviewed state, and its review action sits beside that state. No ranking glow or recommendation language should imply that an unreviewed portrait is already trusted.
+
+Profile review is a real evidence surface, not a generic workflow checkpoint. A focused editor shows the extracted headline, summary, experience, achievements, skills, projects, leadership, technologies, domains, uncertainties, narrative, and source labels before the user approves them. Save and Approve remain visually distinct, while any agent request that still needs a response links directly to its thread. Career Daily stays quiet and unavailable until this human trust boundary is complete.
+
 ## Memory: a quiet archive of continuity
 
 Memory should feel like a local field the user can inspect and prune, never like an invisible personality dossier. Memory lives inside Settings because it is a trust and control surface, not a daily navigation destination. It keeps the same deep, cool atmosphere while making origin and control unusually explicit.

@@ -9,7 +9,7 @@ test('maps Codex desktop rollout lifecycle to Ambientic states', () => {
   assert.equal(codexDesktopState([
     event('2026-07-22T13:10:00Z', 'task_started'),
     event('2026-07-22T13:11:00Z', 'agent_reasoning')
-  ].join('\n'), now), 'running')
+  ].join('\n'), now, Date.parse('2026-07-22T13:19:50Z')), 'running')
   assert.equal(codexDesktopState([
     event('2026-07-22T13:10:00Z', 'task_started'),
     event('2026-07-22T13:19:00Z', 'task_complete')
@@ -19,6 +19,25 @@ test('maps Codex desktop rollout lifecycle to Ambientic states', () => {
     event('2026-07-22T12:01:00Z', 'task_complete')
   ].join('\n'), now), 'idle')
   assert.equal(codexDesktopState('', now, Date.parse('2026-07-22T13:19:50Z')), 'running')
+})
+
+test('expires an unmatched Codex start after rollout activity stops', () => {
+  const now = Date.parse('2026-07-22T13:20:00Z')
+  const interrupted = [
+    event('2026-07-22T13:10:00Z', 'task_started'),
+    JSON.stringify({ timestamp: '2026-07-22T13:10:20Z', type: 'event_msg', payload: { type: 'agent_message' } })
+  ].join('\n')
+
+  assert.equal(codexDesktopState(interrupted, now), 'idle')
+  assert.equal(codexDesktopState(interrupted, Date.parse('2026-07-22T13:10:50Z')), 'running')
+})
+
+test('keeps an explicit recent completion waiting despite a slightly newer index timestamp', () => {
+  const now = Date.parse('2026-07-22T13:20:00Z')
+  assert.equal(codexDesktopState([
+    event('2026-07-22T13:10:00Z', 'task_started'),
+    event('2026-07-22T13:19:00Z', 'task_complete')
+  ].join('\n'), now, Date.parse('2026-07-22T13:19:05Z')), 'waiting')
 })
 
 test('creates stable Codex desktop session records and deep links', () => {

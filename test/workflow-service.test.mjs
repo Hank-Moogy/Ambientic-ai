@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWorkflowService, nextScheduleAt, workflowExecutionPrompt } from '../src/main/workflow-service.mjs'
+import { CAREER_OS_PACK } from '../src/shared/career-os-pack.mjs'
 
 function fixture (overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), 'ambientic-workflows-'))
@@ -46,6 +47,13 @@ test('persists multiple workflows and supports duplicate, update, and delete', (
   assert.equal(service.remove(duplicate.id), true)
   assert.equal(service.list().workflows.length, 2)
   assert.equal(JSON.parse(readFileSync(join(root, 'workflows.json'), 'utf8')).workflows.length, 2)
+})
+
+test('ordinary workflow creation cannot claim an installed pack identity', () => {
+  const { service } = fixture()
+  const workflow = service.create({ ...workflowInput(), packId: CAREER_OS_PACK.id, packRole: 'scout' })
+  assert.equal(workflow.packId, '')
+  assert.equal(workflow.packRole, '')
 })
 
 test('calculates daily, weekday, weekly, and monthly schedule boundaries', () => {
@@ -125,6 +133,29 @@ test('links a managed provider thread and resumes after its final snapshot', asy
   assert.equal(run.steps[0].output, 'Managed task finished.')
 })
 
+test('does not fail a managed run on Codex first-turn materialization noise', async () => {
+  const { service } = fixture({ executeAgentStep: async () => ({ sessionId: 'thread-new' }) })
+  const workflow = service.create(workflowInput([{ id: 'agent', kind: 'agent', label: 'Run agent', detail: 'Do the work', action: 'agent.run', provider: 'auto' }]))
+  await service.startRun(workflow.id)
+  await flush()
+
+  assert.equal(service.handleThread({ id: 'thread-new', error: 'thread is not materialized yet; includeTurns is unavailable before first user message', approvals: [] }), false)
+  assert.equal(service.list().runs[0].status, 'running')
+  assert.equal(service.list().runs[0].steps[0].status, 'running')
+})
+
+test('enforces workflow start preconditions before launching an agent', async () => {
+  let executions = 0
+  const { service } = fixture({
+    canStartWorkflow: () => ({ allowed: false, message: 'Review the profile first.' }),
+    executeAgentStep: async () => { executions++; return { output: 'Should not run' } }
+  })
+  const workflow = service.create(workflowInput([{ id: 'agent', kind: 'agent', label: 'Run agent', detail: 'Do the work', action: 'agent.run', provider: 'auto' }]))
+  await assert.rejects(service.startRun(workflow.id), /Review the profile first/)
+  assert.equal(executions, 0)
+  assert.equal(service.list().runs.length, 0)
+})
+
 test('execution prompts refuse to simulate missing action tools', () => {
   const prompt = workflowExecutionPrompt({
     workflow: { name: 'Inbox triage' },
@@ -132,4 +163,64 @@ test('execution prompts refuse to simulate missing action tools', () => {
   })
   assert.match(prompt, /Do not claim success unless the tool confirms/)
   assert.match(prompt, /which connection is missing/)
+})
+
+test('installs a workflow pack once and keeps private setup out of portable workflow definitions', async () => {
+  const calls = []
+  const { service, root } = fixture({ executeAgentStep: async (input) => { calls.push(input); return { output: 'Done' } } })
+  const setup = {
+    careerProfile: 'AI product leader', careerContext: '', targetRoles: ['Head of Product'], stretchRoles: [],
+    careerObjective: 'Become a CPO', country: 'France', workAuthorization: 'EU citizen',
+    locationPolicy: 'Remote EU', minimumCompensation: '€100k', targetCompensation: '€130k',
+    priorities: ['Technical / AI depth'], tradeoffs: '', sources: ['Public ATS feeds'],
+    routineMinutes: '45', routineTime: '09:15', resultsLimit: 'all'
+  }
+  const installed = service.installPack(CAREER_OS_PACK, setup)
+  service.installPack(CAREER_OS_PACK, setup)
+  const snapshot = service.list()
+  assert.equal(snapshot.packs.length, 1)
+  assert.equal(snapshot.workflows.filter((workflow) => workflow.packId === CAREER_OS_PACK.id).length, 5)
+  assert.equal(installed.workflowIds.length, 5)
+  assert.equal('privateContext' in snapshot.packs[0], false)
+  assert.equal('setup' in snapshot.packs[0], false)
+  assert.equal('privateContext' in installed, false)
+  assert.equal('setup' in installed, false)
+  assert.equal(snapshot.packs[0].summary.routineMinutes, '45')
+  assert.equal(snapshot.workflows.find((workflow) => workflow.packRole === 'scout').nodes[0].detail, 'Every weekday · 08:15')
+  assert.equal(JSON.stringify(snapshot.workflows).includes('AI product leader'), false)
+  assert.match(readFileSync(join(root, 'workflows.json'), 'utf8'), /AI product leader/)
+  assert.equal(service.packSetup(CAREER_OS_PACK.id).careerProfile, 'AI product leader')
+
+  const daily = snapshot.workflows.find((workflow) => workflow.packRole === 'daily')
+  await service.startRun(daily.id)
+  await flush()
+  assert.match(calls[0].prompt, /Private local setup supplied by the user/)
+  assert.match(calls[0].prompt, /AI product leader/)
+  assert.match(calls[0].prompt, /ambientic_career_update/)
+})
+
+test('upgrades an installed pack with new workflow roles while preserving workflow identity and enablement', () => {
+  const { service } = fixture()
+  const setup = {
+    careerProfile: 'AI product leader', careerContext: '', targetRoles: ['Head of Product'], stretchRoles: [],
+    careerObjective: 'Become a CPO', country: 'France', workAuthorization: 'EU citizen',
+    locationPolicy: 'Remote EU', minimumCompensation: '€100k', targetCompensation: '€130k',
+    priorities: ['Technical / AI depth'], tradeoffs: '', sources: ['Public ATS feeds'],
+    routineMinutes: '45', routineTime: '09:15', resultsLimit: 'all'
+  }
+  const priorPack = { ...CAREER_OS_PACK, version: '0.2.0', workflows: CAREER_OS_PACK.workflows.filter((workflow) => workflow.role !== 'profile') }
+  const legacyPack = { ...priorPack, setup: { ...priorPack.setup, summaryFields: priorPack.setup.summaryFields.filter((field) => field !== 'resultsLimit'), stages: priorPack.setup.stages.map((stage) => stage.id === 'routine' ? { ...stage, fields: stage.fields.filter((field) => field.id !== 'resultsLimit') } : stage) } }
+  service.installPack(legacyPack, setup)
+  const priorScout = service.list().workflows.find((workflow) => workflow.packRole === 'scout')
+  service.setEnabled(priorScout.id, false)
+
+  service.installPack(CAREER_OS_PACK, service.packSetup(CAREER_OS_PACK.id))
+  const snapshot = service.list()
+  const upgradedScout = snapshot.workflows.find((workflow) => workflow.packRole === 'scout')
+  assert.equal(snapshot.packs[0].version, CAREER_OS_PACK.version)
+  assert.equal(snapshot.workflows.filter((workflow) => workflow.packId === CAREER_OS_PACK.id).length, 5)
+  assert.ok(snapshot.workflows.some((workflow) => workflow.packRole === 'profile'))
+  assert.equal(upgradedScout.id, priorScout.id)
+  assert.equal(upgradedScout.enabled, false)
+  assert.equal(service.packSetup(CAREER_OS_PACK.id).resultsLimit, 'all')
 })

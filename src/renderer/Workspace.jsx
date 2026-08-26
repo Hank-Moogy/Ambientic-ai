@@ -1160,7 +1160,7 @@ export default function Workspace () {
   const [memoryBootstrap, setMemoryBootstrap] = useState({ status: 'idle', providers: [], items: [], summary: '', error: '', savedCount: 0 })
   const [buildInfo, setBuildInfo] = useState(null)
   const [goalsSnapshot, setGoalsSnapshot] = useState({ version: 1, goals: [], events: [], updatedAt: null })
-  const [workflowSnapshot, setWorkflowSnapshot] = useState({ version: 1, workflows: [], runs: [], updatedAt: null })
+  const [workflowSnapshot, setWorkflowSnapshot] = useState({ version: 2, workflows: [], runs: [], packs: [], updatedAt: null })
   const [hardwareSnapshot, setHardwareSnapshot] = useState({ version: 1, templates: [], activeTemplateId: '', activeViewId: '', mode: 'play', actions: [], slots: [] })
   const [hardwareConfirmation, setHardwareConfirmation] = useState(null)
   const [hardwareConfirmationBusy, setHardwareConfirmationBusy] = useState(false)

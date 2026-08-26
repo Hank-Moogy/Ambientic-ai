@@ -81,6 +81,35 @@ test('creates a Codex task with its chosen model, effort, and explicit project c
   }
 })
 
+test('starts the first Codex turn without reading an unmaterialized new thread', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-first-turn-'))
+  try {
+    const requests = []
+    const session = { id: 'new-thread', agent: 'codex', project: 'Private task', cwd: directory, task: 'Career profile' }
+    const service = new WorkspaceService({ list: () => [session], ingest: () => {}, updateTask: () => {} }, () => [])
+    service.historyRefreshedAt = Date.now()
+    service.codexStartedThreads.add(session.id)
+    service.codexClient = async () => ({
+      request: async (method, params) => {
+        requests.push({ method, params })
+        if (method === 'collaborationMode/list') return { data: [] }
+        if (method === 'turn/start') return { turn: { id: 'first-turn' } }
+        if (method === 'thread/read') throw new Error('thread is not materialized yet; includeTurns is unavailable before first user message')
+        return {}
+      }
+    })
+
+    const snapshot = await service.send(session.id, 'Build the Career Profile.')
+
+    assert.equal(requests.some((entry) => entry.method === 'thread/read'), false)
+    assert.equal(requests.some((entry) => entry.method === 'turn/start'), true)
+    assert.equal(snapshot.error, '')
+    assert.equal(snapshot.running, true)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('offers real recent projects but not private task workspaces or protected folders', () => {
   const home = homedir()
   const taskWorkspaceRoot = join(home, '.ambientic', 'workspaces')
@@ -239,16 +268,16 @@ test('effectiveState is the single source of truth with clear precedence', () =>
   // live terminal hooks remain authoritative even after a passive transcript read
   assert.equal(service.effectiveState({ id: 'live', state: 'running', tty: '/dev/ttys1' }, { id: 'live', running: false }), 'running')
   assert.equal(service.effectiveState({ id: 'live', state: 'waiting', tty: '/dev/ttys1' }, { id: 'live', running: true }), 'waiting')
-  // a separate passive Codex app-server cannot demote a real Desktop turn
+  // an explicit provider-native idle result corrects stale discovery state
   assert.equal(service.effectiveState(
     { id: 'desktop', state: 'running', externalSource: 'codex-desktop' },
     { id: 'desktop', running: false, turnStateKnown: true }
-  ), 'running')
+  ), 'idle')
   // with no managed snapshot, the store's hook-driven lifecycle state is honored
   assert.equal(service.effectiveState({ id: 'x', state: 'waiting' }, null), 'waiting')
 })
 
-test('reading a Codex Desktop thread never writes a false idle lifecycle', async () => {
+test('reading a Codex Desktop thread corrects stale external running state', async () => {
   const session = {
     id: 'codex-desktop:thread-live',
     threadId: 'thread-live',
@@ -273,8 +302,8 @@ test('reading a Codex Desktop thread never writes a false idle lifecycle', async
 
   assert.equal(snapshot.running, false)
   assert.equal(snapshot.turnStateKnown, true)
-  assert.equal(snapshot.state, 'running')
-  assert.deepEqual(ingested, [])
+  assert.equal(snapshot.state, 'idle')
+  assert.equal(ingested.at(-1).event, 'stop_idle')
 })
 
 test('resolving an approval clears the "attention" state instead of sticking', async () => {
