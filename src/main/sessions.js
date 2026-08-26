@@ -282,12 +282,16 @@ export class SessionStore extends EventEmitter {
     if (changed) this.emit('change', this.list())
   }
 
-  // Focusing a pad acknowledges it — stop the attention pulse.
+  // Focusing a thread consumes a completed-turn notification. Keep the raw
+  // WAITING lifecycle state in the map so an unchanged provider refresh cannot
+  // re-arm it; list() presents that acknowledged completion as idle. Genuine
+  // ATTENTION remains actionable until its approval or reply is resolved.
   acknowledge (id) {
     const s = this.map.get(id)
-    if (!s || !s.unseen) return
+    if (!s || !s.unseen) return false
     s.unseen = false
     this.emit('change', this.list())
+    return true
   }
 
   updateTask (id, task, fingerprint = '', source = 'model') {
@@ -354,14 +358,18 @@ export class SessionStore extends EventEmitter {
 
   list () {
     // Stable pad positions (by seq). Recoloring, not reshuffling.
-    return [...this.map.values()].sort((a, b) => a.seq - b.seq)
+    return [...this.map.values()]
+      .sort((a, b) => a.seq - b.seq)
+      .map((session) => session.state === STATE.WAITING && !session.unseen
+        ? { ...session, state: STATE.IDLE }
+        : session)
   }
 
   // Aggregate for the menu-bar light.
   summary () {
     let worst = null
     let needy = 0
-    for (const s of this.map.values()) {
+    for (const s of this.list()) {
       if (!worst || PRIORITY[s.state] > PRIORITY[worst]) worst = s.state
       if (s.state !== STATE.RUNNING) needy++
     }

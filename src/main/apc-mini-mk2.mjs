@@ -41,7 +41,7 @@ export function miniGridSessions (sessions = []) {
 function miniLedForSession (session) {
   if (!session) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.OFF }
   if (session.state === 'running') return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.GREEN }
-  if (session.state === 'attention' || session.state === 'waiting') {
+  if (session.state === 'attention' || (session.state === 'waiting' && session.unseen)) {
     return { channel: session.unseen ? APC_MINI_MK2.ANIMATION.BLINK_QUARTER : APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.RED }
   }
   return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.BLUE }

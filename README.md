@@ -249,7 +249,7 @@ Unassigned APC40 notes and CC controls can be learned as semantic Ambientic acti
 
 ## Implementation plan and status
 
-Last updated: 2026-08-16
+Last updated: 2026-08-26
 
 ### Completed
 
@@ -399,9 +399,11 @@ Last updated: 2026-08-16
 - [x] A managed Claude turn is granted the directories its attachments actually need. Claude confines its file tools to the working directory, so an attachment from outside the project was named in the prompt but unreadable, and `-p` mode has no way to ask for access — the turn simply reported that permission had not been granted. Out-of-project attachment roots are now passed as `--add-dir`, and a compacted retry keeps the grants of the turn it retries. The home folder, the filesystem root, and whole macOS protected collections are still refused; a real project inside one of them is not.
 - [x] A task no longer has to be pointed at the work. Every managed Claude turn is granted the machine's other known project roots, and the opening turn is given that same list by name and path, so an agent asked about a project it was not launched into opens it instead of reporting that the request falls outside its folder. Grant and description come from one source: describing a root that was not granted is worse than describing nothing. Bounded to eight roots, and the home folder, filesystem root, and whole protected collections remain refused.
 - [x] A thread is named once, from the prompt that establishes what it is for, and keeps that name. The summarizer previously ran on every message and `updateTask` overwrote unconditionally, so a single thread was renamed on each turn — one live thread went "Pick up the task" → "Go" → "What do you mean" → "Ok lets recap the". A prompt that is entirely filler ("go", "ok", "status", "?") now leaves the thread unnamed rather than naming it badly; the filler match is anchored at both ends so a real request like "Please fix the terminal focus bug" still names its thread. An explicit user rename is unaffected and still wins.
+- [x] Opening a completed thread now consumes that exact waiting notification across the workspace and native APC profiles: the thread returns to idle and its pad returns from red to blue, an unchanged Codex refresh cannot re-arm the same completion, and a later completed turn becomes red again. Genuine approvals and explicit reply requests remain attention-red until resolved.
 
 ### In progress
 
+- [ ] Physically confirm on the connected controller that opening a newly red completed thread in Ambientic returns its pad to blue, while an unresolved approval remains red.
 - [x] Add a hosted inference provider layer with a Nebius Token Factory / Fireworks AI / OpenRouter catalog, keychain-only credential storage, live model listing and auto-selection, connection tests, per-workload routing with an automatic and a stay-local option, and a dedicated Settings → Inference surface.
 - [ ] Connect a real Nebius Token Factory account, confirm the live model list and a routed thread label end to end, then decide which further Ambientic workloads (memory distillation, handover summaries, workflow drafting) should become routable.
 - [x] Build the first Workflow Studio surface: a new left-navigation section, infinite visual canvas, draggable capability nodes, natural-language drafting, local persistence, permission/provider inspector, sequential dry-run visualization, and portable manifest copy.
@@ -490,6 +492,8 @@ Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*.
 - [ ] Extend the ambient art direction into coordinated screen transitions, preview presentation, optional sound, and user-selectable hardware compositions while respecting reduced motion.
 
 ### Verification
+
+- 2026-08-26 opened-thread acknowledgement: regressions cover workspace selection calling the main-process acknowledgement boundary, completed external sessions presenting idle after opening, unchanged provider refreshes preserving that acknowledgement, a new running → completed lifecycle re-arming attention, genuine approval attention remaining actionable, and both APC40 MKII/APC mini mk2 returning acknowledged waits to blue. The focused lifecycle/hardware suite passes 46/46; the full suite passes 230/232 with 2 intentional transport skips and 0 failures; the production Electron main, preload, and renderer bundles build successfully; and `git diff --check` is clean.
 
 - 2026-08-25 persistent thread names: covered by a dedicated suite asserting that a thread takes a name once and holds it across later messages, that filler prompts leave it unnamed instead of naming it badly, and that the name is read from the request rather than the Ambientic preamble. A regression in the first attempt is worth recording: the filler pattern was anchored only at the start, so "Please fix the terminal focus bug" was classified as filler and the existing inference suite caught it. Full suite passes 226/228 runnable with 2 intentional skips and 0 failures. Separately measured against the installed Claude Code 2.1.237 that Ambientic actually resolves: the `PermissionRequest` hook does **not** fire under `-p`, which is why Ambientic's existing approval path never engages for managed tasks, but a `PreToolUse` hook returning `permissionDecision: "allow"` does grant a read outside the working directory with no `--add-dir` at all. That is the mechanism a provider-neutral, always-on permission broker should use, and it makes the current pre-granting of project roots the wrong default.
 

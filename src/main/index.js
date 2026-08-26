@@ -1346,6 +1346,7 @@ ipcMain.handle('select-session', (_event, id) => {
     midiController?.select(null)
     return false
   }
+  store.acknowledge(id)
   lastFocusedSessionId = id
   midiController?.select(id)
   return true
