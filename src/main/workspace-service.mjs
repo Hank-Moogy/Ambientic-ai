@@ -197,6 +197,30 @@ function statSyncKind (path) {
   try { return statSync(path).isDirectory() ? 'folder' : 'file' } catch { return 'file' }
 }
 
+// Approvals are created and cleared from a dozen places — timeouts, user
+// answers, cancellations, each provider's own bridge. Watching the collection
+// itself is what keeps the hardware light truthful; a notification bolted onto
+// each of those call sites would be one edit away from going stale.
+class ApprovalRegistry extends Map {
+  constructor (onSessionChange) {
+    super()
+    this.onSessionChange = onSessionChange
+  }
+
+  set (key, value) {
+    const result = super.set(key, value)
+    this.onSessionChange?.(value?.sessionId)
+    return result
+  }
+
+  delete (key) {
+    const sessionId = this.get(key)?.sessionId
+    const removed = super.delete(key)
+    if (removed) this.onSessionChange?.(sessionId)
+    return removed
+  }
+}
+
 function normalizePromptOptions (options = {}, provider = '') {
   const mode = CHAT_MODES.has(options.mode) ? options.mode : 'build'
   // Model and effort come from the renderer's composer. Validate against the
@@ -421,7 +445,7 @@ export class WorkspaceService extends EventEmitter {
     this.store = store
     this.getConnectors = getConnectors
     this.snapshots = new Map()
-    this.pendingApprovals = new Map()
+    this.pendingApprovals = new ApprovalRegistry((sessionId) => this.syncApprovalLight(sessionId))
     this.codex = null
     this.hermes = null
     this.codexReady = null
@@ -988,6 +1012,14 @@ export class WorkspaceService extends EventEmitter {
   // that accumulates from clicking through prompts.
   rememberedRoots (sessionId) {
     return [...(this.threadGrants.get(sessionId) || [])]
+  }
+
+  // Keeps the session store's approval flag in step with what is actually
+  // pending, so the APC grid shows a thread waiting on the user as waiting.
+  syncApprovalLight (sessionId) {
+    if (!sessionId) return
+    const pending = [...this.pendingApprovals.values()].some((item) => item.sessionId === sessionId)
+    this.store.setApprovalPending?.(sessionId, pending)
   }
 
   isManagedThread (session) {

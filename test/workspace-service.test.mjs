@@ -712,3 +712,24 @@ test('an approval nobody is holding open resolves instead of hanging the caller'
   const service = brokerService({ id: 'sess-5', agent: 'claude', cwd: '/tmp/x' })
   assert.equal(await service.awaitToolPermission('tool:does-not-exist'), null)
 })
+
+test('the hardware light follows pending approvals without each call site saying so', async () => {
+  const session = { id: 'sess-6', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const flags = []
+  const service = new WorkspaceService({
+    list: () => [session],
+    ingest: () => {},
+    setApprovalPending: (id, pending) => flags.push({ id, pending })
+  }, () => [])
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: session.id, messages: [] })
+
+  const asked = await service.requestToolPermission({
+    sessionId: 'sess-6', tool: 'Read', input: { file_path: '/Users/person/elsewhere/x.md' }
+  })
+  assert.deepEqual(flags.at(-1), { id: 'sess-6', pending: true })
+
+  await service.resolveApproval(asked.id, true, false)
+  assert.deepEqual(flags.at(-1), { id: 'sess-6', pending: false })
+})

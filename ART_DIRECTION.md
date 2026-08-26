@@ -18,7 +18,7 @@ The experience should suggest:
 
 1. **Calm by default.** Persistent motion is slow, low-contrast, and safe to ignore.
 2. **Responsive under the hand.** Direct actions answer immediately, then settle with soft easing.
-3. **Meaning survives the mood.** Green running, red needs-input, and blue idle remain unambiguous. Expressive sequences are temporary and always restore operational state.
+3. **Meaning survives the mood.** Green running, orange waiting on you, red needs-input, and blue idle remain unambiguous. Expressive sequences are temporary and always restore operational state.
 4. **Depth without fog.** Translucency, bloom, and gradients create atmosphere, but text and controls retain strong contrast.
 5. **Rhythm over spectacle.** Animation should have phrasing, rests, and variation. Avoid uniform loading-spinner motion.
 6. **One instrument.** MIDI light, on-screen motion, preview transitions, and future sound should share timing and color language.
@@ -47,6 +47,7 @@ Ambientic’s primary mark is the supplied orbital-circle artwork: nested paths 
 - Hardware expressions: layered waves at different speeds, sparse deterministic glitches, cool color fields, and a clean return to task-state lighting.
 - Prefer spatial waves, opacity drift, blur, and subtle parallax.
 - Respect reduced-motion preferences and never obscure an approval or urgent task state for long.
+- **Orange is a question addressed to the person.** A thread holding a pending approval lights its pad orange on every connected grid, overriding the lifecycle colour underneath, because that thread cannot move until it is answered and nothing else about it matters yet. The pad is held solid rather than blinking: an agent waiting for consent is patient, not alarmed, and blinking is already spoken for by unseen attention. The colour matches the quiet amber that carries consent in the interface, so permission reads the same on screen and under the hand. It clears the moment the approval is answered, cancelled, or times out.
 
 ## First expression: Vibe
 
