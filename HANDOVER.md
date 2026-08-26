@@ -1,9 +1,9 @@
 <!-- ambientic-handover -->
 # AgentBase handover
 
-Generated: 2026-08-26T15:28:10.664Z  
+Generated: 2026-08-26T16:31:21.334Z  
 Source provider: claude  
-Source task: AgentBase  
+Source task: Locate missing packagejson file  
 Reason: 100% used · Current session
 
 ## Continue from here
@@ -26,44 +26,31 @@ The product should own the user experience and normalized session model, not pro
 
 ## Current objective
 
-AgentBase
+Locate missing packagejson file
 
 ## Completed and material state
 
 Recent commits:
 
 ```text
+7774eaa Let an approval be answered once, for a thread, or for good
 71a88c0 Merge commit 'f4a7ba4' into codex/acknowledge-opened-threads
 f4a7ba4 Stop pre-granting the access the user asked to be consulted about
 5d77d9c Light a pad orange while it waits on you
 1a759a5 Merge commit '4154f10a82e1b57eed94c1159827eb674c425e72' into codex/acknowledge-opened-threads
-f23d945 Acknowledge completed threads when opened
 ```
 
 Current working tree (preserve these changes):
 
 ```text
-M resources/build-info.json
- M src/main/index.js
- M src/main/permission-policy.mjs
- M src/main/workspace-service.mjs
- M src/preload/index.js
- M src/renderer/Workspace.jsx
- M test/permission-policy.test.mjs
-?? src/main/permission-grants.mjs
+M HANDOVER.md
 ```
 
 Change footprint:
 
 ```text
-resources/build-info.json       |  6 ++--
- src/main/index.js               |  8 ++++++
- src/main/permission-policy.mjs  | 45 +++++++++++++++++------------
- src/main/workspace-service.mjs  | 63 +++++++++++++++++++++++++++++++----------
- src/preload/index.js            |  5 +++-
- src/renderer/Workspace.jsx      | 51 ++++++++++++++++++++++++++++++---
- test/permission-policy.test.mjs | 28 +++++++++++++++---
- 7 files changed, 161 insertions(+), 45 deletions(-)
+HANDOVER.md | 28 +++-------------------------
+ 1 file changed, 3 insertions(+), 25 deletions(-)
 ```
 
 ## Remaining direction
@@ -115,7 +102,12 @@ normalized turns ───┘                                                   
 
 ## Recent decision context
 
-- No canonical recent messages were available. Use the task title, README, and working tree as the source of truth.
+- **Agent result:** Backed up. Now quitting Ambientic so it can't overwrite the cache while I clean:
+- **User direction:** Exit code 137
+- **User direction:** On ambientic's overview, below the various ai providers/agents and instead of the mozaic I would like to see a visualisation of the threads/agents I have  displayed on my pad. I want the UI to respect the art direction of the project and have a 3d , texture feel of a generic pad with ambient light corresponding of what I see on my apc. + I want clear names of the thread well visible for each pad so I cna easly anderstand what pad is what thread. Remove the thread mozaic its not useful
+- **Agent result:** A screen surface mirroring the hardware — per `AGENTS.md` that's an art-direction change too. Let me look at the mosaic and the LED source of truth first.
+- **User direction:** src/renderer/Workspace.jsx:727:function ThreadMosaicCard ({ session, index, onOpen }) { src/renderer/Workspace.jsx:729:    <button className="mosaic-card" data-session-state={session.state} data-size={index % 7 === 0 ? 'wide' : index % 5 === 0 ? 'tall' : 'standard'} type="button" onClick={() => onOpen(session.id)}> src/renderer/Workspace.jsx:730:      <header><span className="mosaic-card__agent"><AgentIcon agent={session.agent} /></span><span>{session.agent}</span><i data-state={session.state} /></header> src/renderer/Workspace.jsx:758:        <section className="mosaic-section"> src/renderer/Workspace.jsx:759:          <header><div><span className="eyebrow">Across every provider</span><h2>Y
+- **User direction:** context-contract.mjs semantic-actions.mjs 5:  PAD_COUNT: 40, 34:  if (!Number.isInteger(note) || note < 0 || note >= APC40.PAD_COUNT) return null 59:  if (!Number.isInteger(pad) || pad < 0 || pad >= APC40.PAD_COUNT) return null 94:export function gridSessions (sessions = []) { 95:  return sessions.slice(0, APC40.PAD_COUNT) 100:  const grid = gridSessions(sessions) 106:  const grid = gridSessions(sessions) 107:  return Array.from({ length: APC40.PAD_COUNT }, (_, pad) => {
 
 ## Material artifacts
 

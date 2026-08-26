@@ -18,6 +18,8 @@ import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
 import { taskCreationError } from './new-task-state.mjs'
+import { padGridSessions } from './pad-grid.mjs'
+import { padLightForSession } from '../shared/pad-light.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
 import hermesAgentLogo from './assets/hermes-agent.png'
 
@@ -724,14 +726,70 @@ function ProviderPad ({ connector, sessions, usage, index, onOpenProvider }) {
   )
 }
 
-function ThreadMosaicCard ({ session, index, onOpen }) {
+// The first hardware target's grid, used until a controller reports its own.
+const APC40_PAD_COUNT = 40
+
+const PAD_TONE_LABEL = {
+  running: 'Working',
+  approval: 'Waiting for you',
+  attention: 'Needs you',
+  idle: 'Idle',
+  empty: 'Empty pad'
+}
+
+function ThreadPad ({ session, index, onOpen }) {
+  const { tone, motion } = padLightForSession(session)
+  const label = session ? sessionTitle(session) : ''
   return (
-    <button className="mosaic-card" data-session-state={session.state} data-size={index % 7 === 0 ? 'wide' : index % 5 === 0 ? 'tall' : 'standard'} type="button" onClick={() => onOpen(session.id)}>
-      <header><span className="mosaic-card__agent"><AgentIcon agent={session.agent} /></span><span>{session.agent}</span><i data-state={session.state} /></header>
-      <h3>{sessionTitle(session)}</h3>
-      <p>{session.summary || (session.history ? 'A conversation from your local agent history.' : 'Live local agent task.')}</p>
-      <footer><span>{session.project || 'Local task'}</span><span>{stateLabel[session.state] || session.state} →</span></footer>
+    <button
+      className="thread-pad"
+      type="button"
+      data-tone={tone}
+      data-motion={motion}
+      disabled={!session}
+      aria-label={session ? `Pad ${index + 1}: ${label} — ${PAD_TONE_LABEL[tone]}` : `Pad ${index + 1}: empty`}
+      title={session ? `${label} · ${PAD_TONE_LABEL[tone]}` : ''}
+      style={{ '--pad-index': index }}
+      onClick={() => session && onOpen(session.id)}
+    >
+      {/* The light sits under the face so the glow reads as coming through the
+          pad rather than being painted on top of the label. */}
+      <span className="thread-pad__glow" aria-hidden="true" />
+      <span className="thread-pad__face" aria-hidden="true" />
+      {session && (
+        <span className="thread-pad__label">
+          <b>{label}</b>
+          <small>{session.project || PAD_TONE_LABEL[tone]}</small>
+        </span>
+      )}
+      {session && <span className="thread-pad__agent" aria-hidden="true"><AgentIcon agent={session.agent} /></span>}
     </button>
+  )
+}
+
+function ThreadPadGrid ({ sessions, midi, onOpenThread }) {
+  const padCount = Number.isFinite(midi?.padCount) && midi.padCount > 0 ? midi.padCount : APC40_PAD_COUNT
+  const pads = padGridSessions(sessions, padCount)
+  const occupied = pads.filter(Boolean).length
+  return (
+    <section className="pad-section">
+      <header>
+        <div><span className="eyebrow">{midi?.connected ? `Mirroring ${midi.shortModel || midi.model}` : 'Your grid'}</span><h2>Threads under your hands</h2></div>
+        <div className="pad-legend">
+          <span data-tone="running"><i />Working</span>
+          <span data-tone="approval"><i />Waiting for you</span>
+          <span data-tone="attention"><i />Needs you</span>
+          <span data-tone="idle"><i />Idle</span>
+        </div>
+      </header>
+      <div className="pad-grid" data-pads={padCount} role="group" aria-label="Agent pads">
+        {pads.map((session, index) => <ThreadPad key={session?.id || `empty-${index}`} session={session} index={index} onOpen={onOpenThread} />)}
+      </div>
+      <footer className="pad-summary">
+        <span>{occupied} of {padCount} pads in use</span>
+        <span>{midi?.connected ? 'Lit the same on your controller' : 'Connect your APC to light these for real'}</span>
+      </footer>
+    </section>
   )
 }
 
@@ -755,12 +813,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, 
           <button className="provider-pad provider-pad--new" type="button" onClick={() => onCreate('')}><span className="provider-pad--new__plus">＋</span><b>Create an agent task</b><small>Choose a provider and start</small></button>
         </section>
 
-        <section className="mosaic-section">
-          <header><div><span className="eyebrow">Across every provider</span><h2>Your agent mosaic</h2></div><div className="mosaic-legend"><span><i data-state="running" />Active</span><span><i data-state="attention" />Needs you</span><span><i data-state="idle" />Idle</span><span><i data-state="history" />History</span></div></header>
-          <div className="thread-mosaic">{sessions.map((session, index) => <ThreadMosaicCard key={session.id} session={session} index={index} onOpen={onOpenThread} />)}</div>
-          {!sessions.length && <div className="mosaic-empty">Your first agent task will appear here.</div>}
-          <footer className="mosaic-summary"><span>{live.length} live or recent</span><span>{historyCount} from local history</span></footer>
-        </section>
+        <ThreadPadGrid sessions={sessions} midi={midi} onOpenThread={onOpenThread} />
       </div>
     </section>
   )

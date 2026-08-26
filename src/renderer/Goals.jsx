@@ -57,11 +57,38 @@ function GoalCard ({ goal, index, onOpen }) {
   )
 }
 
+function useEditForm (initial) {
+  const [form, setForm] = useState(initial)
+  const field = (name) => ({ value: form[name], onChange: (event) => setForm((current) => ({ ...current, [name]: event.target.value })) })
+  return [form, field]
+}
+
+function failureMessage (error, fallback) {
+  return error.message?.replace(/^Error invoking remote method '[^']+': Error:\s*/, '') || fallback
+}
+
+function formValues (record, fields) {
+  return fields.reduce((values, name) => ({ ...values, [name]: record[name] || '' }), {})
+}
+
+const goalFields = ['title', 'outcome', 'why', 'successCriteria', 'targetDate', 'priority', 'status']
+
+function GoalFields ({ field, autoFocus, withStatus }) {
+  return (
+    <>
+      <label>Goal name<input {...field('title')} autoFocus={autoFocus} maxLength={100} placeholder="Build Ambientic, find a job, get better at…" /></label>
+      <label>Desired outcome<textarea {...field('outcome')} maxLength={600} placeholder="What should be observably different when this succeeds?" /></label>
+      <div className="goal-modal__split"><label>Why it matters<textarea {...field('why')} maxLength={1000} placeholder="The motivation and larger direction" /></label><label>Definition of success<textarea {...field('successCriteria')} maxLength={1200} placeholder="Evidence that proves the goal is achieved" /></label></div>
+      <div className="goal-modal__split goal-modal__split--compact"><label>Target date<input {...field('targetDate')} type="date" /></label><label>Priority<select {...field('priority')}><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label></div>
+      {withStatus && <label>Status<select {...field('status')}>{Object.entries(goalStatusLabel).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>}
+    </>
+  )
+}
+
 function GoalCreateModal ({ onClose, onCreate }) {
-  const [form, setForm] = useState({ title: '', outcome: '', why: '', successCriteria: '', targetDate: '', priority: 'normal' })
+  const [form, field] = useEditForm({ title: '', outcome: '', why: '', successCriteria: '', targetDate: '', priority: 'normal' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const field = (name) => ({ value: form[name], onChange: (event) => setForm((current) => ({ ...current, [name]: event.target.value })) })
   const submit = async (event) => {
     event.preventDefault()
     if (!form.title.trim() || saving) return
@@ -71,7 +98,7 @@ function GoalCreateModal ({ onClose, onCreate }) {
       const goal = await onCreate(form)
       onClose(goal?.id)
     } catch (error) {
-      setError(error.message?.replace(/^Error invoking remote method '[^']+': Error:\s*/, '') || 'This goal could not be created.')
+      setError(failureMessage(error, 'This goal could not be created.'))
       setSaving(false)
     }
   }
@@ -79,10 +106,7 @@ function GoalCreateModal ({ onClose, onCreate }) {
     <div className="modal-backdrop">
       <form className="goal-modal" onSubmit={submit}>
         <header><div><span>Open a new path</span><h2>Create a goal</h2><p>Start with the outcome. Tasks come after the destination is clear.</p></div><button type="button" aria-label="Close" onClick={() => onClose()}>×</button></header>
-        <label>Goal name<input {...field('title')} autoFocus maxLength={100} placeholder="Build Ambientic, find a job, get better at…" /></label>
-        <label>Desired outcome<textarea {...field('outcome')} maxLength={600} placeholder="What should be observably different when this succeeds?" /></label>
-        <div className="goal-modal__split"><label>Why it matters<textarea {...field('why')} maxLength={1000} placeholder="The motivation and larger direction" /></label><label>Definition of success<textarea {...field('successCriteria')} maxLength={1200} placeholder="Evidence that proves the goal is achieved" /></label></div>
-        <div className="goal-modal__split goal-modal__split--compact"><label>Target date<input {...field('targetDate')} type="date" /></label><label>Priority<select {...field('priority')}><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label></div>
+        <GoalFields field={field} autoFocus />
         {error && <p className="goal-modal__error">{error}</p>}
         <footer><button type="button" onClick={() => onClose()}>Cancel</button><button className="primary" type="submit" disabled={!form.title.trim() || saving}>{saving ? 'Creating…' : 'Create goal'}</button></footer>
       </form>
@@ -90,11 +114,53 @@ function GoalCreateModal ({ onClose, onCreate }) {
   )
 }
 
-function TaskCreateModal ({ goal, initialStatus, onClose, onCreate }) {
-  const [form, setForm] = useState({ title: '', description: '', milestone: '', acceptanceCriteria: '', ownerType: 'human', ownerName: '', status: initialStatus || 'backlog' })
+function GoalEditModal ({ goal, onClose, onSave }) {
+  const [form, field] = useEditForm(formValues(goal, goalFields))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const field = (name) => ({ value: form[name], onChange: (event) => setForm((current) => ({ ...current, [name]: event.target.value })) })
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!form.title.trim() || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(goal.id, form)
+      onClose()
+    } catch (error) {
+      setError(failureMessage(error, 'This goal could not be saved.'))
+      setSaving(false)
+    }
+  }
+  return (
+    <div className="modal-backdrop">
+      <form className="goal-modal" onSubmit={submit}>
+        <header><div><span>Editing path</span><h2>Edit goal</h2><p>Restate the destination as your understanding of it changes.</p></div><button type="button" aria-label="Close" onClick={onClose}>×</button></header>
+        <GoalFields field={field} autoFocus withStatus />
+        {error && <p className="goal-modal__error">{error}</p>}
+        <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" type="submit" disabled={!form.title.trim() || saving}>{saving ? 'Saving…' : 'Save changes'}</button></footer>
+      </form>
+    </div>
+  )
+}
+
+const taskFields = ['title', 'description', 'milestone', 'acceptanceCriteria', 'ownerType', 'ownerName', 'status']
+
+function TaskFields ({ form, field, autoFocus }) {
+  return (
+    <>
+      <label>Task<input {...field('title')} autoFocus={autoFocus} maxLength={140} placeholder="A concrete next action" /></label>
+      <div className="goal-modal__split"><label>Milestone<input {...field('milestone')} maxLength={120} placeholder="Optional checkpoint" /></label><label>Board state<select {...field('status')}>{columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}</select></label></div>
+      <label>Context<textarea {...field('description')} maxLength={1600} placeholder="Only the context needed to perform this task" /></label>
+      <label>Definition of done<textarea {...field('acceptanceCriteria')} maxLength={1200} placeholder="The evidence or observable result required" /></label>
+      <div className="goal-modal__split goal-modal__split--compact"><label>Owner type<select {...field('ownerType')}><option value="human">Human</option><option value="agent">Agent</option><option value="mixed">Human + agent</option></select></label><label>Owner<input {...field('ownerName')} maxLength={80} placeholder={form.ownerType === 'agent' ? 'Builder, Codex, Claude…' : 'Samori'} /></label></div>
+    </>
+  )
+}
+
+function TaskCreateModal ({ goal, initialStatus, onClose, onCreate }) {
+  const [form, field] = useEditForm({ title: '', description: '', milestone: '', acceptanceCriteria: '', ownerType: 'human', ownerName: '', status: initialStatus || 'backlog' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const submit = async (event) => {
     event.preventDefault()
     if (!form.title.trim() || saving) return
@@ -103,7 +169,7 @@ function TaskCreateModal ({ goal, initialStatus, onClose, onCreate }) {
       await onCreate(goal.id, form)
       onClose()
     } catch (error) {
-      setError(error.message?.replace(/^Error invoking remote method '[^']+': Error:\s*/, '') || 'This task could not be created.')
+      setError(failureMessage(error, 'This task could not be created.'))
       setSaving(false)
     }
   }
@@ -111,15 +177,38 @@ function TaskCreateModal ({ goal, initialStatus, onClose, onCreate }) {
     <div className="modal-backdrop">
       <form className="goal-modal goal-task-modal" onSubmit={submit}>
         <header><div><span>{goal.title}</span><h2>Add a task</h2><p>Give the human or agent a bounded action and a clear finish line.</p></div><button type="button" aria-label="Close" onClick={onClose}>×</button></header>
-        <label>Task<input {...field('title')} autoFocus maxLength={140} placeholder="A concrete next action" /></label>
-        <div className="goal-modal__split"><label>Milestone<input {...field('milestone')} maxLength={120} placeholder="Optional checkpoint" /></label><label>Board state<select {...field('status')}>{columns.map((column) => <option key={column.id} value={column.id}>{column.label}</option>)}</select></label></div>
-        <label>Context<textarea {...field('description')} maxLength={1600} placeholder="Only the context needed to perform this task" /></label>
-        <label>Definition of done<textarea {...field('acceptanceCriteria')} maxLength={1200} placeholder="The evidence or observable result required" /></label>
-        <div className="goal-modal__split goal-modal__split--compact"><label>Owner type<select {...field('ownerType')}><option value="human">Human</option><option value="agent">Agent</option><option value="mixed">Human + agent</option></select></label><label>Owner<input {...field('ownerName')} maxLength={80} placeholder={form.ownerType === 'agent' ? 'Builder, Codex, Claude…' : 'Samori'} /></label></div>
+        <TaskFields form={form} field={field} autoFocus />
         {error && <p className="goal-modal__error">{error}</p>}
         <footer><button type="button" onClick={onClose}>Cancel</button><button className="primary" type="submit" disabled={!form.title.trim() || saving}>{saving ? 'Adding…' : 'Add task'}</button></footer>
       </form>
     </div>
+  )
+}
+
+function TaskEditModal ({ task, onCancel, onSave }) {
+  const [form, field] = useEditForm(formValues(task, taskFields))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!form.title.trim() || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(task.id, form)
+      onCancel()
+    } catch (error) {
+      setError(failureMessage(error, 'This task could not be saved.'))
+      setSaving(false)
+    }
+  }
+  return (
+    <form className="goal-modal goal-task-modal" onSubmit={submit}>
+      <header><div><span>Editing ticket</span><h2>Edit task</h2><p>Refine the action, the context, and the finish line as the work changes.</p></div><button type="button" aria-label="Close" onClick={onCancel}>×</button></header>
+      <TaskFields form={form} field={field} autoFocus />
+      {error && <p className="goal-modal__error">{error}</p>}
+      <footer><button type="button" onClick={onCancel}>Cancel</button><button className="primary" type="submit" disabled={!form.title.trim() || saving}>{saving ? 'Saving…' : 'Save changes'}</button></footer>
+    </form>
   )
 }
 
@@ -148,14 +237,23 @@ function TaskCard ({ task, onOpen }) {
   )
 }
 
-function TaskDetailModal ({ task, onClose, onMove }) {
+function TaskDetailModal ({ task, onClose, onMove, onSave }) {
+  const [editing, setEditing] = useState(false)
   const status = columns.find((column) => column.id === task.status)
   const owner = task.ownerName || (task.ownerType === 'agent' ? 'Unassigned agent' : task.ownerType === 'mixed' ? 'Shared' : 'You')
+  if (editing) {
+    return (
+      <div className="modal-backdrop">
+        <TaskEditModal task={task} onCancel={() => setEditing(false)} onSave={onSave} />
+      </div>
+    )
+  }
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="goal-ticket-modal" role="dialog" aria-modal="true" aria-labelledby={`ticket-title-${task.id}`}>
         <header>
           <div><span>{status?.label || task.status}</span><h2 id={`ticket-title-${task.id}`}>{task.title}</h2></div>
+          <button className="goal-ticket-modal__edit" type="button" onClick={() => setEditing(true)}>Edit</button>
           <button type="button" aria-label="Close ticket" onClick={onClose}>×</button>
         </header>
         <div className="goal-ticket-modal__meta">
@@ -167,23 +265,28 @@ function TaskDetailModal ({ task, onClose, onMove }) {
           <section><span>Context</span><p>{task.description || 'No additional context yet.'}</p></section>
           <section><span>Definition of done</span><p>{task.acceptanceCriteria || 'No acceptance criteria yet.'}</p></section>
         </div>
-        <footer><small>Drag this ticket between columns for a quick move, or change its status here.</small><button type="button" onClick={onClose}>Done</button></footer>
+        <footer><small>Drag this ticket between columns for a quick move, or edit it to change any detail.</small><button type="button" onClick={onClose}>Done</button></footer>
       </section>
     </div>
   )
 }
 
-function GoalDetail ({ goal, onBack, onUpdateGoal, onAddTask, onMoveTask }) {
+function GoalDetail ({ goal, onBack, onUpdateGoal, onAddTask, onUpdateTask }) {
+  const onMoveTask = (taskId, status) => onUpdateTask(taskId, { status })
   const [newTaskStatus, setNewTaskStatus] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState('')
   const [showGoalDetails, setShowGoalDetails] = useState(false)
+  const [editingGoal, setEditingGoal] = useState(false)
   const selectedTask = goal.tasks.find((task) => task.id === selectedTaskId)
   return (
     <section className="goal-detail">
       <header className="goal-detail__topbar"><button type="button" onClick={onBack}>← All goals</button><span>Goal field</span><button type="button" onClick={() => setNewTaskStatus('ready')}>＋ Add task</button></header>
       <div className="goal-detail__summary">
         <h1>{goal.title}</h1>
-        <button type="button" aria-expanded={showGoalDetails} onClick={() => setShowGoalDetails((visible) => !visible)}>{showGoalDetails ? 'Hide goal details' : 'Goal details'}</button>
+        <div className="goal-detail__summary-actions">
+          <button type="button" onClick={() => setEditingGoal(true)}>Edit goal</button>
+          <button type="button" aria-expanded={showGoalDetails} onClick={() => setShowGoalDetails((visible) => !visible)}>{showGoalDetails ? 'Hide goal details' : 'Goal details'}</button>
+        </div>
       </div>
       {showGoalDetails && <div className="goal-detail__disclosure">
         <section><span>Desired outcome</span><p>{goal.outcome || 'Not defined yet.'}</p></section>
@@ -219,8 +322,9 @@ function GoalDetail ({ goal, onBack, onUpdateGoal, onAddTask, onMoveTask }) {
           )
         })}
       </div>
+      {editingGoal && <GoalEditModal key={goal.id} goal={goal} onClose={() => setEditingGoal(false)} onSave={onUpdateGoal} />}
       {newTaskStatus && <TaskCreateModal goal={goal} initialStatus={newTaskStatus} onClose={() => setNewTaskStatus('')} onCreate={onAddTask} />}
-      {selectedTask && <TaskDetailModal task={selectedTask} onClose={() => setSelectedTaskId('')} onMove={onMoveTask} />}
+      {selectedTask && <TaskDetailModal key={selectedTask.id} task={selectedTask} onClose={() => setSelectedTaskId('')} onMove={onMoveTask} onSave={onUpdateTask} />}
     </section>
   )
 }
@@ -232,7 +336,7 @@ export function GoalsWorkspace ({ snapshot, selectedGoalId, onSelectGoal, onCrea
   const active = goals.filter((goal) => ['active', 'draft'].includes(goal.status))
   const resting = goals.filter((goal) => !['active', 'draft'].includes(goal.status))
   if (selected) {
-    return <GoalDetail goal={selected} onBack={() => onSelectGoal('')} onUpdateGoal={onUpdateGoal} onAddTask={onCreateTask} onMoveTask={(taskId, status) => onUpdateTask(taskId, { status })} />
+    return <GoalDetail goal={selected} onBack={() => onSelectGoal('')} onUpdateGoal={onUpdateGoal} onAddTask={onCreateTask} onUpdateTask={onUpdateTask} />
   }
   return (
     <section className="goals-page">
