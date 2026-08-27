@@ -26,5 +26,14 @@ export function assembleProviderPrompt (text, { mode = 'build', attachments = []
 const AMBIENTIC_CONTEXT = /<(?:ambientic|agentbase)-context\b[^>]*>[\s\S]*?<\/(?:ambientic|agentbase)-context>\s*/i
 
 export function stripAmbienticContext (text) {
-  return String(text || '').replace(AMBIENTIC_CONTEXT, '').trim()
+  const value = String(text || '')
+  const stripped = value.replace(AMBIENTIC_CONTEXT, '').trim()
+  if (stripped !== value.trim()) return stripped
+  // Provider indexes often truncate the first prompt before the closing tag.
+  // In that form there is no user request we can safely recover, and treating
+  // the remaining preamble as a title produces labels such as
+  // "<ambientic-context mode=build> Project context…". Prefer no title so the
+  // caller can use a human fallback or another provider preview.
+  if (/^\s*<(?:ambientic|agentbase)-context\b/i.test(value)) return ''
+  return stripped
 }

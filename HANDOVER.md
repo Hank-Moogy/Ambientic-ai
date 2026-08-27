@@ -1,10 +1,10 @@
 <!-- ambientic-handover -->
 # AgentBase handover
 
-Generated: 2026-07-30T10:54:57.600Z  
+Generated: 2026-08-26T16:31:21.334Z  
 Source provider: claude  
-Source task: Why is it not  
-Reason: 100% used · All models
+Source task: Locate missing packagejson file  
+Reason: 100% used · Current session
 
 ## Continue from here
 
@@ -26,567 +26,31 @@ The product should own the user experience and normalized session model, not pro
 
 ## Current objective
 
-Finish installed-app and physical validation of the implemented Universal
-Hardware Mapping V1, then continue the existing context-platform live acceptance
-gate. The Hardware workspace, profile service, multi-view runtime, generic input,
-keyboard/MIDI Learn, permission confirmation, and portable bundles are in the
-working tree. Do not replace them with the old compact-controller MIDI Learn
-panel or weaken the protected APC40 MKII/APC mini native mode.
-
-## Session log — 2026-08-02 (Universal Hardware Mapping V1)
-
-- Added Hardware as a first-class primary workspace with a local template
-  library and Play, Edit, Map MIDI, and Test modes. The center surface is an
-  arbitrary 1–12 by 1–12 low-motion virtual deck with an action inspector,
-  per-view tabs, deck/view rename, secondary-view deletion with link cleanup,
-  live input truth, and compact-height scaling.
-- Added `src/shared/semantic-actions.mjs`: versioned actions carry category,
-  target type, permission, feedback, and input metadata. Implemented actions
-  cover view navigation, providers, exact/smart threads, prompts and interrupts,
-  Goals, workflows, skills, Overview/Hardware navigation, Vibe, and existing
-  session movement/capture.
-- Added `src/main/hardware-profile-service.mjs`: atomic `0600`
-  `hardware-profiles.json` persistence, protected built-in live-session profile,
-  saved/forked templates, arbitrary grids, multiple views, logical slots,
-  template-wide physical bindings, bounded Back history, linked-view creation,
-  press/release/650 ms hold/value triggers, execution results, and import/export.
-- The key invariant is physical-control → logical slot → active-view assignment.
-  A control is learned once and keeps its position while views change meaning.
-  Creating a linked view assigns the parent pad and seeds Back in the child.
-- Expanded MIDI discovery so Automatic still prefers APC40 MKII/APC mini native
-  behavior, then falls back to a generic input-only port. Every discovered input
-  is selectable. Note/CC press and release events reach the new runtime while
-  legacy native actions, task-state LEDs, voice buttons, Vibe, and process-wide
-  CoreMIDI client reuse remain intact.
-- Custom templates on an APC now project the active view's mapped assignment
-  tones onto learned grid controls and clear stale live-session colors. Returning
-  to the protected Ambientic Live Sessions template restores its native session
-  state feedback; arbitrary-controller LED/SysEx profile authoring is still
-  deliberately deferred.
-- Added focused computer-key learning while the Hardware surface is active.
-  Generic output is deliberately input-only; controller-specific LED/SysEx
-  authoring remains after V1 rather than guessing unsafe protocols.
-- Consequential assignments never execute silently from hardware. The main
-  process emits one pending confirmation and the renderer names the action and
-  target before executing or cancelling it.
-- Export produces `ambientic.hardware-template` JSON and removes physical
-  bindings, exact private thread/goal/workflow targets, and saved prompts. Import
-  marks those assignments as setup-required instead of silently binding another
-  local object.
-- Import now enforces schema version, grid bounds, unique/rooted view graphs,
-  supported actions, valid pads, linked-view targets, a 2 MB file ceiling, and
-  the 80-template library ceiling. A source-to-second-clean-profile test proves
-  sanitized export, import, restart restoration, forward navigation, and Back
-  while asserting that bindings and private IDs/labels are absent. Exports also
-  carry a derived action/provider/skill/setup summary for a future catalog.
-- Consequential actions stay visibly pending until the user responds. Cancel,
-  success, unavailable actions, and execution errors update the Hardware footer;
-  the confirmation dialog waits for the real result and a second hardware press
-  cannot silently replace a pending request. Unanswered confirmations expire
-  after 30 seconds so a renderer reload cannot strand the hardware runtime.
-- Imported setup state is derived from the action's actual required target and,
-  for saved-prompt actions, instruction. Saving repaired inputs clears the red
-  state. MIDI conflict moves are visible, and mapped thread actions now resolve
-  the same live-plus-history index offered by the inspector.
-- Browser-skill visual QA passed at 1280×720. It caught a clipped fourth row;
-  the grid now derives size from available height and all pads remain above the
-  footer. Pad selection and the full inspector were checked in the rendered DOM.
-- Focused hardware/APC verification passes 37/37 tests, including clean-profile
-  bundle exchange, confirmation lifecycle, import validation, and custom APC
-  assignment feedback; the production Electron/Vite build passes. The
-  release-safe repository suite passes 199 runnable tests with 0 failures and 2
-  intentional transport skips. The separate fake-Claude OAuth callback
-  simulator is excluded by that release-safe script because its live callback
-  wait remains flaky; the remaining Claude auth tests run. Preserve the later
-  committed `src/main/workspace-service.mjs` Codex rollout fix at HEAD.
-- `AMBIENTIC_STATE_DIR` is now applied before logging and the single-instance
-  lock, and isolated profiles use an ephemeral ingest port. A clean live smoke
-  ran beside the installed app with a healthy context database and health result
-  `{"ok":true,"sessions":8}`. It repeatedly detected the connected
-  `APC mini mk2 Control` port without writing to the real Ambientic profile.
-
-Remaining release gates:
-
-1. Repeat the now-automated clean-profile bundle exchange through the installed
-   app's native Export and Import file dialogs.
-2. On physical APC40 MKII and APC mini hardware, learn a grid pad, navigate into
-   a child view and Back, run one safe action, and verify confirmation for one
-   consequential action without regressing native RGB/voice/Vibe behavior.
-3. Decide whether focused computer-key bindings are sufficient for soft launch;
-   global system-wide shortcuts can be added later through a separate explicit
-   permission/conflict design.
-
-## Session log — 2026-08-02 (context platform implemented)
-
-- Added the canonical SQLite/FTS5 store, ordered migrations and backups, project
-  backfill, session bindings, frozen capsules, deterministic memory observation,
-  redaction, exclusions, corroboration, conflicts, supersession, and forgetting.
-- Added one permission-restricted local gateway and stdio MCP shim with hashed,
-  scoped, expiring session capabilities; native Ambientic tools; approval,
-  cancellation, audit, namespaced idempotency; and generic stdio/Streamable HTTP
-  MCP discovery and proxying.
-- Wired Claude, Codex, and Hermes through their native instruction and MCP seams.
-  Codex dynamic tools remain deliberately disabled.
-- Added systematic goal closeout for linked work. Before finishing a meaningful
-  turn, the agent must fetch the latest bound goal, compare evidence with ticket
-  acceptance criteria, request justified status updates, and explicitly confirm
-  reconciliation even when nothing changed. Missing closeout is audited, and
-  ticket writes outside the bound goal are rejected.
-- Added preload contracts plus the New Agent context selector, thread capsule and
-  activity panel, Memory workspace, Apps & Tools, gateway approval metadata, and
-  onboarding transcript-consent control. Visual QA passed at desktop and 720 px.
-- Extracted the legacy prompt wrapper behind a byte-regression-tested assembler;
-  kept Goals and Workflows JSON-backed behind repository interfaces.
-- Automated local-release tests, production renderer build, real Unix-socket
-  gateway transport, Electron 33 native rebuild, and packaged-app SQLite/FTS5
-  smoke pass. Do not reset a broken database; the startup error intentionally
-  preserves it for recovery.
-
-## Session log — 2026-08-02 (architecture settled, docs aligned)
-
-Second design session. The plan from 2026-08-01 was challenged against a
-competing proposal and merged. Three positions from the first design were
-overturned and are now settled:
-
-1. **Gateway transport.** A localhost HTTP gateway was wrong — a TCP port is
-   reachable by any local process. Replaced by one long-lived gateway plus a
-   small stdio MCP shim per session, forwarding over a permission-restricted
-   local socket, with the capability token passed only through the shim's
-   environment and persisted as a hash.
-2. **Tool schema budget.** The first design bounded the capsule to ~1200 tokens
-   and would then have injected every proxied server's schemas into every
-   request. External capabilities now go behind `ambientic_capability`
-   search/invoke; only the narrow native tools stay directly visible.
-3. **Goal inference.** Titles-only degradation was replaced by a seven-step
-   inference ladder, made safe by showing the inferred binding before launch and
-   allowing correction afterwards. Inference is acceptable when visible, not
-   when silent.
-
-**Settled technical choices:** SQLite/FTS5 via `better-sqlite3` as the canonical
-store with native packaging as a release gate; goals and workflows stay JSON
-behind repository interfaces; ~900-token frozen capsule with a 1200 hard cap,
-bytes and hash persisted per session; deterministic harvesting only; Hermes
-reproduced, not forked.
-
-**Verified against the installed toolchain this session, not assumed:**
-
-- `claude --help` confirms `--append-system-prompt-file`, `--mcp-config`, and
-  `--strict-mcp-config` all exist. C5's Claude path is sound as written.
-- `codex app-server generate-json-schema --out DIR` dumps the full protocol.
-  `ThreadStartParams` accepts `developerInstructions`, a free-form `config`
-  object, and `dynamicTools`. C5's Codex path is sound. Dynamic tools are
-  deliberately deferred: experimental, and a second dispatch path is not worth
-  maintaining alongside the shim.
-- Hermes is `NousResearch/hermes-agent`, MIT, Python, source at
-  `~/.hermes/hermes-agent`. Its `agent/memory_provider.py` defines the lifecycle
-  worth copying (`system_prompt_block`, `prefetch`, `sync_turn`,
-  `get_tool_schemas`, `handle_tool_call`, `on_session_end`, `on_pre_compress`).
-  Its built-in memory store is a single markdown file at
-  `~/.hermes/memories/USER.md`; external providers are third-party services.
-  There is no retrieval engine in there to harvest — the value is the interface.
-
-**Baseline checkpoint:** commit `906f21a` preserves the working tree, including
-pre-existing uncommitted work and the in-flight context contract, store, and UI
-scaffolding. The stray bundled `index.js` at the repo root is excluded from it —
-that is electron-vite output that landed outside the gitignored `out/`, and it
-should be deleted or moved rather than committed.
-
-**Lane discipline — active risk.** Two agents are working this repo
-concurrently. The backend lane owns `src/main/**`, preload, package/build config,
-the shim, migrations, and backend tests. The product lane owns
-`src/renderer/**`, renderer tests, and product documentation. As of this session
-that split was not being observed: renderer files and `package.json` were both
-being written from one lane on `agent/workflow-studio`, not on the planned
-`feature/context-kernel-gateway` and `feature/context-memory-ui` branches. Split
-the branches before the next merge or the integration step will be painful.
-
-Documentation updated this session: `PRODUCT.md`, `NEXT_STEPS.md`, `README.md`,
-and this file.
-
-## Ambient mode — two confirmed defects fixed 2026-08-02
-
-Reported symptom: the machine still went to sleep with ambient mode on. Both
-causes were confirmed against the running app, not inferred.
-
-1. **Wrong assertion type.** `enable()` started `prevent-app-suspension`, which
-   Electron documents as keeping the system active while *allowing the screen to
-   be turned off*. `pmset -g assertions` against the running app showed
-   `PreventUserIdleSystemSleep 1` but `PreventUserIdleDisplaySleep 0`. Because
-   macOS `powerd` already holds its own "prevent sleep while display is on"
-   assertion, the old type only began mattering once the screen went dark — and
-   did not hold from there. Now `prevent-display-sleep`, exported as
-   `AMBIENT_BLOCKER_TYPE`.
-2. **Enabled state was never persisted.** `set-ambient-mode` wrote nothing to
-   prefs while `set-ambient-mode-check-in` did, and construction restored only
-   `checkInMinutes`. Every relaunch, crash, or auto-update silently turned
-   ambient mode off while the tray checkbox correctly reported false. Persistence
-   now happens in the service's `change` handler so the tray toggle and all
-   future callers are covered by one write, and `prefs.ambientModeEnabled` is
-   restored at startup.
-
-Also added `reassert()` plus a `powerMonitor` `resume` hook, because a
-sleep/wake cycle can leave the process holding a blocker id the system no longer
-honours. It is a no-op when disabled or when the assertion still holds.
-
-No user-space assertion of any type prevents sleep when the lid is closed. That
-limitation is inherent, not a bug to chase.
-
-## Codex "no rollout found" on new tasks — fixed 2026-08-02
-
-Reported symptom: creating a new managed Codex task failed with
-`no rollout found for thread id <uuid>`. Not caused by the context kernel work,
-despite landing at the same time.
-
-`create()` calls `thread/start`, then `send()` calls `thread/resume` before
-`turn/start`. That sequence predates the context kernel — it is unchanged since
-`d738435`. What changed is Codex itself: **it now writes a thread's rollout file
-lazily, on the first turn**, so resuming a just-started thread can never succeed.
-
-Verified by driving the installed app server directly. Three `thread/start`
-variants — plain, with `developerInstructions`, and with `config.mcp_servers` —
-all produced the identical failure on the immediately following `thread/resume`,
-including the plain one carrying none of the new parameters. That rules out the
-capsule and MCP wiring conclusively.
-
-Fixed by tracking threads started by the live app-server process in
-`codexStartedThreads` and skipping `thread/resume` for them; the set is cleared
-when that process exits. Such a thread is already in the running process's memory
-and already carries its instructions and MCP config from `thread/start`, so the
-resume was redundant as well as impossible. Resume still runs for threads this
-process did not start, which is the case it exists for.
-
-Verified end to end: `thread/start` followed directly by `turn/start` with no
-resume returns a real turn id.
-
-Not covered by a regression test — asserting it needs a Codex RPC fixture the
-suite does not currently have. Worth adding when one exists.
-
-## Test suite ABI ping-pong — made self-healing 2026-08-02
-
-Packaging rebuilds `better-sqlite3` against Electron's ABI, after which the
-system Node test runner cannot load it and 15 SQLite-backed tests fail with
-`ERR_DLOPEN_FAILED`. This bit twice in a single session, and the error looks
-unrelated to whatever is actually being tested.
-
-`scripts/rebuild-sqlite-node.mjs` already fixed it but rebuilds unconditionally,
-so nobody ran it preemptively. `scripts/ensure-sqlite-node.mjs` now probes the
-module first and only rebuilds on `ERR_DLOPEN_FAILED`, and `npm test` runs it.
-The fast path costs about a second; the healing path was verified by deliberately
-flipping the ABI to Electron and confirming `npm test` recovered to 184 passing.
-
-## macOS permission prompts — root cause was ad-hoc signing, fixed 2026-08-02
-
-Reported symptom: Ambientic re-asking for Apple Music, Photos, and Documents
-access, having been granted them previously. Not related to the ambient mode
-work — `powerMonitor` and `powerSaveBlocker` are not TCC-gated.
-
-`build.mac` set no `identity`, so electron-builder fell back to ad-hoc signing
-(`Signature=adhoc`, `TeamIdentifier=not set`). macOS keys TCC grants for a
-properly signed app to signing identity plus bundle ID, which survives rebuilds;
-with no identity it falls back to the binary's cdhash, which changes on **every
-build**. Each local release therefore looked like a brand-new app and silently
-discarded every permission previously granted.
-
-Fixed by making `release:local` discover the machine's available Apple
-Development or Developer ID certificate (with `AMBIENTIC_SIGNING_IDENTITY` as an
-explicit override) while keeping only `"type": "development"` in shared build
-configuration. The release pipeline now rejects ad-hoc output before install
-instead of overwriting the stable package signature. Packaging and signing are
-separate: the official Electron signer excludes the duplicate
-`Versions/Current` framework traversal that otherwise invalidates sealed
-resources on this macOS/tooling combination. Verified on a fresh pack:
-`Authority=Apple Development: samori.osei@gmail.com`, `TeamIdentifier=K78PT544J5`,
-chain to Apple Root CA, `codesign --verify --deep --strict` clean.
-
-Two things worth knowing:
-
-- `project-scope.mjs` still correctly blocks Ambientic from inspecting protected
-  home children, and the context kernel's project backfill is guarded at its call
-  site in `workspace-service.mjs`. That guard was never the problem, and it also
-  cannot be the whole solution: Ambientic spawns provider CLIs as children, and
-  macOS attributes a child's file access to the responsible parent process, so
-  anything an agent reads under `~` prompts under Ambientic's name. Sessions whose
-  cwd is the home directory will therefore always surface these prompts.
-- This is a development certificate. It stops the permission churn on this
-  machine, but the app is not distributable to others without a Developer ID
-  certificate, `hardenedRuntime`, and notarization.
-
-Remaining manual step: install the newly signed build and grant the permissions
-once more. They persist across subsequent rebuilds from that point.
-
-## Resolved — better-sqlite3 ABI transition in the release lane
-
-The Electron package and the system Node test runner require different native
-ABIs. After packaging, Node previously failed the SQLite-backed tests with
-`ERR_DLOPEN_FAILED`:
-
-```
-better_sqlite3.node was compiled against NODE_MODULE_VERSION 130,
-this version of Node.js requires NODE_MODULE_VERSION 131
-```
-
-130 is Electron 33's ABI and 131 is the system Node used by `npm test`.
-`scripts/rebuild-sqlite-node.mjs` now restores the Node ABI with the active SDK's
-libc++ headers before the release tests. The existing Electron rebuild then runs
-during packaging. The stable local-release suite passes 172 tests with only the
-two separately exercised socket tests skipped; the real socket suite passes 4/4.
-
-Previous objective, now landed: make Claude usage actually display (broken since
-the status-line payload dropped rate_limits), plus main-process diagnostic
-logging and approval cards that say what is being requested.
-
-## Session log — 2026-08-01 (architecture, specs only)
-
-Design session. No source files changed. Read the existing provider bridge and
-context path, then wrote the memory-layer and tool-gateway architecture into the
-spec documents.
-
-**What the audit found:**
-
-- All context injection in the product is one hard-coded string in
-  `providerPrompt()` (`src/main/workspace-service.mjs:180`): a mode-guidance line
-  and attachment paths inside an `<ambientic-context>` block. **Goals are never
-  injected into any agent.**
-- `handover-service.mjs` is the only real cross-provider context transfer, and it
-  works by writing `HANDOVER.md` into the project and telling the next provider to
-  read it. It is the intended architecture in miniature — hard-coded, one-shot,
-  rate-limit-triggered, file-based.
-- The gateway seam already exists and is deliberately empty: both
-  `session/new` (Hermes) and `session/resume` pass `mcpServers: []`, and
-  `runClaude()` spawns with no `--mcp-config` and no `--append-system-prompt`.
-  Wiring the gateway is a matter of filling seams that are already in place, not
-  restructuring the bridge.
-
-**Decisions taken (Samori, 2026-08-01):**
-
-1. Provider scope — target the local CLIs now, but keep the context assembler and
-   gateway transport runtime-agnostic so an Ambientic-hosted API agent loop drops
-   in later without rework.
-2. Harvest scope — deterministic events plus local transcript mining now.
-   Model-assisted distillation is backlogged, not dropped.
-3. Gateway v1 — Ambientic-native tools plus proxying user-connected tool servers.
-   Native app adapters (Mail, Calendar) are backlogged, not dropped.
-
-**Architecture, in one line:** thin push, wide pull. A byte-stable session capsule
-of 600–1200 tokens carries identity, active goal, acceptance criteria, project
-card, and *an index of what else exists*; everything else is pulled on demand
-through the gateway. The capsule must not be rebuilt per turn — that breaks
-provider prompt caching and multiplies cost for no gain.
-
-**Documents changed:** `PRODUCT.md` (new pillar 0; *Model-agnostic context
-strategy* replaced by the full *Memory layer and tool gateway* spec; new
-*Deferred — memory and gateway backlog*), `NEXT_STEPS.md` (new Phase 1.6 with
-sub-phases a–e and an exit condition), `README.md` (roadmap item 0, planned
-architecture diagram, Next backlog rewritten, new Deferred backlog section).
-
-**Open items / blockers for the next session:**
-
-- **Verify before building:** how the Codex app server accepts per-session tool
-  servers. `thread/start` currently takes only `{ cwd }`. If Codex supports MCP
-  only through global `~/.codex/config.toml`, per-session tokens do not work for
-  it and it needs a static token with session inferred from cwd — weaker
-  attribution, and it changes the gateway's identity model.
-- **Packaging decision:** the memory store wants SQLite with FTS5 for ranked
-  retrieval. `better-sqlite3` is a native module and `package.json` sets
-  `"npmRebuild": false`. `@julusian/midi` proves native deps ship, but decide this
-  deliberately rather than at release time.
-- Phase 1.6a should land as a pure refactor with byte-identical output before any
-  behavior change, so the seam is verifiable on its own.
-- Phase 1.5 (agent-assisted authoring, Apps & Tools) and 1.6 share the connection
-  and permission model. Decide whether they merge or 1.6 goes first.
-
-## Why Claude usage was broken "forever" — root cause, 2026-07-30
-
-`hook/claude-statusline.py` was the designed PRIMARY source: Claude invokes the
-status-line command with a JSON snapshot, the script pulls `rate_limits`
-(`five_hour` / `seven_day`) and writes `~/.ambientic/claude-usage.json`, and
-`collectClaude` reads that cache.
-
-**Current Claude Code no longer sends `rate_limits`.** Captured a real payload
-from 2.1.220 via `claude --settings '{"statusLine":…}'` pointed at a dumper (no
-user config touched). Its only top-level keys are:
-
-```text
-context_window, cost, cwd, effort, exceeds_200k_tokens, fast_mode, model,
-output_style, session_id, thinking, transcript_path, version, workspace
-```
-
-So `normalize_window` always returned `None`, the script returned early, and the
-cache was never written again. The on-disk file was a 20-hour-old relic. Because
-passive refreshes deliberately refuse to launch a provider TUI, the passive path
-had **no data source at all** — hence "waiting for an observation" forever, or a
-stale 100% presented as a live rate limit.
-
-**Fix (within the privacy boundary):** a forced scrape now *writes* the cache the
-status line can no longer fill (`writeClaudeUsageCache`, atomic temp+rename), so
-passive refreshes and the next app launch serve real windows until they reset.
-Verified end to end: forced → `five-hour=44% seven-day=5%`; a fresh service doing
-a passive refresh → same numbers from `claude-status-line`, previously the false
-100%.
-
-**Periodic refreshes now read the limits too — this is intentional and is the
-default.** Previously `collectClaude` refused to scrape unless `force` was set,
-because launching a provider TUI in the background was a product boundary
-asserted by `test/privacy-boundaries.test.mjs`. Samori explicitly authorised
-changing it (2026-07-30) after the risks were checked empirically on 2.1.220:
-
-- no transcript is left in `~/.claude/projects` (verified across ~8 scrapes),
-- no stray processes survive (the long-lived `claude` processes on this machine
-  are Samori's own sessions, 3–6 day uptimes, cwd `/Users/samori`),
-- no prompt is sent, so it consumes no quota,
-- it runs from `providerRuntimeDirectory()` (private, 0700), so macOS never
-  attributes a protected-folder scan to Ambientic,
-- the scrape cache (8 min success / 4 min failure, shared in-flight) bounds the
-  2-minute refresh cycle to ~1 short-lived launch per 8 minutes.
-
-The privacy test was rewritten rather than deleted: it now asserts the scrape runs
-from the private runtime directory and never from `homedir()`. An intermediate
-opt-in preference + UI toggle was built and then removed at Samori's request —
-do not reintroduce it; the behaviour is meant to be on by default with no toggle.
-
-Verified end to end with no preference present at all (fresh-install conditions):
-startup logs `[usage] claude collector using …2.1.217… (force=false)` followed by
-`[usage] claude scrape ok: five-hour=60% seven-day=6%`.
-
-Also fixed while verifying: `resetTextToEpoch` dropped the 5-hour reset entirely
-because ANSI stripping delivers "Resets 3:10pm" as "ets 3:10pm" (anchored regex).
-Loosening it initially broke dated weekly resets — "Aug 6 5am" was parsed as the
-next 5am, i.e. tomorrow — so the bare-time branch is now guarded by a month check.
-Both cases are covered by tests.
-
-## Session log — 2026-07-30 (Claude, opus)
-
-Everything below is committed-ready: `npm run build` is clean and `node --test test/*.mjs`
-passes 139/139. Written by hand — the auto-generated "Recent decision context"
-section further down mislabels scraped tool output as "User direction"; do not
-trust it, and note this whole file is regenerated by `handover-service.mjs` on a
-rate-limit handover, which will clobber this section.
-
-**1. Overview reported a false "rate limited" (fixed).**
-Root cause was in `src/main/usage.js`, not in Claude or the user's plan. The cached
-status-line document at `~/.ambientic/claude-usage.json` held `five-hour: 100%`
-recorded 19.3h earlier, whose `resetAt` had passed 19.2h ago. The only staleness
-check was a 24-hour age cap on `observedAt`, so an expired window sailed through
-and was served as current truth (real `/usage` at the time: ~2% weekly).
-- `parseClaudeStatusLineUsage` now drops windows whose `resetAt` has already
-  passed and rejects the cache when none survive, so the caller falls through to
-  a live source. **`resetAt` is in seconds; `observedAt`/`now` are milliseconds.**
-- `collectClaude` no longer returns the cache when `force` is set — an explicit
-  Refresh was a no-op whenever a cache file existed.
-- Three regression tests in `test/usage.test.mjs`.
-
-**2. No diagnostic logging (added).** A packaged app discards stdout, so all 38
-`console.*` calls in main vanished and this bug had to be diagnosed by running
-`src/main/*` modules directly under node.
-- New `src/main/logging.mjs`: tees main-process console output to
-  `~/.ambientic/logs/main.log`, rotating at 2 MB (keeps one `.1`), captures
-  `uncaughtException`/`unhandledRejection`, and **redacts secret-shaped values**
-  (`sk-ant-*`, `sk-*`, `sbp_*`, `gh[pousr]_*`, JWTs, `access_token`/`api_key`
-  assignments) because this file is opened from a menu item.
-- Initialised in `src/main/index.js` before any service; tray gains
-  "Open diagnostic log".
-- Log lines added at the blind spots that cost this session: which `claude`
-  binary the usage collector resolved, scrape success percentages, the
-  unavailable-limits reason, the passive-refresh branch, and failed Claude turns
-  (exit code + binary + error text).
-- Verified end-to-end by running the built app: the log now records startup and
-  `[usage] claude passive refresh: no usable cached limits…`, which also confirms
-  fix #1 rejecting the stale cache. Tests in `test/logging.test.mjs`.
-
-**3. Approval cards didn't say what was being requested (fixed).**
-`requestExternalApproval` set `title: event.tool_name` — the user saw "Bash" or
-"Edit" with no indication of what would run.
-- New exported `describeApprovalRequest(toolName, toolInput)` in
-  `workspace-service.mjs` builds a one-line request summary per tool (Bash prefers
-  Claude's own `description`; Edit/Write/Read shorten the path to `…/dir/file`;
-  WebFetch shows the host; MCP `mcp__server__tool` becomes `server: tool`), clipped
-  to 120 chars. Approvals also carry `tool` now.
-- `Approval` in `Workspace.jsx` leads with that title; the tool name is secondary.
-- Three tests in `test/workspace-service.test.mjs`.
-
-**4. Claude binary is now resolved by version, not by list position.**
-This machine carries three installs: a stale Homebrew cask (2.1.31), the real
-native login (`~/.local/bin/claude`, 2.1.220), and Claude Desktop's own copy
-(2.1.217). Both `connectors.js` and `usage.js` hardcoded Homebrew first and were
-saved only by luck — `usage.js` by its Desktop preference, `connectors.js` by a
-`command -v` hit. Against 2.1.31 the `/usage` scrape fails outright.
-- New `src/main/claude-binary.mjs` gathers every candidate (standard paths, every
-  Claude Desktop version directory, and any login-shell `command -v` result),
-  reads each `--version`, and picks the highest. Selection is a pure function
-  (`pickNewestClaudeCommand`) so it is tested without spawning; the async
-  resolver caches for 10 minutes.
-- Wired into both `usage.js` (`resolveCommand`) and `connectors.js`
-  (`executablePath`), so the connector and the usage collector now always drive
-  the *same* binary. The shell hit is offered as a candidate, not trusted.
-- Removed the superseded `sortClaudeCodeVersions` / `compareClaudeVersions` /
-  `findClaudeDesktopCommand` from `usage.js` (dead once this landed) and their
-  test; `test/claude-binary.test.mjs` covers the same ground, including the
-  numeric-vs-lexical trap where "2.1.31" sorts above "2.1.220" as a string.
-- Verified on this machine: resolves to `~/.local/bin/claude` 2.1.220, and a real
-  app run logs `[usage] claude collector using /Users/samori/.local/bin/claude
-  (force=false)` → `scrape ok: five-hour=11% seven-day=8%`.
-
-**Still open / deliberately not done**
-- `resources/claude_usage.py` is genuinely flaky: the same binary returned 9%,
-  14%, 20% and one hard failure, because it races a 12-second budget driving an
-  interactive TUI. Fix #1 stops it producing a *wrong* number, not an absent one.
-- Its blind two-right-arrows tab navigation is stale: the panel now has four tabs
-  (`Status Config Usage Stats`).
-- Hermes/Nous Research provider logo: user deprioritised; needs the image asset in
-  `src/renderer/assets/` plus image support in `AgentIcon` (currently path-only).
-- Logo centring (`display:block` on `.agent-icon`, `height:auto` on the three tile
-  rules) is reasoned from CSS but never visually verified.
-- Live secrets sit in `.claude/settings.local.json` permission strings
-  (`sk-ant-api03-…`, `sbp_…`, `sk_live_…`). User chose to defer.
-- Do **not** read the macOS Keychain to diagnose Claude auth; the user rejected it.
+Locate missing packagejson file
 
 ## Completed and material state
 
 Recent commits:
 
 ```text
-f50bb22 Add visual workflow studio
-3512b13 Make task project selection optional
-31d544c Simplify Goals ticket board
-f982963 Define core Ambientic product roadmap
-77e6c49 Prevent protected-folder prompts from provider probes
+7774eaa Let an approval be answered once, for a thread, or for good
+71a88c0 Merge commit 'f4a7ba4' into codex/acknowledge-opened-threads
+f4a7ba4 Stop pre-granting the access the user asked to be consulted about
+5d77d9c Light a pad orange while it waits on you
+1a759a5 Merge commit '4154f10a82e1b57eed94c1159827eb674c425e72' into codex/acknowledge-opened-threads
 ```
 
 Current working tree (preserve these changes):
 
 ```text
-M ART_DIRECTION.md
- M HANDOVER.md
- M README.md
- M resources/build-info.json
- M src/main/index.js
- M src/renderer/WorkflowBuilder.jsx
- M src/renderer/Workspace.jsx
- M src/renderer/main.jsx
- M src/renderer/workflow-model.mjs
- M src/renderer/workflows.css
- M src/renderer/workspace.css
- M test/workflow-model.test.mjs
-?? index.js
-?? test/workflow-interactions.test.mjs
+M HANDOVER.md
 ```
 
 Change footprint:
 
 ```text
-ART_DIRECTION.md                 |   2 +
- HANDOVER.md                      | 160 +++++++++++++++++++++++----------------
- README.md                        |   6 +-
- resources/build-info.json        |  10 +--
- src/main/index.js                |  28 +++++++
- src/renderer/WorkflowBuilder.jsx | 138 ++++++++++++++++++++++++++++-----
- src/renderer/Workspace.jsx       |  20 ++++-
- src/renderer/main.jsx            |  43 +++++++++--
- src/renderer/workflow-model.mjs  |  19 +++++
- src/renderer/workflows.css       |   6 +-
- src/renderer/workspace.css       |   8 +-
- test/workflow-model.test.mjs     |  24 +++++-
- 12 files changed, 359 insertions(+), 105 deletions(-)
+HANDOVER.md | 28 +++-------------------------
+ 1 file changed, 3 insertions(+), 25 deletions(-)
 ```
 
 ## Remaining direction
@@ -600,9 +64,8 @@ ART_DIRECTION.md                 |   2 +
 - Generic MIDI-controller output profiles.
 - Public auto-update infrastructure.
 - OpenClaw integration.
-- Agent-facing Goals tools or MCP server; this first increment establishes the canonical local model and human interface before agents receive scoped read/write access.
 - Linking an existing provider thread or artifact to a goal task, assignment leases, approval-gated agent mutations, or automated next-action reviews.
-- Executing workflow nodes against live providers or inbox/calendar connectors; the current Workflow Studio is the inspectable authoring and portable-manifest slice, while durable execution, approval journals, retries, and restart recovery remain the next engine increment.
+- Agent-powered natural-language workflow authoring and native inbox/calendar connectors. The current prompt uses a deterministic local parser; live workflow steps run through managed AI providers, while direct app actions still require normalized adapters and confirmed tool evidence.
 
 ## Architecture
 
@@ -617,14 +80,6 @@ Codex local task index ──> Codex deep links ────┤                 
 APC40 MKII MIDI input ──> action mappings ──────┴───────────────────────┘
 APC40 MKII MIDI output <── session state and selection LEDs
 
-MIDI / focused keyboard ──> normalized control event ──> logical slot
-                                                            │
-hardware template store ──> active view assignment ─────────┤
-                                                            ▼
-                                            semantic action + permission
-                                                            │
-                                                            └──> screen / native feedback
-
 Codex app-server ─┐
 Claude local CLI ─┼──> normalized workspace bridge ──> transcript / composer / artifacts
 Hermes ACP ───────┘                                      │
@@ -632,44 +87,32 @@ Hermes ACP ───────┘                                      │
 
 Provider quota adapters ──> current capacity ──> local consumption ledger ──> Overview history
 Provider billing APIs (future, optional) ────────────────────────────────────> currency spend
-```
 
-The Electron main process owns local system access, session state, connectors, previews, and MIDI. The renderer receives a narrow IPC surface through the preload script. Provider credentials remain in provider-owned local stores.
+Implemented — context kernel and tool gateway (PRODUCT.md, NEXT_STEPS.md Phase 1.6):
+
+goal + task events ─┐
+approved tool calls ┼─> turn observer ─> candidates ─> corroboration ─> memory records
+normalized turns ───┘                                                        │
+                                                                             ▼
+   projects + session binding (inference: selection > binding > cwd >    context kernel
+   recent task > active goal > lexical > project-only)                        │
+                                              ┌──────────────────────────────┴────┐
+                                     frozen capsule (~900 tok, 1200 cap)   recall on demand
+                                        
 
 ## Recent decision context
 
-- **Agent result:** Installed build is commit `3512b13` (Jul 29) — one behind HEAD. Let me check whether that commit already had the desktop-binary preference.
-- **User direction:** === when was findClaudeDesktopCommand introduced? === 4c871e4 Checkpoint usage tracking and responsive agent threads === is it present in installed commit 3512b13? === count: 2 === is providerSpawnEnv in 3512b13? === count: 1 === diagnostic field in scraper at 3512b13? === count: 1
-- **Agent result:** The installed build **does** have all the fixes — yet nothing is running. Let me launch the packaged app directly so I can capture its logs and see the real failure.
-- **User direction:** pid 77700 === log size ===        0 amb.log === usage / claude / error lines === Shell cwd was reset to /Users/samori
-- **Agent result:** App runs but logs nothing. Let me instead execute the app's **own** usage code path directly against the repo source — that reproduces exactly what Ambientic does.
-- **User direction:** 65:export function knownUsageCommandCandidates (name, home = homedir()) { 97:export function sortClaudeCodeVersions (versions) { 175:export function parseClaudeUsage (stdout) { 221:export function parseClaudeStatusLineUsage (payload, now = Date.now()) { 249:export function claudeUsageCachePath (home = homedir()) { 344:export function parseCodexRateLimits (result) { 580:export function parseKimiUsage (payload) { 618:export class UsageService extends EventEmitter { 694:export function createUsageService () { === collector wiring === async function fetchKimiUsage (token) {   return await fetch(KIMI_USAGE_URL, {     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },     s
+- **Agent result:** Backed up. Now quitting Ambientic so it can't overwrite the cache while I clean:
+- **User direction:** Exit code 137
+- **User direction:** On ambientic's overview, below the various ai providers/agents and instead of the mozaic I would like to see a visualisation of the threads/agents I have  displayed on my pad. I want the UI to respect the art direction of the project and have a 3d , texture feel of a generic pad with ambient light corresponding of what I see on my apc. + I want clear names of the thread well visible for each pad so I cna easly anderstand what pad is what thread. Remove the thread mozaic its not useful
+- **Agent result:** A screen surface mirroring the hardware — per `AGENTS.md` that's an art-direction change too. Let me look at the mosaic and the LED source of truth first.
+- **User direction:** src/renderer/Workspace.jsx:727:function ThreadMosaicCard ({ session, index, onOpen }) { src/renderer/Workspace.jsx:729:    <button className="mosaic-card" data-session-state={session.state} data-size={index % 7 === 0 ? 'wide' : index % 5 === 0 ? 'tall' : 'standard'} type="button" onClick={() => onOpen(session.id)}> src/renderer/Workspace.jsx:730:      <header><span className="mosaic-card__agent"><AgentIcon agent={session.agent} /></span><span>{session.agent}</span><i data-state={session.state} /></header> src/renderer/Workspace.jsx:758:        <section className="mosaic-section"> src/renderer/Workspace.jsx:759:          <header><div><span className="eyebrow">Across every provider</span><h2>Y
+- **User direction:** context-contract.mjs semantic-actions.mjs 5:  PAD_COUNT: 40, 34:  if (!Number.isInteger(note) || note < 0 || note >= APC40.PAD_COUNT) return null 59:  if (!Number.isInteger(pad) || pad < 0 || pad >= APC40.PAD_COUNT) return null 94:export function gridSessions (sessions = []) { 95:  return sessions.slice(0, APC40.PAD_COUNT) 100:  const grid = gridSessions(sessions) 106:  const grid = gridSessions(sessions) 107:  return Array.from({ length: APC40.PAD_COUNT }, (_, pad) => {
 
 ## Material artifacts
 
-- `/Users/samori/vibe-controller/resources/claude_usage.py`
-- `/private/tmp/claude-501/-Users-samori/09ff2cff-39d5-416b-9ac1-90e8f737ea83/scratchpad/usage_debug.py`
-- `/private/tmp/claude-501/-Users-samori/09ff2cff-39d5-416b-9ac1-90e8f737ea83/scratchpad/usage_probe.py`
-- `/Users/samori/vibe-controller/src/renderer/styles.css`
-- `/Users/samori/vibe-controller/src/main/env-path.mjs`
-- `/Users/samori/vibe-controller/src/renderer/AgentIcon.jsx`
-- `/Users/samori/vibe-controller/src/renderer/Workspace.jsx`
-- `/Users/samori/vibe-controller/src/main/workspace-service.mjs`
-- `/Users/samori/vibe-controller/src/renderer/composer-controls.css`
-- `/private/tmp/claude-501/-Users-samori/09ff2cff-39d5-416b-9ac1-90e8f737ea83/tasks/bnz359212.output`
-- `/Users/samori/AgentBase/src/main/connectors.js`
-- `/Users/samori/AgentBase/src/renderer/Workspace.jsx`
+- No task artifacts were recorded. Inspect the working tree.
 
 ## First action
 
 Run `git status --short`, read the directly relevant files, and continue the current objective with the smallest verifiable increment.
-
-## 2026-08-02 — provider-memory onboarding
-
-- Added a fifth onboarding step after provider connection that explicitly asks permission to build the user's local starting memory from connected Claude Code, Codex, and Hermes runtimes.
-- Provider exports run in isolated Ask-mode sessions: no Ambientic capsule, MCP tools, automatic transcript learning, or goal reconciliation can contaminate the result.
-- Safe results are parsed into bounded structured records, secret-shaped and sensitive personal claims are rejected, and the user chooses exactly which records become active before seeing a deterministic high-level summary.
-- Added main/preload lifecycle APIs and live progress events, deterministic service tests, empty-selection behavior, and replay reset support.
-- Moved Memory from the primary workspace navigation to Settings → Memory and recorded the consent/review/empty-result visual rules in `ART_DIRECTION.md`.
-- The renderer and targeted onboarding/context tests pass. The in-app browser backend was unavailable for screenshot QA in this session, so an installed-app human pass through Settings → Replay onboarding remains required after packaging.
-- The installed release attempts exposed two `@electron/osx-sign` API mismatches: distribution-style hardened runtime plus secure timestamps rejected an untimestamped local-development resource, while explicitly passing `strictVerify: true` serialized to the invalid flag `--strict=true`. `release:local` now uses `timestamp: 'none'`, `hardenedRuntime: false`, and the signer's default strict verification, then independently runs `codesign --verify --deep --strict` while still requiring the stable Apple identity and rejecting ad-hoc output.

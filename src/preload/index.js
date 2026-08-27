@@ -81,7 +81,10 @@ contextBridge.exposeInMainWorld('controller', {
   sendThreadPrompt: (id, text, options = {}) => ipcRenderer.invoke('send-thread-prompt', id, text, options),
   interruptThread: (id) => ipcRenderer.invoke('interrupt-thread', id),
   createManagedThread: (options) => ipcRenderer.invoke('create-managed-thread', options),
-  resolveApproval: (id, allow, remember = false) => ipcRenderer.invoke('resolve-approval', id, allow, remember),
+  // `remember` is 'once' | 'session' | 'always' — the button the user pressed.
+  resolveApproval: (id, allow, remember = 'once') => ipcRenderer.invoke('resolve-approval', id, allow, remember),
+  listPermissionGrants: () => ipcRenderer.invoke('list-permission-grants'),
+  revokePermissionGrant: (grantId) => ipcRenderer.invoke('revoke-permission-grant', grantId),
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   showController: () => ipcRenderer.invoke('show-controller'),
@@ -189,6 +192,11 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('provider-auth', handler)
     return () => ipcRenderer.removeListener('provider-auth', handler)
+  },
+  onPermissionGrants: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('permission-grants', handler)
+    return () => ipcRenderer.removeListener('permission-grants', handler)
   },
   onMemoryBootstrap: (cb) => {
     const handler = (_e, payload) => cb(payload)

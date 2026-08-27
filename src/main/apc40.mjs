@@ -1,3 +1,4 @@
+import { PAD_MOTION, PAD_TONE, padLightForSession } from '../shared/pad-light.mjs'
 // Akai APC40 mkII clip-grid protocol. The 5x8 RGB grid is exposed as notes
 // 0x00-0x27; the MIDI channel selects the LED animation and velocity selects
 // the colour. See APC40 Mk2 Communications Protocol v1.2.
@@ -82,10 +83,9 @@ export function ledForSession (session) {
         color: APC40.COLOR.RED
       }
     case 'waiting':
-      return {
-        channel: session.unseen ? APC40.ANIMATION.BLINK_QUARTER : APC40.ANIMATION.SOLID,
-        color: APC40.COLOR.RED
-      }
+      return session.unseen
+        ? { channel: APC40.ANIMATION.BLINK_QUARTER, color: APC40.COLOR.RED }
+        : { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.BLUE }
     case 'idle':
     default:
       return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.BLUE }

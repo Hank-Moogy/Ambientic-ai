@@ -49,3 +49,12 @@ test('creates stable Codex desktop session records and deep links', () => {
   assert.equal(session.task, 'Build Ambientic')
   assert.equal(session.deepLink, 'codex://threads/thread-123')
 })
+
+test('uses the human request when Codex indexes an Ambientic context envelope', () => {
+  const [session] = parseCodexDesktopRows(JSON.stringify([{
+    id: 'thread-context', cwd: '/Users/test/Ambientic',
+    title: '<ambientic-context mode="build"> Project context: truncated',
+    preview: '<ambientic-context mode="build">\nProject context: hidden\n</ambientic-context>\nFix duplicate thread names'
+  }]))
+  assert.equal(session.task, 'Fix duplicate thread names')
+})

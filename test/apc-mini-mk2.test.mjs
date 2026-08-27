@@ -22,12 +22,14 @@ test('renders 64 APC mini mk2 pads with Ambientic state colors', () => {
   const messages = miniGridLedMessages([
     { state: 'running' },
     { state: 'attention', unseen: true },
-    { state: 'idle' }
+    { state: 'idle' },
+    { state: 'waiting', unseen: false }
   ])
   assert.equal(messages.length, 64)
   assert.deepEqual(messages[0], [0x96, 56, APC_MINI_MK2.COLOR.GREEN])
   assert.deepEqual(messages[1], [0x9E, 57, APC_MINI_MK2.COLOR.RED])
   assert.deepEqual(messages[2], [0x96, 58, APC_MINI_MK2.COLOR.BLUE])
+  assert.deepEqual(messages[3], [0x96, 59, APC_MINI_MK2.COLOR.BLUE])
   assert.deepEqual(messages[63], [0x96, 7, APC_MINI_MK2.COLOR.OFF])
 })
 

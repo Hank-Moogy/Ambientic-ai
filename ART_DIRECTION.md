@@ -18,7 +18,7 @@ The experience should suggest:
 
 1. **Calm by default.** Persistent motion is slow, low-contrast, and safe to ignore.
 2. **Responsive under the hand.** Direct actions answer immediately, then settle with soft easing.
-3. **Meaning survives the mood.** Green running, orange waiting on you, red needs-input, and blue idle remain unambiguous. Expressive sequences are temporary and always restore operational state.
+3. **Meaning survives the mood.** Green running, orange waiting on approval, red unseen needs-input, and blue idle remain unambiguous. A completed-turn notification is red only until the user opens that thread; acknowledgment returns it to calm blue, while unresolved approvals stay orange and explicit reply requests stay red. Expressive sequences are temporary and always restore operational state.
 4. **Depth without fog.** Translucency, bloom, and gradients create atmosphere, but text and controls retain strong contrast.
 5. **Rhythm over spectacle.** Animation should have phrasing, rests, and variation. Avoid uniform loading-spinner motion.
 6. **One instrument.** MIDI light, on-screen motion, preview transitions, and future sound should share timing and color language.
@@ -48,6 +48,9 @@ Ambientic’s primary mark is the supplied orbital-circle artwork: nested paths 
 - Prefer spatial waves, opacity drift, blur, and subtle parallax.
 - Respect reduced-motion preferences and never obscure an approval or urgent task state for long.
 - **Orange is a question addressed to the person.** A thread holding a pending approval lights its pad orange on every connected grid, overriding the lifecycle colour underneath, because that thread cannot move until it is answered and nothing else about it matters yet. The pad is held solid rather than blinking: an agent waiting for consent is patient, not alarmed, and blinking is already spoken for by unseen attention. The colour matches the quiet amber that carries consent in the interface, so permission reads the same on screen and under the hand. It clears the moment the approval is answered, cancelled, or times out.
+- **The screen grid is the hardware grid.** Overview shows the same pads the controller shows, in the same order, lit in the same language — one instrument seen twice rather than two views of the same data. Pads hold their position and only ever recolour, so a thread never moves under the hand. Meaning resolves through a single shared source (`src/shared/pad-light.mjs`) so the desk and the glass cannot drift apart.
+- **A launch establishes the instrument.** On launch, Ambientic assigns the available pads to the most recently active real threads, with work needing attention first. Empty process-discovery placeholders receive no pad. Those assignments then stay fixed for the app run; new work fills a vacant pad instead of moving existing threads, so recency does not fight muscle memory.
+- **A lit pad is a light source, not a coloured tile.** Fluorescent colour fills the whole face and washes softly into the page with no hard-edged halo; an empty pad keeps its moulding and emits nothing, so light on the surface always means a live thread. Every pad breathes on a slow cycle, offset per pad so the field drifts instead of pulsing in unison — unison would read as a progress indicator. Thread names stay large and bold over the light, because a grid you cannot read is decoration.
 
 ## First expression: Vibe
 
@@ -138,7 +141,7 @@ Hardware is a dedicated instrument, not an advanced Settings form. Its local tem
 - **One logical surface.** Physical notes, pads, buttons, and keys bind to stable virtual positions. Changing view changes meaning without forcing the user to relearn the physical layout.
 - **Low-motion depth.** The deck moves as one restrained field over a subtle perspective grid. Individual pads answer immediately under the hand but do not bob independently or create constant arcade motion.
 - **Views feel spatial.** View tabs and violet navigation pads communicate location. Creating a linked view should feel like opening another room in the same instrument, with a visible path Back or Home.
-- **Light carries operational truth.** Green remains running, red remains input-required or failed, and blue remains idle. Violet identifies navigation, cyan a neutral executable action, and amber a confirmation boundary.
+- **Light carries operational truth.** Green remains running, orange means a real approval is pending, red means unseen input-required or failed, and blue remains idle. A newly completed turn may call for attention in red, but opening it consumes that notification and restores blue unless a real approval or reply is still pending. Violet identifies navigation, cyan a neutral executable action, and amber/orange the consent boundary.
 - **Input is always acknowledged.** A connected core stays softly lit; each valid MIDI arrival creates one short halo even when unmapped, so diagnosis begins with visible truth rather than configuration guesswork.
 - **Editing stays inspectable.** Play, Edit, Map MIDI, and Test are explicit modes. The selected pad, its semantic action, local target, trigger gesture, permission level, and physical binding remain readable together.
 - **Safety interrupts atmosphere.** Sending a saved prompt, starting work, running a workflow, or interrupting a turn enters an explicit confirmation surface when invoked from hardware. Decorative light never implies permission.

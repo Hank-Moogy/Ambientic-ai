@@ -171,6 +171,12 @@ export function createMidiController (store, {
     notify()
   }
 
+  function hardwareSessions () {
+    return typeof store.hardwareList === 'function'
+      ? store.hardwareList(activeProfile?.padCount)
+      : store.list()
+  }
+
   function learnMessage (control) {
     if (!learningAction || !control) return false
     for (const [key, action] of Object.entries(mappings)) {
@@ -199,7 +205,7 @@ export function createMidiController (store, {
       const customFeedback = getFeedback?.()
       const gridMessages = customFeedback && !activeProfile.inputOnly
         ? customGridLedMessages(activeProfile, customFeedback)
-        : activeProfile.gridLedMessages(store.list())
+        : activeProfile.gridLedMessages(hardwareSessions())
       for (const message of gridMessages) output.sendMessage(message)
       for (const message of activeProfile.recordLedMessages(recording)) output.sendMessage(message)
     } catch (error) {
@@ -260,7 +266,7 @@ export function createMidiController (store, {
         if (recordArm) {
           if (recordArm.pressed) {
             if (recording) return
-            const session = activeProfile.selectedSessionForRecordColumn(store.list(), selectedSessionId, recordArm.column)
+            const session = activeProfile.selectedSessionForRecordColumn(hardwareSessions(), selectedSessionId, recordArm.column)
             if (!session) {
               console.log(`[midi] Record Arm column ${recordArm.column + 1} ignored — select an agent in that column first`)
               Promise.resolve(onRecordUnavailable?.({ column: recordArm.column, selectedSessionId })).catch(() => {})
@@ -294,7 +300,7 @@ export function createMidiController (store, {
         }
         const pad = activeProfile.padForMessage(message)
         if (pad === null) return
-        const session = activeProfile.gridSessions(store.list())[pad]
+        const session = activeProfile.gridSessions(hardwareSessions())[pad]
         if (!session) {
           console.log(`[midi] pad ${pad + 1} pressed (unassigned)`)
         } else if (onPadPress) {

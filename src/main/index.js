@@ -454,7 +454,7 @@ function createWorkspaceWindow () {
 }
 
 function pushState () {
-  const list = store.list()
+  const list = store.hardwareList()
   sendToWindows('state', list)
   void pushWorkspaceThreads()
   updateTray()
@@ -698,7 +698,7 @@ function createTray () {
 }
 
 // ── IPC ───────────────────────────────────────────────────────────────────
-ipcMain.handle('get-state', () => store.list())
+ipcMain.handle('get-state', () => store.hardwareList())
 ipcMain.handle('get-build-info', () => buildInfo)
 ipcMain.handle('get-workspace-threads', () => workspace.list())
 ipcMain.handle('get-goals', () => goals?.list() || { version: 1, goals: [], events: [], updatedAt: null })
@@ -1015,6 +1015,12 @@ ipcMain.handle('send-thread-prompt', (_event, id, text, options = {}) => workspa
 ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))
 ipcMain.handle('resolve-approval', (_event, id, allow, remember) => workspace.resolveApproval(id, allow, remember))
+ipcMain.handle('list-permission-grants', () => workspace.listGrants())
+ipcMain.handle('revoke-permission-grant', (_event, grantId) => {
+  const revoked = workspace.revokeGrant(String(grantId || ''))
+  if (revoked) sendToWindows('permission-grants', workspace.listGrants())
+  return revoked
+})
 ipcMain.handle('copy-text', (_event, text) => {
   clipboard.writeText(String(text || '').slice(0, 2 * 1024 * 1024))
   return true
@@ -1398,6 +1404,7 @@ ipcMain.handle('select-session', (_event, id) => {
     midiController?.select(null)
     return false
   }
+  store.acknowledge(id)
   lastFocusedSessionId = id
   midiController?.select(id)
   return true
@@ -1518,6 +1525,7 @@ app.whenReady().then(() => {
   if (prefs.ambientModeEnabled) ambientMode.enable()
   powerMonitor.on('resume', () => ambientMode?.reassert())
   store.hydrateTasks(loadTaskCache())
+  store.hydrateAliases(prefs.threadAliases)
   if (app.dock) {
     const logoPath = app.isPackaged
       ? join(process.resourcesPath, 'ambientic-logo.png')
@@ -1556,6 +1564,8 @@ app.whenReady().then(() => {
   workspace = new WorkspaceService(store, () => connectors, {
     aliases: prefs.threadAliases,
     onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases }),
+    grants: prefs.permissionGrants,
+    onGrantsChange: (permissionGrants) => savePrefs({ ...loadPrefs(), permissionGrants }),
     contextEngine,
     capabilityGateway,
     gatewayExecutable: process.execPath,
