@@ -8,6 +8,7 @@ import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
 import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, handoverProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
+import { humanThreadTitle, namesThread } from './summarizer.js'
 import { decideToolPermission } from './permission-policy.mjs'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
 
@@ -105,6 +106,71 @@ function shortPath (value) {
 function clip (value, limit = APPROVAL_TITLE_LIMIT) {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
+}
+
+function decisionName (value) {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return ''
+  return Object.keys(value)[0] || ''
+}
+
+export function codexApprovalScopes (request = {}) {
+  const params = request.params || {}
+  const available = Array.isArray(params.availableDecisions) ? params.availableDecisions.map(decisionName).filter(Boolean) : []
+  const supports = (name) => !available.length || available.includes(name)
+  const scopes = ['once']
+  if (supports('acceptForSession')) scopes.push('session')
+  if ((params.proposedExecpolicyAmendment && supports('acceptWithExecpolicyAmendment')) ||
+      (Array.isArray(params.proposedNetworkPolicyAmendments) && params.proposedNetworkPolicyAmendments.length === 1 && supports('applyNetworkPolicyAmendment'))) scopes.push('always')
+  return scopes
+}
+
+export function claudeApprovalScopes (suggestions = []) {
+  if (!Array.isArray(suggestions) || suggestions.length === 0) return ['once']
+  const scopes = ['once', 'session']
+  if (suggestions.some((item) => item?.destination && item.destination !== 'session')) scopes.push('always')
+  return scopes
+}
+
+export function claudePermissionsForScope (suggestions = [], scope = 'once') {
+  if (scope === 'once') return []
+  if (scope === 'session') return suggestions.map((item) => ({ ...item, destination: 'session' }))
+  return suggestions.filter((item) => item?.destination && item.destination !== 'session')
+}
+
+function codexDecisionForScope (approval, scope) {
+  if (scope === 'always' && approval.requestParams?.proposedExecpolicyAmendment) {
+    return {
+      acceptWithExecpolicyAmendment: {
+        execpolicy_amendment: approval.requestParams.proposedExecpolicyAmendment
+      }
+    }
+  }
+  if (scope === 'always' && approval.requestParams?.proposedNetworkPolicyAmendments?.length === 1) {
+    return {
+      applyNetworkPolicyAmendment: {
+        network_policy_amendment: approval.requestParams.proposedNetworkPolicyAmendments[0]
+      }
+    }
+  }
+  return scope === 'session' ? 'acceptForSession' : 'accept'
+}
+
+function codexApprovalResult (approval, allow, scope) {
+  if (approval.method === 'item/permissions/requestApproval') {
+    return {
+      permissions: allow ? (approval.requestParams?.permissions || {}) : {},
+      scope: allow && scope === 'session' ? 'session' : 'turn'
+    }
+  }
+  if (approval.method === 'applyPatchApproval' || approval.method === 'execCommandApproval') {
+    return {
+      decision: allow
+        ? (scope === 'session' ? 'approved_for_session' : 'approved')
+        : { denied: { rejection: 'The user denied this request in Ambientic.' } }
+    }
+  }
+  return { decision: allow ? codexDecisionForScope(approval, scope) : 'decline' }
 }
 
 export function describeApprovalRequest (toolName, toolInput = {}) {
@@ -409,11 +475,11 @@ function claudeHistorySessions () {
         const lastPrompt = rows.map(meaningfulClaudeUserText).filter(Boolean).at(-1)
         const id = sessionId || entry.name.slice(0, -6)
         if (!id) continue
-        const rawTask = firstPrompt || lastPrompt || 'Claude Code task'
-        const task = rawTask.length < 12 && cwd ? `${rawTask} — ${basename(cwd)}` : rawTask
+        const rawTask = firstPrompt || lastPrompt || ''
+        const task = humanThreadTitle(rawTask, 'Claude Code task')
         sessions.push({
           id, agent: 'claude', project: basename(cwd) || 'Claude Code', cwd,
-          task: task.slice(0, 100),
+          task,
           summary: (lastPrompt || firstPrompt || '').slice(0, 240),
           transcriptPath, updatedAt: info.mtimeMs, state: 'history', history: true
         })
@@ -504,6 +570,27 @@ export class WorkspaceService extends EventEmitter {
   }
 
   sessionFor (id) { return this.store.list().find((item) => item.id === id) || this.history.get(id) }
+
+  aliasKeyFor (session) {
+    return session?.agent === 'codex' ? `codex:${this.codexThreadId(session)}` : String(session?.id || '')
+  }
+
+  aliasKeysFor (session) {
+    const keys = [this.aliasKeyFor(session), String(session?.id || '')]
+    if (session?.agent === 'codex') {
+      const providerId = this.codexThreadId(session)
+      keys.push(providerId, `codex-desktop:${providerId}`)
+    }
+    return [...new Set(keys.filter(Boolean))]
+  }
+
+  aliasFor (session) {
+    for (const key of this.aliasKeysFor(session)) {
+      const title = String(this.aliases.get(key) || '').trim()
+      if (title) return title
+    }
+    return ''
+  }
 
   providerSessionId (session) {
     if (session.agent === 'codex') return this.codexThreadId(session)
@@ -627,9 +714,8 @@ export class WorkspaceService extends EventEmitter {
         if (existsSync(db)) {
           const rows = await execJson('/usr/bin/sqlite3', ['-readonly', '-json', db, `
             select s.id,
-              coalesce(nullif(s.title, ''), nullif(s.display_name, ''),
-                (select substr(replace(m.content, char(10), ' '), 1, 100) from messages m where m.session_id=s.id and m.role='user' and m.active=1 order by m.timestamp asc limit 1),
-                'Hermes task') as task,
+              coalesce(nullif(s.title, ''), nullif(s.display_name, '')) as provider_title,
+              (select substr(m.content, 1, 8000) from messages m where m.session_id=s.id and m.role='user' and m.active=1 order by m.timestamp asc limit 1) as first_prompt,
               coalesce(s.cwd, '') as cwd,
               coalesce(s.ended_at, s.started_at) * 1000 as updatedAt,
               s.message_count as messageCount
@@ -637,7 +723,7 @@ export class WorkspaceService extends EventEmitter {
           `])
           histories.push(...rows.map((row) => ({
             id: row.id, agent: 'hermes', project: basename(row.cwd || '') || 'Hermes', cwd: row.cwd || '',
-            task: row.task || 'Hermes task', summary: `${row.messageCount || 0} messages`,
+            task: humanThreadTitle(row.provider_title, '') || humanThreadTitle(row.first_prompt, 'Hermes task'), summary: `${row.messageCount || 0} messages`,
             updatedAt: Number(row.updatedAt) || 0, state: 'history', history: true
           })))
         }
@@ -658,7 +744,7 @@ export class WorkspaceService extends EventEmitter {
       })
     }
     const sessions = [...merged.values()].map((session) => {
-      const alias = this.aliases.get(session.id)
+      const alias = this.aliasFor(session)
       return alias ? { ...session, task: alias, taskSource: 'user' } : session
     }).sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))
     this.contextEngine?.backfillProjects(sessions.filter((session) => {
@@ -669,7 +755,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   baseSnapshot (session) {
-    const title = this.aliases.get(session.id) || session.task || session.project || `${PROVIDER_LABELS[session.agent] || 'Agent'} session`
+    const title = this.aliasFor(session) || session.task || session.project || `${PROVIDER_LABELS[session.agent] || 'Agent'} session`
     return {
       id: session.id,
       provider: session.agent,
@@ -691,7 +777,7 @@ export class WorkspaceService extends EventEmitter {
     snapshot.artifacts = [...new Map(snapshot.messages.flatMap((entry) => (entry.files || []).map((path) => [path, { path, name: basename(path), kind: 'file' }]))).values()]
     snapshot.approvals = [...this.pendingApprovals.values()]
       .filter((approval) => approval.sessionId === snapshot.id)
-      .map(({ rpc: _rpc, resolve: _resolve, timer: _timer, requestId: _requestId, suggestions: _suggestions, ...approval }) => approval)
+      .map(({ rpc: _rpc, resolve: _resolve, timer: _timer, requestId: _requestId, suggestions: _suggestions, requestParams: _requestParams, ...approval }) => approval)
     snapshot.handover = this.handoverContextFor(snapshot.id)
     // State has one owner. Callers set `running`/`error`/`messages`; the state
     // is always derived here so live snapshots and list()/read() cannot diverge.
@@ -755,7 +841,12 @@ export class WorkspaceService extends EventEmitter {
     if (!session) throw new Error('This thread is no longer available.')
     const title = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80)
     if (!title) throw new Error('Enter a thread name.')
-    this.aliases.set(id, title)
+    const aliasKey = this.aliasKeyFor(session)
+    this.aliases.set(aliasKey, title)
+    // Remove legacy variants after migration so a stale prefixed Codex alias
+    // can never compete with the provider-stable canonical key.
+    for (const key of this.aliasKeysFor(session)) if (key !== aliasKey) this.aliases.delete(key)
+    this.store.hydrateAliases?.(Object.fromEntries(this.aliases))
     this.store.updateTask(id, title, '', 'user')
     this.onAliasesChange?.(Object.fromEntries(this.aliases))
     const snapshot = this.snapshots.get(id)
@@ -768,14 +859,17 @@ export class WorkspaceService extends EventEmitter {
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
     const snapshot = { ...this.baseSnapshot(session), ...(this.snapshots.get(id) || {}) }
-    snapshot.title = this.aliases.get(id) || session.task || snapshot.title
+    snapshot.title = this.aliasFor(session) || session.task || snapshot.title
     snapshot.cwd = session.cwd || snapshot.cwd
     try {
       if (session.agent === 'codex') {
         const rpc = await this.codexClient()
         const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
         snapshot.messages = codexThreadMessages(result.thread)
-        snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
+        // The provider owns the transcript, not Ambientic's display name. Its
+        // mutable name/preview may seed an otherwise unnamed thread, but never
+        // overwrite an Ambientic name or a user alias.
+        snapshot.title = this.aliasFor(session) || session.task || humanThreadTitle(result.thread?.name || result.thread?.preview, snapshot.title)
         snapshot.running = codexStatusIsRunning(result.thread?.status)
         snapshot.awaitingReply = !snapshot.running && codexAwaitsReply(result.thread)
         snapshot.turnStateKnown = true
@@ -828,7 +922,10 @@ export class WorkspaceService extends EventEmitter {
         this.codexStartedThreads.clear()
       })
       rpc.start()
-      await rpc.request('initialize', { clientInfo: { name: 'ambientic', title: 'Ambientic', version: '0.8.1' } })
+      await rpc.request('initialize', {
+        clientInfo: { name: 'ambientic', title: 'Ambientic', version: '0.8.1' },
+        capabilities: { experimentalApi: true, requestAttestation: false }
+      })
       rpc.notify('initialized')
       this.codex = rpc
       return rpc
@@ -937,12 +1034,15 @@ export class WorkspaceService extends EventEmitter {
     const providerSessionId = request.params?.sessionId || request.params?.threadId || request.params?.conversationId || ''
     const sessionId = this.uiSessionId(provider, providerSessionId)
     const id = `${provider}:${request.id}`
+    const scopes = provider === 'codex' ? codexApprovalScopes(request) : ['once']
     const approval = {
       id, provider, sessionId, method: request.method,
       title: request.params?.reason || request.params?.toolCall?.title || request.params?.command || 'Permission requested',
       detail: request.params?.command || request.params?.toolCall?.rawInput || request.params?.reason || '',
       options: request.params?.options || [],
-      canRemember: provider === 'codex'
+      scopes,
+      canRemember: scopes.length > 1,
+      requestParams: request.params || {}
     }
     this.pendingApprovals.set(id, { ...approval, rpc, requestId: request.id })
     this.ingestLifecycle(sessionId, 'notification')
@@ -969,6 +1069,7 @@ export class WorkspaceService extends EventEmitter {
       tool: String(event.tool_name || ''),
       detail,
       options: [],
+      scopes: claudeApprovalScopes(suggestions),
       canRemember: suggestions.length > 0
     }
     return new Promise((resolve) => {
@@ -1007,6 +1108,7 @@ export class WorkspaceService extends EventEmitter {
       destructive: permission === 'destructive',
       detail: args,
       options: [],
+      scopes: permission === 'destructive' ? ['once'] : ['once', 'session'],
       canRemember: permission !== 'destructive'
     }
     return new Promise((resolve) => {
@@ -1104,6 +1206,7 @@ export class WorkspaceService extends EventEmitter {
       detail: verdict.reason,
       scope: verdict.scope,
       options: [],
+      scopes: verdict.scope ? ['once', 'session', 'always'] : ['once'],
       canRemember: Boolean(verdict.scope)
     }
     // Answered in two steps on purpose. This call returns at once, so a caller
@@ -1142,7 +1245,9 @@ export class WorkspaceService extends EventEmitter {
   async resolveApproval (approvalId, allow, remember = false) {
     const approval = this.pendingApprovals.get(approvalId)
     if (!approval) return false
-    const scope = remember === true ? 'session' : (remember === false ? 'once' : String(remember || 'once'))
+    const requestedScope = remember === true ? 'session' : (remember === false ? 'once' : String(remember || 'once'))
+    const supportedScopes = Array.isArray(approval.scopes) && approval.scopes.length ? approval.scopes : (approval.canRemember ? ['once', 'session'] : ['once'])
+    const scope = supportedScopes.includes(requestedScope) ? requestedScope : 'once'
     if (approval.kind === 'tool-permission') {
       if (approval.timer) clearTimeout(approval.timer)
       if (allow && scope !== 'once') {
@@ -1169,19 +1274,20 @@ export class WorkspaceService extends EventEmitter {
     }
     if (approval.provider === 'ambientic') {
       if (approval.timer) clearTimeout(approval.timer)
-      approval.resolve({ allowed: Boolean(allow), remember: Boolean(allow && remember && !approval.destructive), outcome: allow ? 'approved' : 'rejected' })
+      approval.resolve({ allowed: Boolean(allow), remember: Boolean(allow && scope === 'session' && !approval.destructive), outcome: allow ? 'approved' : 'rejected' })
     } else if (approval.provider === 'hermes') {
       const option = approval.options.find((item) => allow ? /allow|approve/i.test(`${item.kind} ${item.name}`) : /reject|deny/i.test(`${item.kind} ${item.name}`)) || approval.options[allow ? 0 : approval.options.length - 1]
       approval.rpc.respond(approval.requestId, { outcome: option ? { outcome: 'selected', optionId: option.optionId } : { outcome: 'cancelled' } })
     } else if (approval.provider === 'claude') {
       if (approval.timer) clearTimeout(approval.timer)
+      const updatedPermissions = allow ? claudePermissionsForScope(approval.suggestions, scope) : []
       const decision = allow
         ? {
             hookSpecificOutput: {
               hookEventName: 'PermissionRequest',
               decision: {
                 behavior: 'allow',
-                ...(remember && approval.suggestions?.length ? { updatedPermissions: approval.suggestions } : {})
+                ...(updatedPermissions.length ? { updatedPermissions } : {})
               }
             }
           }
@@ -1196,7 +1302,7 @@ export class WorkspaceService extends EventEmitter {
           }
       approval.resolve(decision)
     } else {
-      approval.rpc.respond(approval.requestId, { decision: allow ? (remember ? 'acceptForSession' : 'accept') : 'decline' })
+      approval.rpc.respond(approval.requestId, codexApprovalResult(approval, allow, scope))
     }
     this.pendingApprovals.delete(approvalId)
     this.ingestLifecycle(approval.sessionId, ((approval.provider === 'claude' || approval.provider === 'ambientic') && allow) || this.activeTurns.has(approval.sessionId) ? 'tool' : 'stop_idle')
@@ -1209,6 +1315,15 @@ export class WorkspaceService extends EventEmitter {
     if (!this.history.size) await this.list()
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
+    // Managed turns do not pass through the terminal hook that normally names
+    // a task. Give the first substantive user prompt the same one-time,
+    // context-free Ambientic title before any provider read can expose its raw
+    // assembled prompt as a name.
+    if (namesThread(text, session.task || this.aliasFor(session))) {
+      const title = humanThreadTitle(text)
+      if (typeof this.store.updateTask === 'function') this.store.updateTask(id, title, '', 'local')
+      else session.task = title
+    }
     const contextSuppressed = Boolean(options.skipAmbienticContext || this.contextSuppressedSessions.has(id))
     if (contextSuppressed) this.contextSuppressedSessions.add(id)
     const snapshot = await this.read(id)
@@ -1273,6 +1388,8 @@ export class WorkspaceService extends EventEmitter {
           threadId,
           input,
           clientUserMessageId: pending.id,
+          approvalPolicy: 'on-request',
+          approvalsReviewer: 'user',
           ...(collaborationMode
             ? { collaborationMode }
             : {
@@ -1314,6 +1431,8 @@ export class WorkspaceService extends EventEmitter {
       const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding })
       const result = await rpc.request('thread/start', {
         cwd: workingDirectory,
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
         ...(normalized.model ? { model: normalized.model } : {}),
         ...(context?.binding?.capsuleText ? { developerInstructions: context.binding.capsuleText } : {}),
         ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
@@ -1590,7 +1709,7 @@ export class WorkspaceService extends EventEmitter {
           const rpc = await this.codexClient()
           const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
           snapshot.messages = codexThreadMessages(result.thread)
-          snapshot.title = result.thread?.name || result.thread?.preview || snapshot.title
+          snapshot.title = this.aliasFor(session) || session.task || humanThreadTitle(result.thread?.name || result.thread?.preview, snapshot.title)
           awaitingReply = codexAwaitsReply(result.thread)
           snapshot.awaitingReply = awaitingReply
         } catch (error) {

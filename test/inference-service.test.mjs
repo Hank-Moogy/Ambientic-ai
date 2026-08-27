@@ -187,9 +187,16 @@ test('a legacy OpenRouter key lazily discovers its model before the first routed
 
 test('thread labels use the routed provider and stay local when it fails', async () => {
   const updates = []
+  const fingerprints = new Map()
+  const names = new Map()
   const store = {
-    taskFingerprint: () => '',
-    updateTask: (sessionId, label, fingerprint, origin) => updates.push({ label, origin })
+    taskName: (sessionId) => names.get(sessionId) || '',
+    taskFingerprint: (sessionId) => fingerprints.get(sessionId) || '',
+    updateTask: (sessionId, label, fingerprint, origin) => {
+      names.set(sessionId, label)
+      fingerprints.set(sessionId, fingerprint)
+      updates.push({ label, origin })
+    }
   }
   const failing = createTaskSummarizer(store, {
     inference: { complete: async () => { throw new Error('provider offline') } }

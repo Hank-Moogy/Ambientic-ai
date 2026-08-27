@@ -3,23 +3,23 @@ import assert from 'node:assert/strict'
 import { padGridSessions } from '../src/renderer/pad-grid.mjs'
 import { padLightForSession, PAD_MOTION, PAD_TONE } from '../src/shared/pad-light.mjs'
 
-test('pads hold their position by seq rather than reshuffling by recency', () => {
+test('pads hold their assigned position rather than reshuffling by recency', () => {
   const sessions = [
-    { id: 'c', seq: 3, updatedAt: 900 },
-    { id: 'a', seq: 1, updatedAt: 100 },
-    { id: 'b', seq: 2, updatedAt: 500 }
+    { id: 'c', padIndex: 2, updatedAt: 900 },
+    { id: 'a', padIndex: 0, updatedAt: 100 },
+    { id: 'b', padIndex: 1, updatedAt: 500 }
   ]
   assert.deepEqual(padGridSessions(sessions, 4).map((item) => item ? item.id : null), ['a', 'b', 'c', null])
 })
 
-test('history sessions get no pad, because the hardware never shows them', () => {
-  const sessions = [{ id: 'live', seq: 1 }, { id: 'old', history: true, seq: 0 }]
+test('sessions without a hardware assignment get no pad', () => {
+  const sessions = [{ id: 'live', padIndex: 0 }, { id: 'old', history: true, padIndex: null }]
   assert.deepEqual(padGridSessions(sessions, 2).map((item) => item ? item.id : null), ['live', null])
 })
 
 test('the grid is always exactly as long as the device has pads', () => {
   assert.equal(padGridSessions([], 40).length, 40)
-  assert.equal(padGridSessions(Array.from({ length: 90 }, (_, i) => ({ id: `s${i}`, seq: i })), 64).length, 64)
+  assert.equal(padGridSessions(Array.from({ length: 90 }, (_, i) => ({ id: `s${i}`, padIndex: i })), 64).length, 64)
 })
 
 test('a pad on screen says exactly what the pad on the desk says', () => {

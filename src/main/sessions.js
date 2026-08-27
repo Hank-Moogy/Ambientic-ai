@@ -27,6 +27,8 @@ const TRANSITION = {
 // Sessions untouched for this long are reaped (terminal closed without a clean
 // SessionEnd, machine slept, etc.).
 const STALE_MS = 1000 * 60 * 60 * 4
+const MAX_HARDWARE_PADS = 64
+const ACTIVITY_EVENTS = new Set(['prompt', 'tool', 'notification', 'stop', 'stop_idle'])
 
 function isTransientAgentCwd (cwd) {
   const value = String(cwd || '')
@@ -43,6 +45,11 @@ export class SessionStore extends EventEmitter {
     super()
     this.map = new Map()
     this.taskCache = new Map()
+    this.aliases = new Map()
+    // Rebuilt on every app launch, then held stable for that launch. The first
+    // eligible sessions are the most recently active ones; later sessions fill
+    // vacated pads without moving anything already under the user's hand.
+    this.padOrder = []
     this._reaper = setInterval(() => this.reap(), 30_000)
     if (this._reaper.unref) this._reaper.unref()
   }
@@ -71,7 +78,41 @@ export class SessionStore extends EventEmitter {
     s.task = record.label
     s.taskFingerprint = record.fingerprint || ''
     s.taskSource = record.source || 'cache'
+    // A live terminal rediscovered after launch can reclaim a pad from the last
+    // real prompt that named it. Project-only placeholders have no cache record
+    // and therefore remain dark.
+    s.activityAt = Math.max(Number(s.activityAt) || 0, Number(record.updatedAt) || 0)
     return true
+  }
+
+  aliasKeysFor (s) {
+    const id = String(s?.id || '')
+    const providerId = s?.agent === 'codex' ? String(s.threadId || id).replace(/^codex-desktop:/, '') : ''
+    return [...new Set([
+      providerId ? `codex:${providerId}` : '',
+      id,
+      providerId,
+      providerId ? `codex-desktop:${providerId}` : ''
+    ].filter(Boolean))]
+  }
+
+  applyAlias (s) {
+    for (const key of this.aliasKeysFor(s)) {
+      const label = String(this.aliases.get(key) || '').trim()
+      if (!label) continue
+      s.task = label.slice(0, 80)
+      s.taskFingerprint = ''
+      s.taskSource = 'user'
+      return true
+    }
+    return false
+  }
+
+  hydrateAliases (records = {}) {
+    this.aliases = new Map(Object.entries(records || {}).filter(([, title]) => String(title || '').trim()))
+    let changed = false
+    for (const s of this.map.values()) if (this.applyAlias(s)) changed = true
+    if (changed) this.emit('change', this.list())
   }
 
   hydrateTasks (records = {}) {
@@ -123,10 +164,12 @@ export class SessionStore extends EventEmitter {
         taskSource: '',
         unseen: false,
         awaitingApproval: false,
+        activityAt: 0,
         discovered: false
       }
       this.map.set(id, s)
       this.applyCachedTask(s)
+      this.applyAlias(s)
     }
 
     // Refresh focus/context fields whenever the hook re-reports them.
@@ -143,6 +186,10 @@ export class SessionStore extends EventEmitter {
     if (e.transcript_path) s.transcriptPath = String(e.transcript_path).slice(0, 1000)
     if (e.summary) s.summary = String(e.summary).slice(0, 200)
     s.lastSeen = now
+    if (ACTIVITY_EVENTS.has(e.event)) {
+      s.activityAt = Math.max(Number(s.activityAt) || 0, Number(e.ts) || now)
+      s.updatedAt = s.activityAt
+    }
 
     const next = TRANSITION[e.event]
     if (next === undefined) { this.emit('change', this.list()); return s }
@@ -209,9 +256,11 @@ export class SessionStore extends EventEmitter {
         taskFingerprint: '',
         taskSource: '',
         unseen: false,
+        activityAt: 0,
         discovered: true
       })
       this.applyCachedTask(this.map.get(t.id))
+      this.applyAlias(this.map.get(t.id))
       changed = true
     }
 
@@ -236,13 +285,31 @@ export class SessionStore extends EventEmitter {
     let changed = false
 
     for (const incoming of sessions) {
-      const existing = this.map.get(incoming.id)
+      let existing = this.map.get(incoming.id)
+      // A Codex thread started through Ambientic is keyed by the provider's raw
+      // thread id. Desktop discovery sees that same provider thread with a
+      // `codex-desktop:` prefix. Merge the discovery metadata into the managed
+      // record instead of lighting two pads for one conversation.
+      if (source === 'codex-desktop' && incoming.threadId) {
+        const managed = [...this.map.values()].find((candidate) =>
+          candidate !== existing &&
+          candidate.agent === 'codex' &&
+          !candidate.tty &&
+          (candidate.threadId || candidate.id) === incoming.threadId
+        )
+        if (managed) {
+          if (existing) this.map.delete(incoming.id)
+          existing = managed
+          changed = true
+        }
+      }
       if (!existing) {
         const created = {
           ...incoming,
           seq: SEQ++,
           since: incoming.updatedAt || now,
           lastSeen: now,
+          activityAt: Number(incoming.updatedAt) || now,
           terminalCwd: incoming.cwd || '',
           transcriptPath: incoming.rolloutPath || '',
           contextText: '',
@@ -254,19 +321,27 @@ export class SessionStore extends EventEmitter {
         }
         this.map.set(incoming.id, created)
         this.applyCachedTask(created)
+        this.applyAlias(created)
         changed = true
         continue
       }
 
       const previousState = existing.state
       for (const [key, value] of Object.entries(incoming)) {
-        // A persistent Ambientic label is authoritative over a provider index
-        // title. Provider refreshes may expose the full first prompt as title.
-        if (key === 'task' && ['user', 'model', 'cache'].includes(existing.taskSource)) continue
+        if (key === 'id') continue
+        // A thread receives one Ambientic name. Provider indexes are useful for
+        // the initial label, but a later refresh must not rename the same pad —
+        // especially after an explicit user rename.
+        if (key === 'task' && String(existing.task || '').trim()) continue
         if (existing[key] !== value) { existing[key] = value; changed = true }
       }
       existing.lastSeen = now
-      existing.externalSource = source
+      this.applyAlias(existing)
+      existing.activityAt = Math.max(Number(existing.activityAt) || 0, Number(incoming.updatedAt) || 0)
+      // Only provider-index records are owned by provider discovery. A managed
+      // thread enriched above must not disappear merely because it falls out of
+      // the desktop index's bounded recent list.
+      if (existing.id === incoming.id) existing.externalSource = source
       if (previousState !== existing.state) {
         existing.since = incoming.updatedAt || now
         existing.unseen = existing.state === STATE.WAITING || existing.state === STATE.ATTENTION
@@ -297,8 +372,11 @@ export class SessionStore extends EventEmitter {
 
   updateTask (id, task, fingerprint = '', source = 'model') {
     const s = this.map.get(id)
-    const next = String(task || '').trim().slice(0, 60)
+    const next = String(task || '').trim().slice(0, 80)
     if (!s || !next) return
+    // A delayed inference result or provider refresh must never race past an
+    // explicit rename. Only another user rename may replace a user title.
+    if (s.taskSource === 'user' && source !== 'user') return
     const nextFingerprint = String(fingerprint || '')
     const changed = s.task !== next || s.taskFingerprint !== nextFingerprint || s.taskSource !== source
     s.task = next
@@ -372,9 +450,44 @@ export class SessionStore extends EventEmitter {
   }
 
   list () {
-    // Stable pad positions (by seq). Recoloring, not reshuffling.
+    this.syncPadAssignments()
     return [...this.map.values()]
       .sort((a, b) => a.seq - b.seq)
+      .map((session) => session.state === STATE.WAITING && !session.unseen
+        ? { ...session, state: STATE.IDLE }
+        : session)
+  }
+
+  syncPadAssignments () {
+    const eligible = [...this.map.values()].filter((session) => {
+      if (!session || session.history || session.state === STATE.ENDED) return false
+      if (session.awaitingApproval || [STATE.RUNNING, STATE.WAITING, STATE.ATTENTION].includes(session.state)) return true
+      // An idle discovery placeholder has no verified conversation activity.
+      // This is the empty "Hermes · AgentBase" pad that used to consume space.
+      return (Number(session.activityAt) || 0) > 0
+    })
+    const byId = new Map(eligible.map((session) => [session.id, session]))
+    const retained = this.padOrder.filter((id) => byId.has(id))
+    const retainedIds = new Set(retained)
+    const candidates = eligible
+      .filter((session) => !retainedIds.has(session.id))
+      .sort((left, right) => {
+        const urgency = (session) => session.awaitingApproval || [STATE.ATTENTION, STATE.WAITING].includes(session.state) ? 2 : session.state === STATE.RUNNING ? 1 : 0
+        return urgency(right) - urgency(left) ||
+          (Number(right.activityAt || right.updatedAt) || 0) - (Number(left.activityAt || left.updatedAt) || 0) ||
+          left.seq - right.seq
+      })
+    this.padOrder = [...retained, ...candidates.map((session) => session.id)].slice(0, MAX_HARDWARE_PADS)
+    const indexById = new Map(this.padOrder.map((id, index) => [id, index]))
+    for (const session of this.map.values()) session.padIndex = indexById.has(session.id) ? indexById.get(session.id) : null
+  }
+
+  hardwareList (limit = MAX_HARDWARE_PADS) {
+    this.syncPadAssignments()
+    return this.padOrder
+      .slice(0, Math.max(0, Math.min(MAX_HARDWARE_PADS, Number(limit) || MAX_HARDWARE_PADS)))
+      .map((id) => this.map.get(id))
+      .filter(Boolean)
       .map((session) => session.state === STATE.WAITING && !session.unseen
         ? { ...session, state: STATE.IDLE }
         : session)

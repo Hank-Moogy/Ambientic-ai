@@ -54,13 +54,13 @@ export function namesThread (text, existingName = '') {
   return words.length >= 2 && !LOW_SIGNAL.test(value)
 }
 
-function localLabel (text) {
+export function humanThreadTitle (text, fallback = 'Current task') {
   const simplified = sourceText(text)
     .replace(/^(please\s+|can you\s+|could you\s+|would you\s+|i want (?:you )?to\s+|we need to\s+|let(?:'s| us)\s+)/i, '')
     .replace(/^\d+\s*[/.):~-]?\s*/, '')
   const words = simplified.match(/[\p{L}\p{N}][\p{L}\p{N}'’+_.-]*/gu) || []
-  const label = words.slice(0, 4).join(' ')
-  if (!label) return 'Current task'
+  const label = words.slice(0, 4).join(' ').replace(/[.,:;!?-]+$/, '')
+  if (!label) return fallback
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
@@ -100,7 +100,7 @@ export function createTaskSummarizer (store, { inference = null } = {}) {
     if (lastBySession.get(sessionId) === fingerprint) return
     lastBySession.set(sessionId, fingerprint)
 
-    const fallback = localLabel(text)
+    const fallback = humanThreadTitle(text)
     store.updateTask(sessionId, fallback, fingerprint, 'local')
 
     if (cache.has(fingerprint)) {
@@ -115,6 +115,10 @@ export function createTaskSummarizer (store, { inference = null } = {}) {
       .then(async () => {
         try {
           const { label, model } = await remoteLabel(inference, text, fallback)
+          // The user may have renamed the thread while inference was running.
+          // A changed fingerprint means the original naming request no longer
+          // owns the title and its late result must be discarded.
+          if (store.taskFingerprint(sessionId) !== fingerprint) return
           cache.set(fingerprint, label)
           store.updateTask(sessionId, label, fingerprint, 'model')
           console.log(`[summary] ${model} -> "${label}"`)

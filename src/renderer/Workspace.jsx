@@ -330,6 +330,9 @@ function ThreadPreview ({ state, onPresent }) {
 function Approval ({ approval, onResolve }) {
   const destructive = approval.risk === 'destructive' || approval.permission === 'destructive'
   const context = [approval.providerLabel || approval.provider, approval.projectName || approval.project, approval.goalName || approval.goal, approval.taskName || approval.task, approval.connectionName || approval.connection, approval.tool].filter(Boolean)
+  const scopes = Array.isArray(approval.scopes) && approval.scopes.length
+    ? approval.scopes
+    : (approval.canRemember ? ['once', 'session'] : ['once'])
   return (
     <section className="approval" data-risk={destructive ? 'destructive' : approval.risk || approval.permission || 'write'}>
       {/* Lead with what is being requested — the user decides yes/no from this
@@ -340,9 +343,9 @@ function Approval ({ approval, onResolve }) {
           something irreversible is not a choice worth offering. */}
       <div className="approval__actions">
         <button type="button" onClick={() => onResolve(approval.id, false, 'once')}>Deny</button>
-        <button type="button" className="primary" onClick={() => onResolve(approval.id, true, 'once')}>Allow once</button>
-        {approval.canRemember && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, 'session')} title={approval.scope ? `Stops asking for ${approval.scope} in this thread` : ''}>Allow for this thread</button>}
-        {approval.canRemember && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, 'always')} title={approval.scope ? `Stops asking for ${approval.scope} in every thread, until you revoke it in Settings` : ''}>Always allow</button>}
+        {scopes.includes('once') && <button type="button" className="primary" onClick={() => onResolve(approval.id, true, 'once')}>Allow once</button>}
+        {scopes.includes('session') && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, 'session')} title={approval.scope ? `Stops asking for ${approval.scope} in this thread` : 'Applies until this thread ends'}>Allow for this thread</button>}
+        {scopes.includes('always') && !destructive && <button type="button" onClick={() => onResolve(approval.id, true, 'always')} title={approval.scope ? `Stops asking for ${approval.scope} in future threads too` : 'Uses the provider’s persistent permission rule'}>Always allow</button>}
       </div>
     </section>
   )
@@ -798,7 +801,7 @@ function ThreadPadGrid ({ sessions, midi, onOpenThread }) {
       </div>
       <footer className="pad-summary">
         <span>{occupied} of {padCount} pads in use</span>
-        <span>{midi?.connected ? 'Lit the same on your controller' : 'Connect your APC to light these for real'}</span>
+        <span>Latest active threads are chosen at launch; assigned pads stay put</span>
       </footer>
     </section>
   )

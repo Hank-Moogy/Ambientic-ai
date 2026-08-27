@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { open, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
+import { humanThreadTitle } from './summarizer.js'
 
 const MAX_DESKTOP_THREADS = 8
 const ACTIVE_LOOKBACK_DAYS = 7
@@ -78,7 +79,7 @@ export function parseCodexDesktopRows (text) {
     agent: 'codex',
     project: basename(String(row.cwd || '')) || 'Codex',
     cwd: String(row.cwd || ''),
-    task: String(row.title || row.preview || 'Codex task').replace(/\s+/g, ' ').trim().slice(0, 80),
+    task: humanThreadTitle(row.title, '') || humanThreadTitle(row.preview, '') || 'Codex task',
     summary: String(row.preview || '').replace(/\s+/g, ' ').trim().slice(0, 200),
     rolloutPath: String(row.rollout_path || ''),
     updatedAt: Number(row.activity_ms) || 0,

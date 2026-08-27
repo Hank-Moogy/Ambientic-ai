@@ -450,7 +450,7 @@ function createWorkspaceWindow () {
 }
 
 function pushState () {
-  const list = store.list()
+  const list = store.hardwareList()
   sendToWindows('state', list)
   void pushWorkspaceThreads()
   updateTray()
@@ -694,7 +694,7 @@ function createTray () {
 }
 
 // ── IPC ───────────────────────────────────────────────────────────────────
-ipcMain.handle('get-state', () => store.list())
+ipcMain.handle('get-state', () => store.hardwareList())
 ipcMain.handle('get-build-info', () => buildInfo)
 ipcMain.handle('get-workspace-threads', () => workspace.list())
 ipcMain.handle('get-goals', () => goals?.list() || { version: 1, goals: [], events: [], updatedAt: null })
@@ -1473,6 +1473,7 @@ app.whenReady().then(() => {
   if (prefs.ambientModeEnabled) ambientMode.enable()
   powerMonitor.on('resume', () => ambientMode?.reassert())
   store.hydrateTasks(loadTaskCache())
+  store.hydrateAliases(prefs.threadAliases)
   if (app.dock) {
     const logoPath = app.isPackaged
       ? join(process.resourcesPath, 'ambientic-logo.png')

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WorkspaceService, createPrivateTaskWorkspace, describeApprovalRequest } from '../src/main/workspace-service.mjs'
+import { WorkspaceService, claudeApprovalScopes, claudePermissionsForScope, codexApprovalScopes, createPrivateTaskWorkspace, describeApprovalRequest } from '../src/main/workspace-service.mjs'
 
 test('managed tasks reject unsafe or unavailable explicit project folders', async () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
@@ -72,6 +72,8 @@ test('creates a Codex task with its chosen model, effort, and explicit project c
 
     assert.equal(id, 'new-thread')
     assert.equal(requests[0].params.model, 'gpt-test')
+    assert.equal(requests[0].params.approvalPolicy, 'on-request')
+    assert.equal(requests[0].params.approvalsReviewer, 'user')
     assert.equal(sent[0], 'new-thread')
     assert.equal(sent[2].model, 'gpt-test')
     assert.equal(sent[2].effort, 'high')
@@ -292,7 +294,7 @@ test('resolving an approval clears the "attention" state instead of sticking', a
   assert.equal(events.at(-1).state, 'idle')
 })
 
-test('bridges Claude approval once or always through its official hook decision', async () => {
+test('bridges Claude thread approval through an in-memory provider permission', async () => {
   const session = { id: 'claude-terminal', agent: 'claude', cwd: '/tmp/project', state: 'attention', tty: '/dev/ttys1' }
   const ingested = []
   const service = new WorkspaceService({
@@ -317,14 +319,64 @@ test('bridges Claude approval once or always through its official hook decision'
   assert.equal(service.snapshots.get(session.id).approvals[0].resolve, undefined)
   assert.equal(service.snapshots.get(session.id).state, 'attention')
 
-  await service.resolveApproval(approvalId, true, true)
+  await service.resolveApproval(approvalId, true, 'session')
   assert.deepEqual(await decisionPromise, {
     hookSpecificOutput: {
       hookEventName: 'PermissionRequest',
-      decision: { behavior: 'allow', updatedPermissions: [suggestion] }
+      decision: { behavior: 'allow', updatedPermissions: [{ ...suggestion, destination: 'session' }] }
     }
   })
   assert.equal(ingested.at(-1).event, 'tool')
+})
+
+test('provider approval scopes only advertise decisions the provider can honor', () => {
+  const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'localSettings' }
+  assert.deepEqual(claudeApprovalScopes([suggestion]), ['once', 'session', 'always'])
+  assert.deepEqual(claudePermissionsForScope([suggestion], 'session'), [{ ...suggestion, destination: 'session' }])
+  assert.deepEqual(claudePermissionsForScope([suggestion], 'always'), [suggestion])
+
+  assert.deepEqual(codexApprovalScopes({ params: {} }), ['once', 'session'])
+  assert.deepEqual(codexApprovalScopes({ params: { proposedExecpolicyAmendment: ['prefix_rule(pattern=["npm", "test"], decision="allow")'] } }), ['once', 'session', 'always'])
+  assert.deepEqual(codexApprovalScopes({ params: { proposedNetworkPolicyAmendments: [{ host: 'example.com', action: 'allow' }] } }), ['once', 'session', 'always'])
+  assert.deepEqual(codexApprovalScopes({ params: { availableDecisions: ['accept', 'decline'] } }), ['once'])
+})
+
+test('Codex persistent approval uses its proposed exec-policy amendment', async () => {
+  const session = { id: 'thread-policy', agent: 'codex', cwd: '/tmp/project', state: 'running' }
+  const responses = []
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, { ...service.baseSnapshot(session), messages: [] })
+  const amendment = ['prefix_rule(pattern=["npm", "test"], decision="allow")']
+  service.providerApproval('codex', { respond: (id, result) => responses.push({ id, result }) }, {
+    id: 41,
+    method: 'item/commandExecution/requestApproval',
+    params: { threadId: session.id, command: 'npm test', proposedExecpolicyAmendment: amendment }
+  })
+  const [approvalId, approval] = [...service.pendingApprovals.entries()][0]
+  assert.deepEqual(approval.scopes, ['once', 'session', 'always'])
+
+  await service.resolveApproval(approvalId, true, 'always')
+  assert.deepEqual(responses[0], {
+    id: 41,
+    result: { decision: { acceptWithExecpolicyAmendment: { execpolicy_amendment: amendment } } }
+  })
+})
+
+test('Codex permission-profile approvals grant only the requested profile for the chosen scope', async () => {
+  const session = { id: 'thread-permissions', agent: 'codex', cwd: '/tmp/project', state: 'running' }
+  const responses = []
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, { ...service.baseSnapshot(session), messages: [] })
+  const permissions = { fileSystem: { write: ['/tmp/shared'] }, network: null }
+  service.providerApproval('codex', { respond: (id, result) => responses.push({ id, result }) }, {
+    id: 42,
+    method: 'item/permissions/requestApproval',
+    params: { threadId: session.id, reason: 'Use the shared fixture', permissions }
+  })
+  const [approvalId] = [...service.pendingApprovals.keys()]
+
+  await service.resolveApproval(approvalId, true, 'session')
+  assert.deepEqual(responses[0], { id: 42, result: { permissions, scope: 'session' } })
 })
 
 test('ignores a stale Codex completion event for a different active turn', async () => {
@@ -363,6 +415,7 @@ test('steers the exact active Codex turn instead of starting a second turn', asy
 
   await service.send(session.id, 'Use the newer screenshot.')
 
+  assert.equal(session.task, 'Use the newer screenshot')
   assert.deepEqual(requests.map((entry) => entry.method), ['thread/resume', 'turn/steer'])
   assert.equal(requests[1].params.expectedTurnId, 'active-turn')
   assert.equal(requests[1].params.input[0].text, 'Use the newer screenshot.')
@@ -436,6 +489,8 @@ test('sends Codex folders as native mentions and uses its native plan preset', a
   assert.equal(start.collaborationMode.settings.reasoning_effort, 'high')
   assert.match(start.input[0].text, /Project context: you are working on tmp at \/tmp/)
   assert.ok(start.clientUserMessageId)
+  assert.equal(start.approvalPolicy, 'on-request')
+  assert.equal(start.approvalsReviewer, 'user')
 })
 
 test('orders the workspace by latest message activity across providers', async () => {
@@ -533,9 +588,21 @@ test('applies a persistent user alias to workspace lists and snapshots', async (
   })
   assert.deepEqual(await service.rename(session.id, '  Ambientic  '), { id: session.id, title: 'Ambientic' })
   assert.deepEqual(renamed, { id: session.id, title: 'Ambientic', source: 'user' })
-  assert.equal(saved[session.id], 'Ambientic')
+  assert.equal(saved['codex:thread-123'], 'Ambientic')
+  assert.equal(saved[session.id], undefined)
   assert.equal((await service.list()).find((item) => item.id === session.id).task, 'Ambientic')
   assert.equal(service.baseSnapshot(session).title, 'Ambientic')
+})
+
+test('a Codex provider read cannot overwrite a manual Ambientic name', async () => {
+  const session = { id: 'codex-desktop:thread-123', threadId: 'thread-123', agent: 'codex', task: 'Provider title', project: 'Codex', cwd: '/Users/test', state: 'idle', externalSource: 'codex-desktop' }
+  const service = new WorkspaceService({ list: () => [session], updateTask: () => {} }, () => [], {
+    aliases: { 'codex:thread-123': 'My Ambientic name' }
+  })
+  service.codexClient = async () => ({
+    request: async () => ({ thread: { id: 'thread-123', name: '<ambientic-context mode="build"> raw provider title', status: { type: 'idle' }, turns: [] } })
+  })
+  assert.equal((await service.read(session.id)).title, 'My Ambientic name')
 })
 
 // An approval card must say what is being requested, not just which tool wants
