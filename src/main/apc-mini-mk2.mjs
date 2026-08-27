@@ -7,7 +7,7 @@ export const APC_MINI_MK2 = {
   PAD_COUNT: 64,
   DEVICE_NAME: /APC\s*mini\s*mk2\s*Control/i,
   INTRO: [0xF0, 0x47, 0x7F, 0x4F, 0x60, 0x00, 0x04, 0x00, 0x01, 0x00, 0x00, 0xF7],
-  COLOR: { OFF: 0, RED: 5, GREEN: 21, BLUE: 45 },
+  COLOR: { OFF: 0, RED: 5, ORANGE: 9, GREEN: 21, BLUE: 45 },
   ANIMATION: { SOLID: 6, BLINK_QUARTER: 14 },
   NOTE: { TRACK_FIRST: 0x64 }
 }
@@ -40,6 +40,8 @@ export function miniGridSessions (sessions = []) {
 
 function miniLedForSession (session) {
   if (!session) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.OFF }
+  // Same meaning as the APC40 grid: orange is a question waiting for the person.
+  if (session.awaitingApproval) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.ORANGE }
   if (session.state === 'running') return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.GREEN }
   if (session.state === 'attention' || session.state === 'waiting') {
     return { channel: session.unseen ? APC_MINI_MK2.ANIMATION.BLINK_QUARTER : APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.RED }

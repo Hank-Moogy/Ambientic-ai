@@ -10,7 +10,7 @@ test('context renderer accepts wrapped and direct preload collections', () => {
 })
 
 test('context renderer remains safe before the optional preload contract is available', () => {
-  assert.deepEqual(contextApi({}), { context: {}, memory: {}, tools: {}, audit: {} })
+  assert.deepEqual(contextApi({}), { context: {}, memory: {}, tools: {}, inference: {}, audit: {} })
   const memory = { list: () => [] }
   assert.equal(contextApi({ ambientic: { memory } }).memory, memory)
 })
@@ -33,7 +33,9 @@ test('memory and tool labels keep inference and risk boundaries explicit', () =>
 test('workspace exposes context, Settings memory, and shared tool surfaces without experimental dynamic tools', () => {
   const workspace = readFileSync(new URL('../src/renderer/Workspace.jsx', import.meta.url), 'utf8')
   const context = readFileSync(new URL('../src/renderer/ContextMemory.jsx', import.meta.url), 'utf8')
-  assert.match(workspace, /<b>Memory<\/b>/)
+  const inference = readFileSync(new URL('../src/renderer/InferenceProviders.jsx', import.meta.url), 'utf8')
+  assert.match(workspace, /id: 'memory'.*label: 'Memory'/)
+  assert.match(workspace, /id: 'inference'.*label: 'Inference'/)
   assert.match(workspace, /section === 'memory' \? <MemoryWorkspace/)
   assert.doesNotMatch(workspace, /setView\('memory'\)/)
   assert.match(workspace, /Build my memory/)
@@ -45,4 +47,6 @@ test('workspace exposes context, Settings memory, and shared tool surfaces witho
   assert.match(context, /Context update recorded\. The original capsule remains unchanged\./)
   assert.match(context, /Credentials remain outside provider agents/)
   assert.doesNotMatch(context, /dynamicTools/)
+  assert.match(inference, /window\.controller\.openExternalUrl\(provider\.consoleUrl\)/)
+  assert.doesNotMatch(inference, /target="_blank"/)
 })

@@ -264,6 +264,15 @@ contextBridge.exposeInMainWorld('ambientic', {
     disconnect: (id) => ipcRenderer.invoke('tools-disconnect', id),
     listCapabilities: (connectionId = '') => ipcRenderer.invoke('tools-list-capabilities', connectionId)
   },
+  inference: {
+    snapshot: () => ipcRenderer.invoke('inference-snapshot'),
+    saveKey: (id, key) => ipcRenderer.invoke('inference-save-key', id, key),
+    removeKey: (id) => ipcRenderer.invoke('inference-remove-key', id),
+    test: (id) => ipcRenderer.invoke('inference-test', id),
+    listModels: (id) => ipcRenderer.invoke('inference-list-models', id),
+    updateProvider: (id, patch = {}) => ipcRenderer.invoke('inference-update-provider', id, patch),
+    setRoute: (workload, providerId) => ipcRenderer.invoke('inference-set-route', workload, providerId)
+  },
   audit: {
     list: (options = {}) => ipcRenderer.invoke('audit-list', options)
   }

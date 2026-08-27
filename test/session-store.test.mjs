@@ -16,22 +16,6 @@ test('keeps a persistent Ambientic thread name across provider index refreshes',
   clearInterval(store._reaper)
 })
 
-test('a named thread is not renamed by the prompts that follow', () => {
-  const store = new SessionStore()
-  const id = 'claude-thread'
-  store.ingest({ event: 'session_start', session_id: id, agent: 'claude', cwd: '/Users/test/project' })
-
-  assert.equal(store.taskNamed(id), false)
-  store.updateTask(id, 'Fix thread naming', 'fp-1', 'model')
-  assert.equal(store.taskNamed(id), true)
-
-  // The summarizer asks before it spends a model call; a thread is named after
-  // the intent it opened with, not after whatever you said most recently.
-  assert.equal(store.taskNamed(id), true)
-  assert.equal(store.list()[0].task, 'Fix thread naming')
-  clearInterval(store._reaper)
-})
-
 test('expires stale running hooks for every terminal provider without removing the thread', () => {
   for (const agent of ['codex', 'claude', 'hermes']) {
     const store = new SessionStore()

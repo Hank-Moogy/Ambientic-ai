@@ -4,6 +4,7 @@ export function contextApi (host = globalThis.window) {
     context: api.context || {},
     memory: api.memory || {},
     tools: api.tools || {},
+    inference: api.inference || {},
     audit: api.audit || {}
   }
 }

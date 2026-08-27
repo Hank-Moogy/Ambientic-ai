@@ -4,7 +4,7 @@ import http from 'node:http'
 // keep it dead simple and permissive (any parse error just 400s, never throws).
 export const PORT = 47600
 
-export function startServer (store, { focusById, onTaskText, onApprovalRequest, port = PORT } = {}) {
+export function startServer (store, { focusById, onTaskText, onApprovalRequest, onToolPermission, onToolPermissionWait, port = PORT } = {}) {
   const server = http.createServer((req, res) => {
     // Loopback only — never accept anything off-box.
     const ra = req.socket.remoteAddress || ''
@@ -32,6 +32,31 @@ export function startServer (store, { focusById, onTaskText, onApprovalRequest, 
       Promise.resolve(focusById ? focusById(id) : { ok: false, reason: 'no-handler' })
         .then((r) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(r)) })
         .catch((e) => { res.writeHead(500).end(JSON.stringify({ ok: false, error: String(e) })) })
+      return
+    }
+
+    if (req.method === 'POST' && (req.url === '/permission/claude' || req.url === '/permission/claude/wait')) {
+      let body = ''
+      let tooBig = false
+      req.on('data', (chunk) => {
+        body += chunk
+        if (body.length > 256 * 1024) { tooBig = true; req.destroy() }
+      })
+      req.on('end', () => {
+        if (tooBig) { res.writeHead(413).end(); return }
+        const answer = (value) => {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(value || {}))
+        }
+        try {
+          const event = JSON.parse(body)
+          // An empty answer means "Ambientic has no opinion", and the caller
+          // keeps its own permission behaviour. Every failure path below lands
+          // there too: this endpoint must never be able to wedge an agent.
+          const handler = req.url === '/permission/claude/wait' ? onToolPermissionWait : onToolPermission
+          Promise.resolve(handler ? handler(event) : null).then(answer).catch(() => answer(null))
+        } catch { answer(null) }
+      })
       return
     }
 
