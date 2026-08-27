@@ -275,12 +275,15 @@ function RenameThreadButton ({ thread, onRenamed }) {
 }
 
 // Header action: move this task's context to another connected agent.
-function HandoverControl ({ thread, connectors, onHandover }) {
+function HandoverControl ({ thread, connectors, onHandover, onUnavailable }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState('')
   useEffect(() => { setOpen(false); setBusy('') }, [thread?.id])
   const targets = handoverTargets(connectors, thread?.provider)
   if (!thread?.managed || !targets.length) return null
+  if (thread?.handover?.eligible === false) {
+    return <button type="button" title={thread.handover.reason} onClick={() => onUnavailable(thread.handover.reason)}>Choose project to hand off</button>
+  }
   const run = async (provider) => {
     setBusy(provider)
     try { await onHandover(provider) } finally { setBusy(''); setOpen(false) }
@@ -291,11 +294,19 @@ function HandoverControl ({ thread, connectors, onHandover }) {
 
 // In-thread banner shown when the current provider is near its rate limit,
 // offering one-click handover to the least-loaded connected provider.
-function HandoverBanner ({ thread, connectors, usage, onHandover }) {
+function HandoverBanner ({ thread, connectors, usage, onHandover, onUnavailable }) {
   const [busy, setBusy] = useState(false)
   const percent = providerRiskPercent(usage, thread?.provider)
   const targets = handoverTargets(connectors, thread?.provider)
   if (!thread?.managed || percent === null || percent < HANDOVER_THRESHOLD || !targets.length) return null
+  if (thread?.handover?.eligible === false) {
+    return (
+      <div className="handover-banner" data-tone="critical">
+        <div><b>{thread.providerLabel || thread.provider} is at {Math.round(percent)}% of its limit</b><small>{thread.handover.reason}</small></div>
+        <button type="button" onClick={() => onUnavailable(thread.handover.reason)}>Choose project folder</button>
+      </div>
+    )
+  }
   const suggestion = targets.slice().sort((a, b) => (providerRiskPercent(usage, a.id) ?? 0) - (providerRiskPercent(usage, b.id) ?? 0))[0]
   const run = async () => { setBusy(true); try { await onHandover(suggestion.id) } finally { setBusy(false) } }
   return (
@@ -1246,6 +1257,7 @@ export default function Workspace () {
   const [connectors, setConnectors] = useState([])
   const [providerAuth, setProviderAuth] = useState({})
   const [handovers, setHandovers] = useState([])
+  const [handoffError, setHandoffError] = useState('')
   const [midi, setMidi] = useState({ connected: false, model: 'Akai APC controller', shortModel: 'APC' })
   const [voice, setVoice] = useState({ recording: false, transcribing: false, error: '', transcript: '', sessionId: '', sessionLabel: '' })
   const [ambientMode, setAmbientMode] = useState({ enabled: false, checkInDue: false, checkInMinutes: 240, availableCheckIns: [30, 60, 120, 240, 480, 720] })
@@ -1506,9 +1518,34 @@ export default function Workspace () {
   // Generate a fresh handover brief for this thread and start the target
   // provider on it, then jump to the new thread.
   const handoff = async (targetProvider) => {
-    const result = await window.controller.continueHandover(selectedId, targetProvider)
-    if (result?.targetSessionId) setSelectedId(result.targetSessionId)
+    setHandoffError('')
+    try {
+      const result = await window.controller.continueHandover(selectedId, targetProvider)
+      if (result?.targetSessionId) setSelectedId(result.targetSessionId)
+      return result
+    } catch (error) {
+      setHandoffError(error?.message || 'Ambientic could not hand this thread off. Check the project binding and provider connection, then try again.')
+      return null
+    }
   }
+
+  const chooseHandoffProject = async () => {
+    setHandoffError('')
+    try {
+      const rootPath = await window.controller.chooseProjectFolder()
+      if (!rootPath) return
+      const name = rootPath.split('/').filter(Boolean).at(-1) || 'Local project'
+      const project = await window.ambientic.context.upsertProject({ rootPath, name })
+      await window.ambientic.context.rebind(selectedId, { projectId: project.id, goalId: '', taskId: '' })
+      const refreshed = await window.controller.getThread(selectedId)
+      setThread(refreshed)
+      setHandoffError('Project linked. Choose the target provider to continue this thread.')
+    } catch (error) {
+      setHandoffError(error?.message || 'Ambientic could not link that project folder. Try correcting the project in Context.')
+    }
+  }
+
+  useEffect(() => { setHandoffError('') }, [selectedId])
 
   if (onboarding === null) {
     return <main className="onboarding-loading"><span><img src={ambienticLogo} alt="" /></span><p>Assembling your field…</p></main>
@@ -1557,9 +1594,10 @@ export default function Workspace () {
       {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
       {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'goals' ? <GoalsWorkspace snapshot={goalsSnapshot} selectedGoalId={selectedGoalId} onSelectGoal={setSelectedGoalId} onCreateGoal={createGoal} onUpdateGoal={updateGoal} onCreateTask={createGoalTask} onUpdateTask={updateGoalTask} /> : view === 'workflows' ? <WorkflowStudio onOpenThread={openThread} /> : view === 'hardware' ? <HardwareWorkspace snapshot={hardwareSnapshot} midi={midi} sessions={sessions} goalsSnapshot={goalsSnapshot} workflowSnapshot={workflowSnapshot} connectors={connectors} onOpenThread={openThread} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
-          <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
+          <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} onUnavailable={chooseHandoffProject} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef} onScroll={updateTranscriptPosition}>
-            <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} />
+            {handoffError && <div className="handover-error" role="alert"><span>!</span><div><b>Handoff needs attention</b><small>{handoffError}</small></div><button type="button" aria-label="Dismiss handoff error" onClick={() => setHandoffError('')}>×</button></div>}
+            <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} onUnavailable={chooseHandoffProject} />
             {loading && <div className="loading">Loading local conversation…</div>}
             {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. Ambientic will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
             {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
@@ -1613,7 +1651,7 @@ export default function Workspace () {
 
       <aside className="artifact-panel">
         <header><span>Context</span><button type="button">···</button></header>
-        <ThreadContextPanel sessionId={selectedId} thread={thread} goalsSnapshot={goalsSnapshot} />
+        <ThreadContextPanel sessionId={selectedId} thread={thread} goalsSnapshot={goalsSnapshot} onBindingUpdated={() => window.controller.getThread(selectedId).then(setThread)} />
         <section><h3>Task</h3><dl><div><dt>Provider</dt><dd>{thread?.providerLabel || '—'}</dd></div><div><dt>Status</dt><dd><i data-state={thread?.state} />{stateLabel[thread?.state] || '—'}</dd></div><div><dt>Project</dt><dd>{thread?.project || '—'}</dd></div></dl></section>
         <section><h3>Preview <span>{companions?.bySession?.[selectedId]?.activeCount || 0}</span></h3><ThreadPreview state={companions?.bySession?.[selectedId]} onPresent={() => window.controller.presentPreview(selectedId)} /></section>
         <section><h3>Artifacts <span>{thread?.artifacts?.length || 0}</span></h3>{thread?.artifacts?.length ? <div className="artifacts">{thread.artifacts.map((artifact) => <button key={artifact.path} type="button" title={artifact.path} onClick={() => window.controller.openArtifact(thread.id, artifact.path)}><span>⌘</span><div><b>{artifact.name}</b><small>{artifact.path}</small></div></button>)}</div> : <div className="no-artifacts">Files touched by the agent appear here.</div>}</section>

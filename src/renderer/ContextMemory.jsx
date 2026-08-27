@@ -109,7 +109,7 @@ export function LaunchContext ({ provider, cwd, prompt, projectId = '', goalsSna
   )
 }
 
-export function ThreadContextPanel ({ sessionId, thread, goalsSnapshot }) {
+export function ThreadContextPanel ({ sessionId, thread, goalsSnapshot, onBindingUpdated }) {
   const [binding, setBinding] = useState(null)
   const [draft, setDraft] = useState(EMPTY_BINDING)
   const [projects, setProjects] = useState([])
@@ -149,6 +149,7 @@ export function ThreadContextPanel ({ sessionId, thread, goalsSnapshot }) {
       setBinding(value || { ...binding, ...draft, correctedByUser: true })
       setEditing(false)
       setNotice('Context update recorded. The original capsule remains unchanged.')
+      onBindingUpdated?.(value)
     } catch (cause) { setNotice(apiError(cause, 'Context could not be updated.')) }
   }
   const tokenCount = binding?.capsuleTokens || binding?.tokenCount

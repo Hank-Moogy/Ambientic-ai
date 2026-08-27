@@ -37,3 +37,21 @@
 }
 
 .handover-banner button:disabled { opacity: .6; cursor: default; }
+
+.handover-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border: 1px solid #75443f;
+  border-radius: 10px;
+  background: #1d1213;
+  color: #e7bbb5;
+}
+
+.handover-error > span { width: 20px; height: 20px; display: grid; place-items: center; flex: none; border-radius: 50%; background: #a85d54; color: #180b0b; font-weight: 850; }
+.handover-error > div { min-width: 0; display: grid; gap: 3px; }
+.handover-error b { font-size: 10px; }
+.handover-error small { color: #b98f8a; font-size: 9px; line-height: 1.45; }
+.handover-error > button { margin-left: auto; border: 0; background: transparent; color: #b98f8a; font-size: 17px; }

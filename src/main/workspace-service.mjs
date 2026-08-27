@@ -6,7 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
-import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, isBroadProjectRoot } from './project-scope.mjs'
+import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, handoverProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
 import { decideToolPermission } from './permission-policy.mjs'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
@@ -563,6 +563,27 @@ export class WorkspaceService extends EventEmitter {
     return binding ? { projectId: binding.projectId || '', goalId: binding.goalId || '', taskId: binding.taskId || '' } : {}
   }
 
+  handoverContextFor (sessionOrId) {
+    const session = typeof sessionOrId === 'string' ? this.sessionFor(sessionOrId) : sessionOrId
+    if (!session) return { eligible: false, root: '', reason: 'This thread is no longer available.' }
+    const binding = this.contextEngine?.bindingFor(session.agent, this.providerSessionId(session))
+    const boundRoot = binding?.project?.rootPath || ''
+    const root = handoverProjectRoot({ cwd: session.cwd, boundRoot })
+    if (!root) {
+      return {
+        eligible: false,
+        root: '',
+        reason: 'Choose a specific project folder before handing this thread off.'
+      }
+    }
+    return {
+      eligible: true,
+      root,
+      source: boundRoot && root === resolve(boundRoot) ? 'project-binding' : 'session',
+      projectName: binding?.project?.name || session.project || basename(root)
+    }
+  }
+
   recentProjects (limit = 4) {
     const projects = new Map()
     for (const session of [...this.store.list(), ...this.history.values()].sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))) {
@@ -661,7 +682,8 @@ export class WorkspaceService extends EventEmitter {
       messages: [], artifacts: [], approvals: [], running: false, error: '',
       turnStateKnown: false,
       nativeAvailable: Boolean(session.deepLink || session.tty),
-      managed: ['codex', 'claude', 'hermes'].includes(session.agent)
+      managed: ['codex', 'claude', 'hermes'].includes(session.agent),
+      handover: this.handoverContextFor(session)
     }
   }
 
@@ -670,6 +692,7 @@ export class WorkspaceService extends EventEmitter {
     snapshot.approvals = [...this.pendingApprovals.values()]
       .filter((approval) => approval.sessionId === snapshot.id)
       .map(({ rpc: _rpc, resolve: _resolve, timer: _timer, requestId: _requestId, suggestions: _suggestions, ...approval }) => approval)
+    snapshot.handover = this.handoverContextFor(snapshot.id)
     // State has one owner. Callers set `running`/`error`/`messages`; the state
     // is always derived here so live snapshots and list()/read() cannot diverge.
     snapshot.state = this.effectiveState(this.sessionFor(snapshot.id), snapshot)
