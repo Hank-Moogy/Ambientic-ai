@@ -13,7 +13,7 @@ export const INFERENCE_PROVIDERS = [
     label: 'Nebius Token Factory',
     summary: 'Open-weight models hosted by Nebius on an OpenAI-compatible endpoint.',
     baseUrl: 'https://api.studio.nebius.com/v1',
-    consoleUrl: 'https://studio.nebius.com/settings/api-keys',
+    consoleUrl: 'https://tokenfactory.nebius.com/settings/api-keys',
     keyPrefix: 'nebius_',
     environmentKeys: ['NEBIUS_API_KEY', 'NEBIUS_TOKEN_FACTORY_API_KEY'],
     keychainService: 'com.findmecreators.ambientic.inference.nebius',
@@ -89,23 +89,30 @@ function securityKeychain () {
     }
   })
 
+  async function readKey (service) {
+    try {
+      return await run(['find-generic-password', '-w', '-s', service])
+    } catch {
+      return ''
+    }
+  }
+
   return {
-    async read (service) {
-      try {
-        return await run(['find-generic-password', '-w', '-s', service])
-      } catch {
-        return ''
-      }
-    },
+    read: readKey,
     async write (service, key) {
-      // `security` reads the password from stdin when `-w` carries no value, which
-      // keeps the key out of the process list. Older releases need the argument
-      // form, so fall back rather than losing the credential.
-      try {
-        await run(['add-generic-password', '-U', '-s', service, '-a', KEYCHAIN_ACCOUNT, '-w'], `${key}\n`)
-      } catch {
-        await run(['add-generic-password', '-U', '-s', service, '-a', KEYCHAIN_ACCOUNT, '-w', key])
-      }
+      // `security add-generic-password -w` with no value does not read one value
+      // from stdin: it prompts twice ("password data" then "retype") and compares
+      // them. Feeding the key once leaves the confirmation empty, and `security`
+      // still exits 0 — so a single-fed write silently stores nothing. Feed it
+      // twice, and never trust the exit status: verify by reading the key back.
+      await run(['add-generic-password', '-U', '-s', service, '-a', KEYCHAIN_ACCOUNT, '-w'], `${key}\n${key}\n`)
+        .catch(() => {})
+      if (await readKey(service) === key) return
+      // Older `security` builds only accept the value as an argument. That form
+      // exposes the key in the process list for the life of the call, so it stays
+      // a fallback rather than the first choice.
+      await run(['add-generic-password', '-U', '-s', service, '-a', KEYCHAIN_ACCOUNT, '-w', key])
+      if (await readKey(service) !== key) throw new Error('macOS did not store the key in your keychain.')
     },
     async remove (service) {
       try {

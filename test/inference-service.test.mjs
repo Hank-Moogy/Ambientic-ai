@@ -212,3 +212,24 @@ test('thread labels use the routed provider and stay local when it fails', async
   assert.equal(updates.at(-1).origin, 'model')
   assert.equal(updates.at(-1).label, 'Fix terminal focus')
 })
+
+// `security add-generic-password -w` prompts twice and exits 0 even when the two
+// entries disagree, so the store can report success and keep nothing. The UI must
+// never call that a connection: the user would leave Settings believing a provider
+// was ready and only meet the failure later, inside a task.
+test('a keychain that reports success but stores nothing is not reported as connected', async () => {
+  const silentlyFailing = {
+    read: async () => '',
+    write: async () => {},
+    remove: async () => {}
+  }
+  const { service, cleanup } = harness({ keychain: silentlyFailing, handler: async () => modelList })
+  try {
+    const result = await service.saveKey('nebius', 'nebius_secret_value')
+    assert.equal(result.connected, false)
+    assert.equal(result.keyHint, '')
+    assert.match(result.lastError, /no API key/i)
+  } finally {
+    cleanup()
+  }
+})
