@@ -73,6 +73,11 @@ export class SessionStore extends EventEmitter {
   applyCachedTask (s) {
     const record = this.taskCache.get(this.taskKeyFor(s))
     if (!this.taskRecordMatches(record, s)) return false
+    // A name the user typed is restored even over a label the provider already
+    // supplied — otherwise a rename silently loses to the provider's own title
+    // the next time the session is rediscovered or the app restarts.
+    if (s.task && record.source !== 'user') return false
+    if (s.task === record.label && s.taskSource === (record.source || 'cache')) return false
     s.task = record.label
     s.taskFingerprint = record.fingerprint || ''
     s.taskSource = record.source || 'cache'
@@ -83,7 +88,7 @@ export class SessionStore extends EventEmitter {
     this.taskCache = new Map(Object.entries(records))
     let changed = false
     for (const s of this.map.values()) {
-      if (!s.task && this.applyCachedTask(s)) changed = true
+      if (this.applyCachedTask(s)) changed = true
     }
     if (changed) this.emit('change', this.list())
   }
@@ -195,7 +200,7 @@ export class SessionStore extends EventEmitter {
           if (existing.agent !== t.agent) { existing.agent = t.agent; changed = true }
           existing.lastSeen = now
         }
-        if (!existing.task && this.applyCachedTask(existing)) changed = true
+        if (this.applyCachedTask(existing)) changed = true
         continue
       }
 
@@ -312,27 +317,42 @@ export class SessionStore extends EventEmitter {
 
   updateTask (id, task, fingerprint = '', source = 'model') {
     const s = this.map.get(id)
-    const next = String(task || '').trim().slice(0, 60)
+    const next = String(task || '').replace(/\s+/g, ' ').trim().slice(0, 80)
     if (!s || !next) return
     const nextFingerprint = String(fingerprint || '')
+
+    // Renaming a thread is a decision, not a suggestion. Automatic labellers —
+    // the summarizer, provider indexes, the transcript reader — may still record
+    // what they saw so they stop recomputing it, but they never take the name
+    // back from the user.
+    if (s.taskSource === 'user' && source !== 'user') {
+      if (s.taskFingerprint === nextFingerprint) return
+      s.taskFingerprint = nextFingerprint
+      this.persistTask(s)
+      return
+    }
+
     const changed = s.task !== next || s.taskFingerprint !== nextFingerprint || s.taskSource !== source
     s.task = next
     s.taskFingerprint = nextFingerprint
     s.taskSource = source
 
-    const key = this.taskKeyFor(s)
-    if (key) {
-      this.taskCache.set(key, {
-        label: next,
-        fingerprint: nextFingerprint,
-        source,
-        cwd: s.cwd || '',
-        agent: s.agent || '',
-        updatedAt: Date.now()
-      })
-      this.emit('task-cache', this.taskCacheSnapshot())
-    }
+    this.persistTask(s)
     if (changed) this.emit('change', this.list())
+  }
+
+  persistTask (s) {
+    const key = this.taskKeyFor(s)
+    if (!key) return
+    this.taskCache.set(key, {
+      label: s.task,
+      fingerprint: s.taskFingerprint || '',
+      source: s.taskSource || 'cache',
+      cwd: s.cwd || '',
+      agent: s.agent || '',
+      updatedAt: Date.now()
+    })
+    this.emit('task-cache', this.taskCacheSnapshot())
   }
 
   updateContext (id, text) {
@@ -345,6 +365,20 @@ export class SessionStore extends EventEmitter {
 
   taskFingerprint (id) {
     return this.map.get(id)?.taskFingerprint || ''
+  }
+
+  // True once the user has named this thread — automatic labellers should not
+  // even spend a model call trying to rename it.
+  taskLocked (id) {
+    return this.map.get(id)?.taskSource === 'user'
+  }
+
+  // True once this thread carries any name at all. A thread is named after the
+  // intent it opened with, so automatic labellers get one shot: re-labelling on
+  // every prompt made the name track the latest message rather than the
+  // conversation, and a thread you could recognise kept changing under you.
+  taskNamed (id) {
+    return Boolean(this.map.get(id)?.task)
   }
 
   taskCacheSnapshot () {

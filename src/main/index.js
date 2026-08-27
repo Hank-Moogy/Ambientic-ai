@@ -594,6 +594,11 @@ function snapTopRight () {
 function showWorkspace (sessionId = '') {
   if (!workspaceWin || workspaceWin.isDestroyed()) createWorkspaceWindow()
   workspaceWin.show()
+  // Raising the window is not enough when another app owns the foreground:
+  // macOS keeps Ambientic behind whatever is active unless the app itself is
+  // activated, which is why the workspace could open "invisibly" behind a
+  // terminal or browser.
+  if (process.platform === 'darwin') app.focus({ steal: true })
   workspaceWin.focus()
   if (sessionId) {
     pendingWorkspaceSessionId = sessionId
@@ -1125,6 +1130,16 @@ async function focusById (id) {
     lastFocusedSessionId = id
     midiController?.select(id)
     return { ok: true, via: 'provider-deep-link' }
+  }
+
+  // A thread Ambientic runs itself has no terminal window to raise, so the
+  // AppleScript below has nothing to target and the pad appeared dead. Its home
+  // is the Ambientic workspace — open it there and bring this app forward.
+  if (!s.tty && !s.term_pid) {
+    lastFocusedSessionId = id
+    midiController?.select(id)
+    showWorkspace(id)
+    return { ok: true, via: 'workspace' }
   }
 
   // AX window control requires Accessibility permission for THIS app (in dev:

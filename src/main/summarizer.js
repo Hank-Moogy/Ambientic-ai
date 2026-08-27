@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { stripPromptMachinery, threadTitle } from './thread-title.mjs'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const MODEL = process.env.AMBIENTIC_SUMMARY_MODEL || process.env.AGENTBASE_SUMMARY_MODEL || process.env.CLAUDE_CONTROLLER_SUMMARY_MODEL || 'amazon/nova-micro-v1'
@@ -28,8 +29,10 @@ function openRouterKey () {
 }
 
 function sourceText (value) {
-  return String(value || '')
-    .replace(/<[^>]+>/g, ' ')
+  // Drop injected context, system reminders and command wrappers whole. The
+  // old tag-only strip left their bodies behind, so the model was asked to
+  // name a task from Ambientic's own machinery.
+  return stripPromptMachinery(value)
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -52,7 +55,7 @@ function tidyLabel (value, fallback) {
 }
 
 function localLabel (text) {
-  const simplified = sourceText(text)
+  const simplified = threadTitle(text, { limit: 200 })
     .replace(/^(please\s+|can you\s+|could you\s+|would you\s+|i want (?:you )?to\s+|we need to\s+|let(?:'s| us)\s+)/i, '')
     .replace(/^\d+\s*[/.):~-]?\s*/, '')
   const words = simplified.match(/[\p{L}\p{N}][\p{L}\p{N}'’+_.-]*/gu) || []
@@ -100,6 +103,12 @@ export function createTaskSummarizer (store) {
   function enqueue (sessionId, rawText) {
     const text = sourceText(rawText)
     if (!sessionId || !text) return
+    // The user has named this thread. Nothing to compute, and nothing this
+    // would be allowed to apply.
+    if (store.taskLocked?.(sessionId)) return
+    // Already named by its opening prompt. Later prompts continue the same
+    // thread; they do not retitle it.
+    if (store.taskNamed?.(sessionId)) return
 
     const fingerprint = createHash('sha1').update(text).digest('hex')
     if (store.taskFingerprint(sessionId) === fingerprint) return

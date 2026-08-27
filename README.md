@@ -421,6 +421,7 @@ Last updated: 2026-08-21
 - [x] Background provider checks now run from `~/.ambientic/provider-runtime` rather than the user’s home directory, preventing provider-owned CLI startup inspection from being attributed to Ambientic as Music, Photos, Documents, Desktop, or Downloads access.
 - [x] Automatic Claude usage refresh is passive: it reads the privacy-preserving status-line cache or local activity only. Claude’s interactive `/usage` collector runs solely after an explicit **Refresh usage** action or completed account connection, and always from Ambientic’s private runtime directory.
 - [x] Removed the legacy terminal-specific discovery/focus adapter, hook metadata, cached identifiers, UI states, documentation, and generated hook bytecode.
+- [x] Thread naming is one provider-neutral rule (`src/main/thread-title.mjs`). Claude transcripts, Codex CLI `thread/read`, the Codex Desktop index, the Hermes session table, and the local summarizer all name a thread from the intent the user typed — injected context capsules, system reminders, slash-command wrappers, local-command caveats, hook output, and tool-result payloads are stripped, and a value with nothing human left in it falls back to a readable provider · project name instead of a raw identifier. Renaming a thread is authoritative for every provider: the summarizer skips a renamed thread entirely, provider indexes and transcript reads can no longer take the name back, and the name is restored over a provider title on rediscovery and relaunch.
 
 ### In progress
 

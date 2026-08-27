@@ -153,9 +153,10 @@ test('reconciles a partial Hermes ACP stream with the completed database transcr
   assert.equal(events.at(-1).messages[0].text, 'The complete saved Hermes response.')
   assert.equal(events.at(-1).messages[0].streaming, undefined)
   assert.equal(events.at(-1).running, false)
-  // A completed turn with no pending approval is idle/done, not red "needs you".
   assert.equal(events.at(-1).state, 'idle')
-  assert.equal(ingested.at(-1).event, 'stop_idle')
+  // A completed turn is your move: `stop` marks the pad unseen so it pulses
+  // until you have actually looked at the result.
+  assert.equal(ingested.at(-1).event, 'stop')
 })
 
 test('a Codex turn that ends by asking the user a question surfaces as needing you', async () => {
@@ -192,7 +193,7 @@ test('a Codex turn that ends by asking the user a question surfaces as needing y
   assert.equal(ingested.at(-1).event, 'notification')
 })
 
-test('a Codex turn that finishes ordinary work without a question stays idle', async () => {
+test('a Codex turn that finishes ordinary work hands the thread back to you', async () => {
   const session = { id: 'codex-done', agent: 'codex', cwd: '/tmp/project', state: 'running' }
   const ingested = []
   const service = new WorkspaceService({
@@ -223,7 +224,9 @@ test('a Codex turn that finishes ordinary work without a question stays idle', a
   await service.finish(session.id)
 
   assert.equal(events.at(-1).state, 'idle')
-  assert.equal(ingested.at(-1).event, 'stop_idle')
+  // Not "attention" — nothing is blocked — but still `stop`, so the pad pulses
+  // as unreviewed rather than going quietly grey.
+  assert.equal(ingested.at(-1).event, 'stop')
 })
 
 test('a completed turn blocked on a pending approval stays "attention"', async () => {
