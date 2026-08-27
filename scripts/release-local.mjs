@@ -1,6 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
+  existsSync,
   mkdirSync,
+  renameSync,
+  rmSync,
   readFileSync,
   readdirSync,
   rmdirSync,
@@ -131,6 +134,24 @@ function installedAppPids () {
   }
 }
 
+function parentPid (pid) {
+  try { return Number(output('ps', ['-o', 'ppid=', '-p', String(pid)])) || 0 } catch { return 0 }
+}
+
+// Ambientic is used to build Ambientic, so a release can be launched by an agent
+// running inside the very app the install is about to quit. Quitting it kills
+// the builder mid-copy, which is how a half-replaced bundle gets left behind.
+function launchedByInstalledApp () {
+  const appPids = new Set(installedAppPids())
+  if (!appPids.size) return false
+  let pid = process.pid
+  for (let hop = 0; hop < 40 && pid > 1; hop += 1) {
+    if (appPids.has(pid)) return true
+    pid = parentPid(pid)
+  }
+  return false
+}
+
 async function waitForInstalledAppExit (attempts = 30) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (!installedAppPids().length) return true
@@ -140,6 +161,13 @@ async function waitForInstalledAppExit (attempts = 30) {
 }
 
 async function stopInstalledApp () {
+  if (launchedByInstalledApp() && process.env.AMBIENTIC_ALLOW_SELF_RELEASE !== '1') {
+    throw new Error(
+      'This release was started from inside the running Ambientic app, and installing has to quit it — ' +
+      'which would kill this build partway through and leave a broken bundle. ' +
+      'Run it from a terminal instead, or set AMBIENTIC_ALLOW_SELF_RELEASE=1 if you have detached it.'
+    )
+  }
   try { execFileSync('osascript', ['-e', 'tell application "Ambientic" to quit']) } catch {}
   if (await waitForInstalledAppExit()) return
 
@@ -221,12 +249,31 @@ async function main () {
     const packagedInfo = JSON.parse(readFileSync(packagedManifest, 'utf8'))
     if (packagedInfo.commit !== commit) throw new Error('Packaged build metadata does not match the release commit.')
 
+    const staged = `${installedApp}.staged-${process.pid}`
+    const superseded = `${installedApp}.superseded-${process.pid}`
+    rmSync(staged, { recursive: true, force: true })
+    rmSync(superseded, { recursive: true, force: true })
+    run('ditto', [packagedApp, staged], { cwd: '/' })
+
     await stopInstalledApp()
-    run('ditto', [packagedApp, installedApp], { cwd: '/' })
+    try {
+      if (existsSync(installedApp)) renameSync(installedApp, superseded)
+      renameSync(staged, installedApp)
+    } catch (error) {
+      // Put the working app back rather than leaving nothing installed.
+      if (!existsSync(installedApp) && existsSync(superseded)) renameSync(superseded, installedApp)
+      throw error
+    }
+    rmSync(superseded, { recursive: true, force: true })
 
     const installedManifest = join(installedApp, 'Contents', 'Resources', 'build-info.json')
     const installedInfo = JSON.parse(readFileSync(installedManifest, 'utf8'))
     if (installedInfo.commit !== commit) throw new Error('Installed build metadata does not match the release commit.')
+
+    // The packaged app was verified before the copy; verify what actually landed
+    // in /Applications too. A bundle whose seal is broken still launches from a
+    // terminal but is not something to call healthy.
+    run('codesign', ['--verify', '--deep', '--strict', installedApp])
 
     run('open', [installedApp], { cwd: '/' })
     await waitForPort(47600)
