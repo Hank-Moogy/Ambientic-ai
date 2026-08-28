@@ -830,6 +830,7 @@ function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }
         <div className="pad-legend">
           <span data-tone="running"><i />Working</span>
           <span data-tone="approval"><i />Waiting for you</span>
+          <span data-tone="standby"><i />Stand by</span>
           <span data-tone="attention"><i />Needs you</span>
           <span data-tone="idle"><i />Idle</span>
         </div>
