@@ -42,6 +42,7 @@ function miniLedForSession (session) {
   if (!session) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.OFF }
   // Same meaning as the APC40 grid: orange is a question waiting for the person.
   if (session.awaitingApproval) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.ORANGE }
+  if (session.standby) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.ORANGE }
   if (session.state === 'running') return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.GREEN }
   if (session.state === 'attention' || (session.state === 'waiting' && session.unseen)) {
     return { channel: session.unseen ? APC_MINI_MK2.ANIMATION.BLINK_QUARTER : APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.RED }

@@ -86,6 +86,8 @@ contextBridge.exposeInMainWorld('controller', {
   midiResetMappings: () => ipcRenderer.invoke('midi-reset-mappings'),
   refreshUsage: () => ipcRenderer.invoke('refresh-usage'),
   focus: (id) => ipcRenderer.invoke('focus', id),
+  setThreadStandby: (id, enabled) => ipcRenderer.invoke('set-thread-standby', id, enabled),
+  showThreadMenu: (id) => ipcRenderer.invoke('show-thread-menu', id),
   selectSession: (id) => ipcRenderer.invoke('select-session', id),
   capturePreview: (id) => ipcRenderer.invoke('capture-preview', id),
   showDisplayMenu: () => ipcRenderer.invoke('show-display-menu'),

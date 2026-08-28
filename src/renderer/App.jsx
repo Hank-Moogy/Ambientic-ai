@@ -19,17 +19,7 @@ const STATE_HINT = {
   idle: 'ready'
 }
 
-const STANDBY_STORAGE_KEY = 'standby-terminals-v1'
 const PAD_LAYOUT_STORAGE_KEY = 'pad-layout-v1'
-
-function loadStandbyKeys () {
-  try {
-    const value = JSON.parse(window.localStorage.getItem(STANDBY_STORAGE_KEY) || '[]')
-    return new Set(Array.isArray(value) ? value : [])
-  } catch {
-    return new Set()
-  }
-}
 
 function terminalKey (s) {
   return s.tty || s.id
@@ -400,11 +390,12 @@ function Pad ({ s, now, standby, selected, companion, capturing, onFocus, onCapt
       <button
         className={`pad__standby${standby ? ' pad__standby--active' : ''}`}
         type="button"
+        disabled={!standby && s.state !== 'idle'}
         aria-label={`${standby ? 'Resume live status for' : 'Put on standby:'} ${labels.primary}`}
         aria-pressed={standby}
         title={standby ? 'Resume live status' : 'Set to standby'}
         onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => { event.stopPropagation(); onToggleStandby(terminalKey(s)) }}
+        onClick={(event) => { event.stopPropagation(); onToggleStandby(s.id, !standby) }}
       >
         <svg viewBox="0 0 12 12" aria-hidden="true">
           <rect x="2" y="1" width="3" height="10" rx="1" />
@@ -428,7 +419,6 @@ export default function App () {
   const [installMsg, setInstallMsg] = useState(null)
   const [focusMsg, setFocusMsg] = useState(null)
   const [needsAccess, setNeedsAccess] = useState(false)
-  const [standbyKeys, setStandbyKeys] = useState(loadStandbyKeys)
   const [focusedId, setFocusedId] = useState(null)
   const [capturingId, setCapturingId] = useState(null)
   const bodyRef = useRef(null)
@@ -465,10 +455,6 @@ export default function App () {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
-
-  useEffect(() => {
-    window.localStorage.setItem(STANDBY_STORAGE_KEY, JSON.stringify([...standbyKeys]))
-  }, [standbyKeys])
 
   // Keep the native window hugging its content until the user explicitly
   // resizes it. ResizeObserver also catches grid reflow as the width changes.
@@ -510,14 +496,7 @@ export default function App () {
     }
   }
 
-  const onToggleStandby = (key) => {
-    setStandbyKeys((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
+  const onToggleStandby = (id, enabled) => window.controller.setThreadStandby(id, enabled)
 
   const onCapture = async (id) => {
     if (capturingId) return
@@ -601,7 +580,7 @@ export default function App () {
                 key={terminalKey(s)}
                 s={s}
                 now={now}
-                standby={standbyKeys.has(terminalKey(s))}
+                standby={Boolean(s.standby)}
                 selected={focusedId === s.id}
                 companion={companions?.bySession?.[s.id]}
                 capturing={capturingId === s.id}

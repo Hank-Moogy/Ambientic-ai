@@ -33,6 +33,11 @@ test('renders 64 APC mini mk2 pads with Ambientic state colors', () => {
   assert.deepEqual(messages[63], [0x96, 7, APC_MINI_MK2.COLOR.OFF])
 })
 
+test('a thread on stand by holds a solid orange APC mini pad', () => {
+  const [message] = miniGridLedMessages([{ state: 'idle', standby: true }])
+  assert.deepEqual(message, [0x96, 56, APC_MINI_MK2.COLOR.ORANGE])
+})
+
 test('uses APC mini track buttons as column push-to-talk controls', () => {
   assert.deepEqual(miniRecordButtonForMessage([0x90, 0x64, 127]), { column: 0, pressed: true })
   assert.deepEqual(miniRecordButtonForMessage([0x80, 0x6B, 64]), { column: 7, pressed: false })

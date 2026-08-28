@@ -9,6 +9,7 @@ export const PAD_TONE = {
   EMPTY: 'empty',
   RUNNING: 'running',
   APPROVAL: 'approval',
+  STANDBY: 'standby',
   ATTENTION: 'attention',
   IDLE: 'idle'
 }
@@ -25,6 +26,7 @@ export function padLightForSession (session) {
   // An approval outranks the lifecycle state beneath it: the thread cannot move
   // until the person answers, so that is all the pad needs to say.
   if (session.awaitingApproval) return { tone: PAD_TONE.APPROVAL, motion: PAD_MOTION.STILL }
+  if (session.standby) return { tone: PAD_TONE.STANDBY, motion: PAD_MOTION.STILL }
   if (session.state === 'running') return { tone: PAD_TONE.RUNNING, motion: PAD_MOTION.STILL }
   if (session.state === 'attention' || session.state === 'waiting') {
     return { tone: PAD_TONE.ATTENTION, motion: session.unseen ? PAD_MOTION.BLINK : PAD_MOTION.STILL }

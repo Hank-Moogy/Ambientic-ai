@@ -51,6 +51,7 @@ export class SessionStore extends EventEmitter {
     this.map = new Map()
     this.taskCache = new Map()
     this.aliases = new Map()
+    this.standbyKeys = new Set()
     // Rebuilt on every app launch, then held stable for that launch. The first
     // eligible sessions are the most recently active ones; later sessions fill
     // vacated pads without moving anything already under the user's hand.
@@ -127,6 +128,43 @@ export class SessionStore extends EventEmitter {
     if (changed) this.emit('change', this.list())
   }
 
+  hydrateStandby (keys = []) {
+    this.standbyKeys = new Set((Array.isArray(keys) ? keys : []).filter((key) => typeof key === 'string' && key))
+    let changed = false
+    for (const session of this.map.values()) {
+      const standby = this.canStandby(session) && this.standbyKeys.has(this.taskKeyFor(session))
+      if (session.standby !== standby) { session.standby = standby; changed = true }
+    }
+    if (changed) this.emit('change', this.list())
+  }
+
+  canStandby (session) {
+    const idle = session?.state === STATE.IDLE || (session?.state === STATE.WAITING && !session?.unseen)
+    return Boolean(session && !session.discovered && !session.history && idle)
+  }
+
+  applyStandby (session) {
+    if (!session) return false
+    session.standby = this.canStandby(session) && this.standbyKeys.has(this.taskKeyFor(session))
+    return session.standby
+  }
+
+  persistStandby (session, enabled) {
+    const key = this.taskKeyFor(session)
+    if (!key) return
+    if (enabled) this.standbyKeys.add(key)
+    else this.standbyKeys.delete(key)
+    this.emit('standby-cache', [...this.standbyKeys])
+  }
+
+  clearStandby (session) {
+    const key = this.taskKeyFor(session)
+    if (!session || (!session.standby && (!key || !this.standbyKeys.has(key)))) return false
+    session.standby = false
+    this.persistStandby(session, false)
+    return true
+  }
+
   ingest (e) {
     if (!e || !e.event) return null
     const id = this.keyFor(e)
@@ -173,6 +211,7 @@ export class SessionStore extends EventEmitter {
       this.map.set(id, s)
       this.applyCachedTask(s)
       this.applyAlias(s)
+      this.applyStandby(s)
     }
 
     // Refresh focus/context fields whenever the hook re-reports them.
@@ -210,7 +249,10 @@ export class SessionStore extends EventEmitter {
       if (next === STATE.WAITING || next === STATE.ATTENTION) s.unseen = true
     }
     // Any forward progress clears the "needs me" flag.
-    if (next === STATE.RUNNING) s.unseen = false
+    if (next === STATE.RUNNING) {
+      s.unseen = false
+      this.clearStandby(s)
+    }
 
     this.emit('change', this.list())
     return s
@@ -340,6 +382,8 @@ export class SessionStore extends EventEmitter {
         this.map.set(incoming.id, created)
         this.applyCachedTask(created)
         this.applyAlias(created)
+        this.applyStandby(created)
+        if (created.state === STATE.RUNNING) this.clearStandby(created)
         changed = true
         continue
       }
@@ -364,6 +408,7 @@ export class SessionStore extends EventEmitter {
         existing.since = incoming.updatedAt || now
         existing.unseen = existing.state === STATE.WAITING || existing.state === STATE.ATTENTION
       }
+      if (existing.state === STATE.RUNNING) this.clearStandby(existing)
     }
 
     for (const [id, session] of this.map) {
@@ -438,6 +483,20 @@ export class SessionStore extends EventEmitter {
     return true
   }
 
+  // A user-held reminder, not a lifecycle state. It survives relaunches, then
+  // clears when the next turn starts or when the user removes it.
+  setStandby (id, enabled) {
+    const s = this.map.get(id)
+    if (!s) return false
+    const next = Boolean(enabled)
+    if (next && !this.canStandby(s)) return false
+    if (s.standby === next) return false
+    s.standby = next
+    this.persistStandby(s, next)
+    this.emit('change', this.list())
+    return true
+  }
+
   taskName (id) {
     return this.map.get(id)?.task || ''
   }
@@ -482,7 +541,7 @@ export class SessionStore extends EventEmitter {
       // Process discovery proves only that a provider is running. The first
       // lifecycle event replaces this placeholder with a real thread.
       if (session.discovered) return false
-      if (session.awaitingApproval || [STATE.RUNNING, STATE.WAITING, STATE.ATTENTION].includes(session.state)) return true
+      if (session.standby || session.awaitingApproval || [STATE.RUNNING, STATE.WAITING, STATE.ATTENTION].includes(session.state)) return true
       // An idle provider thread must have verified conversation activity.
       return (Number(session.activityAt) || 0) > 0
     })
@@ -492,7 +551,7 @@ export class SessionStore extends EventEmitter {
     const candidates = eligible
       .filter((session) => !retainedIds.has(session.id))
       .sort((left, right) => {
-        const urgency = (session) => session.awaitingApproval || [STATE.ATTENTION, STATE.WAITING].includes(session.state) ? 2 : session.state === STATE.RUNNING ? 1 : 0
+        const urgency = (session) => session.standby || session.awaitingApproval || [STATE.ATTENTION, STATE.WAITING].includes(session.state) ? 2 : session.state === STATE.RUNNING ? 1 : 0
         return urgency(right) - urgency(left) ||
           (Number(right.activityAt || right.updatedAt) || 0) - (Number(left.activityAt || left.updatedAt) || 0) ||
           left.seq - right.seq

@@ -73,6 +73,9 @@ export function ledForSession (session) {
   if (session.awaitingApproval) {
     return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.ORANGE }
   }
+  if (session.standby) {
+    return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.ORANGE }
+  }
 
   switch (session.state) {
     case 'running':

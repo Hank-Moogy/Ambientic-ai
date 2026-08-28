@@ -17,7 +17,7 @@ import { createCompanionService } from './companions.js'
 import { loadPrefs, savePrefs } from './prefs.js'
 import { loadTaskCache, saveTaskCache } from './task-cache.js'
 import { createMidiController } from './midi-controller.js'
-import { connectorState, openAgentSetup, openAgentTerminal } from './connectors.js'
+import { connectorState, openAgentSetup, openAgentTerminal, pendingConnectorState } from './connectors.js'
 import { createVoiceInput } from './voice-input.mjs'
 import { WorkspaceService } from './workspace-service.mjs'
 import { HandoverService } from './handover-service.mjs'
@@ -510,8 +510,19 @@ function pushConnectors () {
   sendToWindows('connectors', connectors)
 }
 
+// Probing the providers spawns a login shell and several CLIs. Startup, the
+// Overview mount, and any manual refresh used to each start their own sweep and
+// then contend for the same processes, so a single in-flight run is shared.
+let connectorRefresh = null
+
 async function refreshConnectors () {
-  connectors = await connectorState()
+  if (connectorRefresh) return connectorRefresh
+  connectorRefresh = connectorState()
+  try {
+    connectors = await connectorRefresh
+  } finally {
+    connectorRefresh = null
+  }
   pushConnectors()
   return connectors
 }
@@ -825,7 +836,13 @@ ipcMain.handle('set-ambient-mode-check-in', (_event, minutes) => {
   return state
 })
 ipcMain.handle('refresh-usage', () => usage.refresh(true))
-ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
+// Never block the first paint on the provider sweep: hand back the checking
+// state right away and let the `connectors` push replace it when it lands.
+ipcMain.handle('get-connectors', () => {
+  if (connectors.length) return connectors
+  void refreshConnectors()
+  return pendingConnectorState()
+})
 ipcMain.handle('refresh-connectors', () => refreshConnectors())
 ipcMain.handle('get-provider-auth', () => Object.fromEntries(providerAuthState))
 ipcMain.handle('dismiss-provider-auth', (_event, provider) => providerAuthState.delete(String(provider || '')))
@@ -1333,6 +1350,19 @@ async function invokeHardwareAssignment (invocation) {
 }
 
 ipcMain.handle('focus', (_e, id) => queueFocus(id))
+ipcMain.handle('set-thread-standby', (_e, id, enabled) => store.setStandby(id, enabled))
+ipcMain.handle('show-thread-menu', (_e, id) => {
+  const session = store.list().find((candidate) => candidate.id === id)
+  if (!session) return false
+  const enabled = Boolean(session.standby)
+  const canEnable = !session.discovered && !session.history && session.state === STATE.IDLE
+  Menu.buildFromTemplate([{
+    label: enabled ? 'Remove stand by' : 'Put on stand by',
+    enabled: enabled || canEnable,
+    click: () => store.setStandby(id, !enabled)
+  }]).popup({ window: workspaceWin || win })
+  return true
+})
 ipcMain.handle('select-session', (_event, id) => {
   const session = store.list().find((candidate) => candidate.id === id)
   if (!session) {
@@ -1432,6 +1462,7 @@ store.on('change', () => pushState())
 store.on('change', () => pushCompanions())
 store.on('change', () => midiController?.render())
 store.on('task-cache', (records) => saveTaskCache(records))
+store.on('standby-cache', (keys) => savePrefs({ ...loadPrefs(), threadStandbyKeys: keys }))
 usage.on('change', (state) => {
   pushUsage()
   consumptionLedger?.observe(state)
@@ -1462,6 +1493,7 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => ambientMode?.reassert())
   store.hydrateTasks(loadTaskCache())
   store.hydrateAliases(prefs.threadAliases)
+  store.hydrateStandby(prefs.threadStandbyKeys)
   if (app.dock) {
     const logoPath = app.isPackaged
       ? join(process.resourcesPath, 'ambientic-logo.png')

@@ -29,6 +29,7 @@ Product-specific vertical applications belong in separate products and repositor
 - Provider-aware new-task creation with project context, model selection, reasoning or effort controls, and safe folder boundaries.
 - Cross-provider handovers, local preview discovery, and companion display presentation.
 - Provider login state, quota signals, local consumption history, and diagnostics.
+- Independently streamed Overview state with animated skeleton pads, so the pad grid, provider pads, and usage each appear as soon as their own reader returns rather than waiting on the slowest provider probe.
 
 ### Goals and context
 
@@ -99,6 +100,8 @@ npm run build
 
 The live pad roster only includes threads with verified current-session activity. Provider process discovery and cached thread names enrich the Threads view but cannot put an empty placeholder on a hardware pad.
 
+Idle live threads can be placed on **Stand by** from the thread header or the Overview pad context menu. Stand by persists locally, holds the on-screen and physical pad solid orange as a check-later reminder, and clears automatically when the next turn begins or when the user removes it.
+
 The canonical installed-app milestone gate is `npm run release:local`. It rebuilds native SQLite for Electron, runs the release tests, packages and signs the app, replaces `/Applications/Ambientic.app`, relaunches it, and checks the installed build identity and health endpoint.
 
 ## Current status
@@ -113,6 +116,7 @@ Implemented:
 - Hosted inference settings and local fallback for Ambientic utility tasks.
 - Native APC40 MKII/APC mini behavior plus generic input-first hardware mapping and portable templates.
 - Simplified product boundary across runtime, navigation, preload/IPC contracts, capability scopes, hardware actions, styles, and tests.
+- Overview load path: per-source state hydration in place of a single blocking `Promise.all`, an immediate non-blocking `get-connectors` reply backed by a deduplicated background probe, parallel auth and version reads per provider, and staggered skeleton pads while each slice is in flight.
 
 Next:
 
@@ -126,7 +130,7 @@ Next:
 Verification on 2026-08-28:
 
 - Retirement reference scans and `git diff --check`: clean.
-- `npm run test:local-release`: 267 tests, 265 passed, 2 intentional transport skips, 0 failures.
+- `npm test`: 275 tests, 273 passed, 2 intentional transport skips, 0 failures.
 - `npm run build`: production main, preload, and renderer bundles built successfully.
 - Signed installation, relaunch, build-identity, health, and physical APC smoke remain the release step after commit.
 

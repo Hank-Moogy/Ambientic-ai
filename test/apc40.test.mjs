@@ -87,3 +87,10 @@ test('a thread waiting on the user lights orange, whatever it was doing undernea
   // Unseen attention still blinks red once the approval is answered.
   assert.equal(ledForSession({ state: 'attention', unseen: true }).color, APC40.COLOR.RED)
 })
+
+test('a thread on stand by holds a solid orange APC40 pad', () => {
+  assert.deepEqual(ledForSession({ state: 'idle', standby: true }), {
+    channel: APC40.ANIMATION.SOLID,
+    color: APC40.COLOR.ORANGE
+  })
+})

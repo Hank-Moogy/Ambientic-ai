@@ -146,6 +146,52 @@ test('a managed provider thread earns a pad only after real conversation activit
   clearInterval(store._reaper)
 })
 
+test('stand by persists an idle reminder on a pad and the next turn consumes it', () => {
+  const store = new SessionStore()
+  const persisted = []
+  store.on('standby-cache', (keys) => persisted.push(keys))
+  store.ingest({ event: 'session_start', session_id: 'check-later', agent: 'hermes', cwd: '/Users/test/AgentBase' })
+
+  assert.equal(store.setStandby('check-later', true), true)
+  assert.equal(store.list()[0].standby, true)
+  assert.equal(store.list()[0].state, 'idle')
+  assert.deepEqual(store.hardwareList().map((session) => session.id), ['check-later'])
+  assert.deepEqual(persisted.at(-1), ['session:check-later'])
+
+  store.ingest({ event: 'prompt', session_id: 'check-later', agent: 'hermes', cwd: '/Users/test/AgentBase' })
+  assert.equal(store.list()[0].standby, false)
+  assert.equal(store.list()[0].state, 'running')
+  assert.deepEqual(persisted.at(-1), [])
+  clearInterval(store._reaper)
+})
+
+test('stand by restores after relaunch but cannot mark a running or discovered placeholder', () => {
+  const store = new SessionStore()
+  store.hydrateStandby(['session:restored'])
+  store.ingest({ event: 'session_start', session_id: 'restored', agent: 'codex', cwd: '/Users/test/project' })
+  assert.equal(store.list()[0].standby, true)
+
+  store.ingest({ event: 'prompt', session_id: 'running', agent: 'codex', cwd: '/Users/test/project' })
+  assert.equal(store.setStandby('running', true), false)
+  store.syncDiscovered([{ id: 'discovered:tty2', agent: 'hermes', tty: 'tty2', cwd: '/Users/test/project' }])
+  assert.equal(store.setStandby('discovered:tty2', true), false)
+  clearInterval(store._reaper)
+
+  const runningStore = new SessionStore()
+  runningStore.hydrateStandby(['session:already-running'])
+  const runningPersisted = []
+  runningStore.on('standby-cache', (keys) => runningPersisted.push(keys))
+  runningStore.syncExternal('codex-desktop', [{
+    id: 'already-running',
+    agent: 'codex',
+    cwd: '/Users/test/project',
+    state: 'running'
+  }])
+  assert.equal(runningStore.list()[0].standby, false)
+  assert.deepEqual(runningPersisted.at(-1), [])
+  clearInterval(runningStore._reaper)
+})
+
 test('Codex Desktop discovery enriches a managed thread instead of duplicating its pad', () => {
   const store = new SessionStore()
   store.ingest({ event: 'session_start', session_id: 'thread-123', agent: 'codex', cwd: '/Users/test/project' })

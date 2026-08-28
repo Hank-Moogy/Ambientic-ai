@@ -28,6 +28,8 @@ test('a pad on screen says exactly what the pad on the desk says', () => {
   // An approval outranks whatever the thread was doing underneath it.
   assert.equal(padLightForSession({ state: 'running', awaitingApproval: true }).tone, PAD_TONE.APPROVAL)
   assert.equal(padLightForSession({ state: 'running', awaitingApproval: true }).motion, PAD_MOTION.STILL)
+  assert.equal(padLightForSession({ state: 'idle', standby: true }).tone, PAD_TONE.STANDBY)
+  assert.equal(padLightForSession({ state: 'idle', standby: true }).motion, PAD_MOTION.STILL)
   assert.equal(padLightForSession({ state: 'idle' }).tone, PAD_TONE.IDLE)
   assert.equal(padLightForSession({ state: 'attention', unseen: true }).motion, PAD_MOTION.BLINK)
   assert.equal(padLightForSession({ state: 'attention' }).motion, PAD_MOTION.STILL)

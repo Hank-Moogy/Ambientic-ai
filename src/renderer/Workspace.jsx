@@ -652,7 +652,7 @@ function SpendActivity ({ ledger }) {
   )
 }
 
-function OverviewUsageBalance ({ sessions, connectors, usage, onRefresh }) {
+function OverviewUsageBalance ({ sessions, connectors, usage, loading, onRefresh }) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 15000)
@@ -685,8 +685,16 @@ function OverviewUsageBalance ({ sessions, connectors, usage, onRefresh }) {
   return (
     <section className="overview-usage">
       <header><div><span>Provider balance</span><b>Capacity at a glance</b></div><button type="button" aria-label="Refresh provider usage" title="Refresh provider usage" data-refreshing={Boolean(usage?.refreshing)} disabled={Boolean(usage?.refreshing)} onClick={onRefresh}>↻</button></header>
-      <div className="overview-usage__rows">
-        {providerRows.map(({ providerId, name, short, week, hasGauges, detail }) => (
+      <div className="overview-usage__rows" aria-busy={Boolean(loading)}>
+        {loading && ['codex', 'claude', 'hermes'].map((providerId, index) => (
+          <div className="overview-usage__row" key={`skeleton-${providerId}`} data-provider={providerId}>
+            <div className="overview-usage__head">
+              <span className="overview-usage__icon"><AgentIcon agent={providerId} /></span>
+              <div><b>{providerId === 'codex' ? 'Codex' : providerId === 'claude' ? 'Claude Code' : 'Hermes'}</b><Skeleton className="skeleton--usage" delay={index * 0.12} /></div>
+            </div>
+          </div>
+        ))}
+        {!loading && providerRows.map(({ providerId, name, short, week, hasGauges, detail }) => (
           <div className="overview-usage__row" key={providerId} data-provider={providerId}>
             <div className="overview-usage__head">
               <span className="overview-usage__icon"><AgentIcon agent={providerId} /></span>
@@ -704,6 +712,14 @@ function OverviewUsageBalance ({ sessions, connectors, usage, onRefresh }) {
       <footer>5-hour and weekly limits · detailed spend in Settings</footer>
     </section>
   )
+}
+
+// A skeleton is a placeholder for a value that is on its way, not a spinner:
+// it holds the exact space the real content will take so nothing jumps when it
+// lands, and it sweeps rather than pulses so the wait reads as movement toward
+// something. `--skeleton-delay` staggers a field of them into one wave.
+function Skeleton ({ className = '', delay = 0, style }) {
+  return <span className={`skeleton${className ? ` ${className}` : ''}`} aria-hidden="true" style={{ '--skeleton-delay': `${delay}s`, ...style }} />
 }
 
 function OverviewProviderMark ({ provider }) {
@@ -731,10 +747,15 @@ function ProviderPad ({ connector, sessions, usage, index, onOpenProvider }) {
       <span className="provider-pad__glow" />
       <header>
         <span className="provider-pad__icon"><OverviewProviderMark provider={connector.id} /></span>
-        <div className="provider-pad__name"><b>{connector.label}</b><small>{status}</small></div>
-        <i data-state={active ? 'running' : needsInput ? 'attention' : unavailable ? 'history' : 'idle'} />
+        <div className="provider-pad__name">
+          <b>{connector.label}</b>
+          {connector.checking ? <Skeleton className="skeleton--pad-status" delay={index * 0.12} /> : <small>{status}</small>}
+        </div>
+        <i data-state={connector.checking ? 'checking' : active ? 'running' : needsInput ? 'attention' : unavailable ? 'history' : 'idle'} />
       </header>
-      <footer><span>{providerSessions.length} task{providerSessions.length === 1 ? '' : 's'}</span><span>{compactUsage(usage, connector.id)}</span></footer>
+      {connector.checking
+        ? <footer><Skeleton className="skeleton--pad-foot" delay={index * 0.12} /><Skeleton className="skeleton--pad-foot" delay={index * 0.12 + 0.06} /></footer>
+        : <footer><span>{providerSessions.length} task{providerSessions.length === 1 ? '' : 's'}</span><span>{compactUsage(usage, connector.id)}</span></footer>}
     </button>
   )
 }
@@ -745,12 +766,13 @@ const APC40_PAD_COUNT = 40
 const PAD_TONE_LABEL = {
   running: 'Working',
   approval: 'Waiting for you',
+  standby: 'Standing by',
   attention: 'Needs you',
   idle: 'Idle',
   empty: 'Empty pad'
 }
 
-function ThreadPad ({ session, index, onOpen }) {
+function ThreadPad ({ session, index, onOpen, onStandbyMenu }) {
   const { tone, motion } = padLightForSession(session)
   const label = session ? sessionTitle(session) : ''
   return (
@@ -764,6 +786,11 @@ function ThreadPad ({ session, index, onOpen }) {
       title={session ? `${label} · ${PAD_TONE_LABEL[tone]}` : ''}
       style={{ '--pad-index': index }}
       onClick={() => session && onOpen(session.id)}
+      onContextMenu={(event) => {
+        if (!session) return
+        event.preventDefault()
+        onStandbyMenu(session.id)
+      }}
     >
       {/* The light sits under the face so the glow reads as coming through the
           pad rather than being painted on top of the label. */}
@@ -772,7 +799,7 @@ function ThreadPad ({ session, index, onOpen }) {
       {session && (
         <span className="thread-pad__label">
           <b>{label}</b>
-          <small>{session.project || PAD_TONE_LABEL[tone]}</small>
+          <small>{tone === 'standby' ? PAD_TONE_LABEL[tone] : session.project || PAD_TONE_LABEL[tone]}</small>
         </span>
       )}
       {session && <span className="thread-pad__agent" aria-hidden="true"><AgentIcon agent={session.agent} /></span>}
@@ -780,7 +807,19 @@ function ThreadPad ({ session, index, onOpen }) {
   )
 }
 
-function ThreadPadGrid ({ sessions, midi, onOpenThread }) {
+// The unlit grid and a grid that has not been read yet look identical, so while
+// the thread list is in flight the pads sweep instead of sitting dark.
+function ThreadPadSkeleton ({ index }) {
+  return (
+    <div className="thread-pad thread-pad--skeleton" data-tone="empty" style={{ '--pad-index': index }} aria-hidden="true">
+      <span className="thread-pad__glow" />
+      <span className="thread-pad__face" />
+      <Skeleton className="skeleton--pad" delay={((index % 8) + Math.floor(index / 8)) * 0.055} />
+    </div>
+  )
+}
+
+function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }) {
   const padCount = Number.isFinite(midi?.padCount) && midi.padCount > 0 ? midi.padCount : APC40_PAD_COUNT
   const pads = padGridSessions(sessions, padCount)
   const occupied = pads.filter(Boolean).length
@@ -795,18 +834,20 @@ function ThreadPadGrid ({ sessions, midi, onOpenThread }) {
           <span data-tone="idle"><i />Idle</span>
         </div>
       </header>
-      <div className="pad-grid" data-pads={padCount} role="group" aria-label="Agent pads">
-        {pads.map((session, index) => <ThreadPad key={session?.id || `empty-${index}`} session={session} index={index} onOpen={onOpenThread} />)}
+      <div className="pad-grid" data-pads={padCount} data-loading={Boolean(loading)} role="group" aria-label="Agent pads" aria-busy={Boolean(loading)}>
+        {loading
+          ? Array.from({ length: padCount }, (_, index) => <ThreadPadSkeleton key={`skeleton-${index}`} index={index} />)
+          : pads.map((session, index) => <ThreadPad key={session?.id || `empty-${index}`} session={session} index={index} onOpen={onOpenThread} onStandbyMenu={onStandbyMenu} />)}
       </div>
       <footer className="pad-summary">
-        <span>{occupied} of {padCount} pads in use</span>
+        <span>{loading ? `Reading your threads…` : `${occupied} of ${padCount} pads in use`}</span>
         <span>Latest active threads are chosen at launch; assigned pads stay put</span>
       </footer>
     </section>
   )
 }
 
-function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, onOpenThreads, onOpenProvider, onOpenThread, onVibe, onRefreshUsage, onToggleAmbientMode }) {
+function Dashboard ({ sessions, connectors, usage, midi, ambientMode, sessionsLoaded, usageLoaded, onCreate, onOpenThreads, onOpenProvider, onOpenThread, onStandbyMenu, onVibe, onRefreshUsage, onToggleAmbientMode }) {
   const live = sessions.filter((session) => !session.history)
   const active = live.filter((session) => session.state === 'running').length
   const needsInput = live.filter((session) => ['waiting', 'attention'].includes(session.state)).length
@@ -817,8 +858,8 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, 
       <header className="dashboard-topbar"><span>Agent operating system</span><div><button type="button" onClick={onOpenThreads}>All threads</button><button className="dashboard-topbar__ambient" type="button" data-active={Boolean(ambientMode.enabled)} aria-pressed={Boolean(ambientMode.enabled)} title={ambientMode.enabled ? 'Ambient mode is keeping this Mac awake while the display may sleep.' : 'Keep this Mac awake so agents can continue working.'} onClick={() => onToggleAmbientMode(!ambientMode.enabled)}><i />Ambient mode · {ambientMode.enabled ? 'On' : 'Off'}</button><button className="dashboard-topbar__vibe" type="button" disabled={!midi.connected} data-active={Boolean(midi.vibeActive)} title="Play the next APC composition · ⌘⇧V" onClick={onVibe}><i />Vibe</button></div></header>
       <div className="dashboard-scroll">
         <section className="dashboard-hero">
-          <div className="dashboard-hero__copy"><span className="eyebrow"><i /> Local intelligence, online</span><h1>Your agents,<br /><em>in one field.</em></h1><p>See who is working, who needs you, and where to send the next idea—without starting from a chat list.</p><div className="dashboard-statline"><span><b>{active}</b> active</span><span><b>{needsInput}</b> need input</span><span><b>{sessions.length}</b> threads</span><span><b>{midi.connected ? 'On' : 'Off'}</b> {midi.shortModel || 'APC'}</span></div></div>
-          <OverviewUsageBalance sessions={sessions} connectors={connectors} usage={usage} onRefresh={onRefreshUsage} />
+          <div className="dashboard-hero__copy"><span className="eyebrow"><i /> Local intelligence, online</span><h1>Your agents,<br /><em>in one field.</em></h1><p>See who is working, who needs you, and where to send the next idea—without starting from a chat list.</p><div className="dashboard-statline" data-loading={!sessionsLoaded}>{sessionsLoaded ? <><span><b>{active}</b> active</span><span><b>{needsInput}</b> need input</span><span><b>{sessions.length}</b> threads</span></> : <>{['active', 'need input', 'threads'].map((label, index) => <span key={label}><Skeleton className="skeleton--stat" delay={index * 0.09} /> {label}</span>)}</>}<span><b>{midi.connected ? 'On' : 'Off'}</b> {midi.shortModel || 'APC'}</span></div></div>
+          <OverviewUsageBalance sessions={sessions} connectors={connectors} usage={usage} loading={!usageLoaded} onRefresh={onRefreshUsage} />
         </section>
 
         <section className="provider-field" aria-label="Agent providers">
@@ -826,7 +867,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, onCreate, 
           <button className="provider-pad provider-pad--new" type="button" onClick={() => onCreate('')}><span className="provider-pad--new__plus">＋</span><b>Create an agent task</b><small>Choose a provider and start</small></button>
         </section>
 
-        <ThreadPadGrid sessions={sessions} midi={midi} onOpenThread={onOpenThread} />
+        <ThreadPadGrid sessions={sessions} midi={midi} loading={!sessionsLoaded} onOpenThread={onOpenThread} onStandbyMenu={onStandbyMenu} />
       </div>
     </section>
   )
@@ -1264,6 +1305,9 @@ export default function Workspace () {
   const [voice, setVoice] = useState({ recording: false, transcribing: false, error: '', transcript: '', sessionId: '', sessionLabel: '' })
   const [ambientMode, setAmbientMode] = useState({ enabled: false, checkInDue: false, checkInMinutes: 240, availableCheckIns: [30, 60, 120, 240, 480, 720] })
   const [usage, setUsage] = useState(null)
+  // Overview skeletons need to tell "nothing yet" apart from "genuinely empty".
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const [usageLoaded, setUsageLoaded] = useState(false)
   const [ledger, setLedger] = useState(null)
   const [companions, setCompanions] = useState({ bySession: {} })
   const [onboarding, setOnboarding] = useState(null)
@@ -1335,14 +1379,32 @@ export default function Workspace () {
   }, [sidebarCollapsed])
 
   useEffect(() => {
-    window.controller.getOnboarding().then(setOnboarding)
-    window.controller.getMemoryBootstrap().then(setMemoryBootstrap)
-    Promise.all([window.controller.getWorkspaceThreads(), window.controller.getConnectors(), window.controller.getProviderAuth(), window.controller.getHandovers(), window.controller.getMidi(), window.controller.getVoice(), window.controller.getAmbientMode(), window.controller.getUsage(), window.controller.getConsumptionLedger(), window.controller.getCompanions(), window.controller.getBuildInfo(), window.controller.getGoals(), window.controller.getHardwareProfiles()]).then(([state, agents, authState, handoverState, hardware, voiceState, ambientState, usageState, ledgerState, companionState, packagedBuild, goalState, hardwareState]) => {
-      setSessions(state); setConnectors(agents); setProviderAuth(authState); setHandovers(handoverState); setMidi(hardware); setVoice(voiceState); setAmbientMode(ambientState); setUsage(usageState); setLedger(ledgerState); setCompanions(companionState); setBuildInfo(packagedBuild); setGoalsSnapshot(goalState); setHardwareSnapshot(hardwareState)
-      if (state[0]) setSelectedId(state[0].id)
+    // Each slice of the workspace paints the moment its own call returns. These
+    // used to share one Promise.all, which meant the pad grid waited on the
+    // slowest reader — provider probing spawns CLIs and can take seconds, so
+    // the whole Overview appeared empty until it finished.
+    const settle = (promise, apply) => { promise.then(apply, () => {}) }
+    settle(window.controller.getOnboarding(), setOnboarding)
+    settle(window.controller.getMemoryBootstrap(), setMemoryBootstrap)
+    settle(window.controller.getWorkspaceThreads(), (state) => {
+      setSessions(state)
+      setSessionsLoaded(true)
+      if (state[0]) setSelectedId((current) => current || state[0].id)
     })
+    settle(window.controller.getConnectors(), setConnectors)
+    settle(window.controller.getProviderAuth(), setProviderAuth)
+    settle(window.controller.getHandovers(), setHandovers)
+    settle(window.controller.getMidi(), setMidi)
+    settle(window.controller.getVoice(), setVoice)
+    settle(window.controller.getAmbientMode(), setAmbientMode)
+    settle(window.controller.getUsage(), (usageState) => { setUsage(usageState); setUsageLoaded(true) })
+    settle(window.controller.getConsumptionLedger(), setLedger)
+    settle(window.controller.getCompanions(), setCompanions)
+    settle(window.controller.getBuildInfo(), setBuildInfo)
+    settle(window.controller.getGoals(), setGoalsSnapshot)
+    settle(window.controller.getHardwareProfiles(), setHardwareSnapshot)
     const disposers = [
-      window.controller.onWorkspaceThreads(setSessions),
+      window.controller.onWorkspaceThreads((state) => { setSessions(state); setSessionsLoaded(true) }),
       window.controller.onGoals(setGoalsSnapshot),
       window.controller.onHardwareProfiles(setHardwareSnapshot),
       window.controller.onHardwareNavigate((payload) => {
@@ -1358,7 +1420,7 @@ export default function Workspace () {
       window.controller.onMidi(setMidi),
       window.controller.onVoice(setVoice),
       window.controller.onAmbientMode(setAmbientMode),
-      window.controller.onUsage(setUsage),
+      window.controller.onUsage((usageState) => { setUsage(usageState); setUsageLoaded(true) }),
       window.controller.onConsumptionLedger(setLedger),
       window.controller.onCompanions(setCompanions),
       window.controller.onThread((value) => value.id === selectedIdRef.current && setThread(value)),
@@ -1439,6 +1501,7 @@ export default function Workspace () {
     setTuningByProvider((current) => ({ ...current, [provider]: { ...(current[provider] || { model: '', effort: '' }), ...patch } }))
   }
   const selectedPreview = companions?.bySession?.[selectedId]
+  const selectedSession = sessions.find((item) => item.id === selectedId)
   const saveOnboarding = async (patch) => {
     const next = await window.controller.saveOnboarding(patch)
     setOnboarding(next)
@@ -1592,9 +1655,9 @@ export default function Workspace () {
       {providerAuth.codex && <div className="provider-auth-toast" data-status={providerAuth.codex.status}><span>{providerAuth.codex.status === 'connected' ? '✓' : providerAuth.codex.status === 'waiting' ? '…' : '!'}</span><div><b>{providerAuth.codex.status === 'connected' ? 'Codex connected' : providerAuth.codex.status === 'waiting' ? 'Waiting for ChatGPT' : 'Codex connection needs attention'}</b><small>{providerAuth.codex.status === 'connected' ? (providerAuth.codex.email || 'Your ChatGPT account is ready in Ambientic.') : providerAuth.codex.status === 'waiting' ? 'Complete sign-in in your browser. Ambientic is listening for confirmation.' : (providerAuth.codex.error || 'Open Settings → AI Providers for details.')}</small></div><button type="button" aria-label="Dismiss authentication message" onClick={() => dismissProviderAuth('codex')}>×</button></div>}
       {claudeAuthMode === 'success' && <div className="provider-auth-toast" data-status="connected" data-provider="claude"><span>✓</span><div><b>Claude Code connected</b><small>{providerAuth.claude.email || 'Your Claude account is ready. Plan limits are syncing in Overview.'}</small></div><button type="button" aria-label="Dismiss Claude connection message" onClick={() => dismissProviderAuth('claude')}>×</button></div>}
       {claudeAuthMode === 'wizard' && <ClaudeAuthWizard auth={providerAuth.claude} onInput={(input) => window.controller.claudeAuthInput(input)} onCancel={() => window.controller.claudeAuthCancel()} onRetry={() => window.controller.connectProvider('claude')} onClose={() => dismissProviderAuth('claude')} />}
-      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'goals' ? <GoalsWorkspace snapshot={goalsSnapshot} selectedGoalId={selectedGoalId} onSelectGoal={setSelectedGoalId} onCreateGoal={createGoal} onUpdateGoal={updateGoal} onCreateTask={createGoalTask} onUpdateTask={updateGoalTask} /> : view === 'hardware' ? <HardwareWorkspace snapshot={hardwareSnapshot} midi={midi} sessions={sessions} goalsSnapshot={goalsSnapshot} connectors={connectors} onOpenThread={openThread} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
+      {view === 'overview' ? <Dashboard sessions={sessions} connectors={connectors} usage={usage} midi={midi} ambientMode={ambientMode} sessionsLoaded={sessionsLoaded} usageLoaded={usageLoaded} onCreate={openCreate} onOpenThreads={openAllThreads} onOpenProvider={openProviderThreads} onOpenThread={openThread} onStandbyMenu={(id) => window.controller.showThreadMenu(id)} onVibe={() => window.controller.midiVibe()} onRefreshUsage={() => window.controller.refreshUsage()} onToggleAmbientMode={(enabled) => window.controller.setAmbientMode(enabled)} /> : view === 'goals' ? <GoalsWorkspace snapshot={goalsSnapshot} selectedGoalId={selectedGoalId} onSelectGoal={setSelectedGoalId} onCreateGoal={createGoal} onUpdateGoal={updateGoal} onCreateTask={createGoalTask} onUpdateTask={updateGoalTask} /> : view === 'hardware' ? <HardwareWorkspace snapshot={hardwareSnapshot} midi={midi} sessions={sessions} goalsSnapshot={goalsSnapshot} connectors={connectors} onOpenThread={openThread} /> : view === 'settings' ? <ProviderSettings connectors={connectors} providerAuth={providerAuth} sessions={sessions} usage={usage} ledger={ledger} midi={midi} ambientMode={ambientMode} buildInfo={buildInfo} initialSection={settingsSection} onRefresh={() => window.controller.refreshConnectors()} onRefreshUsage={() => window.controller.refreshUsage()} onConnect={(id) => window.controller.connectProvider(id)} onInstallHooks={() => window.controller.installHooks()} onMidiProfile={(profileId) => window.controller.midiSetProfile(profileId)} onAmbientToggle={(enabled) => window.controller.setAmbientMode(enabled)} onAmbientCheckIn={(minutes) => window.controller.setAmbientModeCheckIn(minutes)} onReplayOnboarding={() => window.controller.resetOnboarding().then((state) => { setOnboarding(state); setView('overview') })} /> : <><section className="workspace-main">
         {!selectedId ? <EmptyThread onCreate={() => setNewTask(true)} /> : <>
-          <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || sessions.find((item) => item.id === selectedId)?.agent} /></div><div><h1>{thread?.title || sessionTitle(sessions.find((item) => item.id === selectedId) || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} onUnavailable={chooseHandoffProject} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
+          <header className="thread-header"><div className="thread-header__provider"><AgentIcon agent={thread?.provider || selectedSession?.agent} /></div><div><h1>{thread?.title || sessionTitle(selectedSession || {})}</h1><p><span data-state={thread?.state} />{thread?.providerLabel || thread?.provider} · {thread?.cwd || 'Local session'}</p></div><div className="thread-header__actions">{selectedPreview?.activeCount > 0 && <button type="button" onClick={() => window.controller.presentPreview(selectedId)}>Preview {selectedPreview.activeCount}</button>}<button className="thread-standby" type="button" data-active={Boolean(selectedSession?.standby)} aria-pressed={Boolean(selectedSession?.standby)} disabled={!selectedSession || (!selectedSession.standby && selectedSession.state !== 'idle')} title={selectedSession?.standby ? 'Remove this reminder' : 'Keep this idle thread orange until its next turn'} onClick={() => window.controller.setThreadStandby(selectedId, !selectedSession?.standby)}>◐ {selectedSession?.standby ? 'Standing by' : 'Stand by'}</button><CopyThreadButton thread={thread} /><RenameThreadButton thread={thread} onRenamed={(title) => setThread((current) => ({ ...current, title }))} /><HandoverControl thread={thread} connectors={connectors} onHandover={handoff} onUnavailable={chooseHandoffProject} />{thread?.nativeAvailable && <button type="button" onClick={() => window.controller.focus(selectedId)}>Open native</button>}<button type="button" title="Reload conversation" onClick={() => window.controller.getThread(selectedId).then(setThread)}>↻</button></div></header>
           <div className="thread-body" ref={transcriptRef} onScroll={updateTranscriptPosition}>
             {handoffError && <div className="handover-error" role="alert"><span>!</span><div><b>Handoff needs attention</b><small>{handoffError}</small></div><button type="button" aria-label="Dismiss handoff error" onClick={() => setHandoffError('')}>×</button></div>}
             <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} onUnavailable={chooseHandoffProject} />
