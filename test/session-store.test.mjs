@@ -111,6 +111,41 @@ test('an empty discovered process does not consume a hardware pad', () => {
   clearInterval(store._reaper)
 })
 
+test('a cached name cannot make an empty discovered process consume a hardware pad', () => {
+  const store = new SessionStore()
+  store.hydrateTasks({
+    'tty:tty1': {
+      label: 'AgentBase', source: 'model', agent: 'hermes', cwd: '/Users/test/AgentBase', updatedAt: Date.now()
+    }
+  })
+
+  store.syncDiscovered([{ id: 'discovered:tty1', agent: 'hermes', cwd: '/Users/test/AgentBase', project: 'AgentBase', tty: 'tty1' }])
+
+  const session = store.list()[0]
+  assert.equal(session.task, 'AgentBase')
+  assert.equal(session.activityAt, 0)
+  assert.equal(session.discovered, true)
+  assert.equal(session.padIndex, null)
+  assert.deepEqual(store.hardwareList(), [])
+  clearInterval(store._reaper)
+})
+
+test('a managed provider thread earns a pad only after real conversation activity', () => {
+  const store = new SessionStore()
+  store.hydrateTasks({
+    'session:managed-hermes': {
+      label: 'Useful Hermes task', source: 'user', agent: 'hermes', cwd: '/Users/test/AgentBase', updatedAt: Date.now()
+    }
+  })
+
+  store.ingest({ event: 'session_start', session_id: 'managed-hermes', agent: 'hermes', cwd: '/Users/test/AgentBase' })
+  assert.deepEqual(store.hardwareList(), [])
+
+  store.ingest({ event: 'prompt', session_id: 'managed-hermes', agent: 'hermes', cwd: '/Users/test/AgentBase' })
+  assert.deepEqual(store.hardwareList().map((session) => session.id), ['managed-hermes'])
+  clearInterval(store._reaper)
+})
+
 test('Codex Desktop discovery enriches a managed thread instead of duplicating its pad', () => {
   const store = new SessionStore()
   store.ingest({ event: 'session_start', session_id: 'thread-123', agent: 'codex', cwd: '/Users/test/project' })

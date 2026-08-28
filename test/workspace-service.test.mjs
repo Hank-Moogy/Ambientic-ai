@@ -87,7 +87,7 @@ test('starts the first Codex turn without reading an unmaterialized new thread',
   const directory = mkdtempSync(join(tmpdir(), 'ambientic-first-turn-'))
   try {
     const requests = []
-    const session = { id: 'new-thread', agent: 'codex', project: 'Private task', cwd: directory, task: 'Career profile' }
+    const session = { id: 'new-thread', agent: 'codex', project: 'Private task', cwd: directory, task: 'Product brief' }
     const service = new WorkspaceService({ list: () => [session], ingest: () => {}, updateTask: () => {} }, () => [])
     service.historyRefreshedAt = Date.now()
     service.codexStartedThreads.add(session.id)
@@ -101,7 +101,7 @@ test('starts the first Codex turn without reading an unmaterialized new thread',
       }
     })
 
-    const snapshot = await service.send(session.id, 'Build the Career Profile.')
+    const snapshot = await service.send(session.id, 'Build the product brief.')
 
     assert.equal(requests.some((entry) => entry.method === 'thread/read'), false)
     assert.equal(requests.some((entry) => entry.method === 'turn/start'), true)

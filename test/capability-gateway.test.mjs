@@ -22,29 +22,16 @@ function fixture ({ start = true, requestApproval } = {}) {
   const contextEngine = new ContextEngine({ store, goals })
   const prepared = contextEngine.prepareSession({ provider: 'codex', providerSessionId: 'thread-1', cwd: '/tmp/project', goalId: 'goal-1', taskId: 'task-1' })
   const approvals = []
-  const careerUpdates = []
-  const discoveryCalls = []
-  const career = {
-    list: () => ({ profile: { status: 'needs_review', headline: 'AI Product Leader' }, opportunities: [{ id: 'opportunity-1', company: 'Acme', roleTitle: 'Head of Product' }], dailyQueue: { items: [{ opportunityId: 'opportunity-1' }] } }),
-    updateProfile: (input) => { careerUpdates.push({ action: 'profile', input }); return { status: 'needs_review', ...input } },
-    upsertOpportunity: (input) => { careerUpdates.push({ action: 'upsert', input }); return { id: 'opportunity-1', ...input } },
-    updateOpportunity: (id, patch) => { careerUpdates.push({ action: 'status', id, patch }); return { id, ...patch } },
-    passOpportunity: (id, reason) => { careerUpdates.push({ action: 'pass', id, reason }); return { id, status: 'Archived' } },
-    addInterview: (id, input) => { careerUpdates.push({ action: 'interview', id, input }); return { id: 'interview-1', opportunityId: id } },
-    recordMarketScan: (input) => { careerUpdates.push({ action: 'market_scan', input }); return input }
-  }
   const gateway = new CapabilityGateway({
     store,
     contextEngine,
     goals,
-    career,
-    jobDiscovery: async (input) => { discoveryCalls.push(input); return { source: { id: input.source }, jobs: [{ company: 'Remote Co', roleTitle: 'Product Lead' }] } },
     socketPath: join(directory, 'gateway.sock'),
     requestApproval: requestApproval || (async (request) => { approvals.push(request); return true })
   })
   if (start) gateway.start()
   const session = gateway.issueSession(prepared.binding.id)
-  return { directory, store, contextEngine, gateway, session, approvals, careerUpdates, discoveryCalls }
+  return { directory, store, contextEngine, gateway, session, approvals }
 }
 
 test('gateway tokens scope native tools and mutations are audited', async () => {
@@ -105,29 +92,14 @@ test('gateway enforces capability scopes and remembers only session-scoped appro
   }
 })
 
-test('Career OS tools are hidden from ordinary sessions and available to scoped pack sessions', async () => {
+test('connection dependencies report active capability sessions only', () => {
   const value = fixture({ start: false })
   try {
-    const ordinary = await value.gateway.handleRequest({ token: value.session.token, method: 'tools/list' })
-    assert.equal(ordinary.tools.some((tool) => tool.name.startsWith('ambientic_career_')), false)
-    assert.equal(ordinary.tools.some((tool) => tool.name === 'ambientic_jobs_discover'), false)
-    const careerSession = value.gateway.issueSession(value.session.bindingId, { scopes: ['career:read', 'career:discover', 'career:write'] })
-    const listed = await value.gateway.handleRequest({ token: careerSession.token, method: 'tools/list' })
-    assert.deepEqual(listed.tools.map((tool) => tool.name), ['ambientic_career_read', 'ambientic_jobs_discover', 'ambientic_career_update'])
-    const queue = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_read', arguments: { action: 'daily_queue' } })
-    assert.equal(queue.items[0].opportunityId, 'opportunity-1')
-    const profile = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_read', arguments: { action: 'profile' } })
-    assert.equal(profile.headline, 'AI Product Leader')
-    const built = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_update', arguments: { action: 'profile', profile: { headline: 'Product Executive' } } })
-    assert.equal(built.headline, 'Product Executive')
-    const created = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_update', arguments: { action: 'upsert', opportunity: { company: 'Acme', roleTitle: 'Head of Product' } } })
-    assert.equal(created.id, 'opportunity-1')
-    assert.equal(value.careerUpdates.length, 2)
-    const discovered = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_jobs_discover', arguments: { action: 'discover', source: 'himalayas', query: 'product' } })
-    assert.equal(discovered.jobs[0].company, 'Remote Co')
-    assert.equal(value.discoveryCalls.length, 1)
-    assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_career_update' && event.permission === 'write'))
-    assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_jobs_discover' && event.permission === 'read'))
+    value.store.upsertConnection({ id: 'tool-1', name: 'Local tool', transport: 'stdio' })
+    value.store.replaceCapabilities('tool-1', [{ name: 'documents.read', permission: 'read' }])
+    const [connection] = value.gateway.listConnections()
+    assert.equal(connection.capabilityCount, 1)
+    assert.deepEqual(connection.dependents, { sessions: 1 })
   } finally {
     value.gateway.stop()
     value.store.close()

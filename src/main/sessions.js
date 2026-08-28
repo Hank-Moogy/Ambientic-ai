@@ -83,10 +83,8 @@ export class SessionStore extends EventEmitter {
     s.task = record.label
     s.taskFingerprint = record.fingerprint || ''
     s.taskSource = record.source || 'cache'
-    // A live terminal rediscovered after launch can reclaim a pad from the last
-    // real prompt that named it. Project-only placeholders have no cache record
-    // and therefore remain dark.
-    s.activityAt = Math.max(Number(s.activityAt) || 0, Number(record.updatedAt) || 0)
+    // A cached label is display metadata, not proof of conversation activity.
+    // Only current lifecycle events may make a thread eligible for a pad.
     return true
   }
 
@@ -481,9 +479,11 @@ export class SessionStore extends EventEmitter {
   syncPadAssignments () {
     const eligible = [...this.map.values()].filter((session) => {
       if (!session || session.history || session.state === STATE.ENDED) return false
+      // Process discovery proves only that a provider is running. The first
+      // lifecycle event replaces this placeholder with a real thread.
+      if (session.discovered) return false
       if (session.awaitingApproval || [STATE.RUNNING, STATE.WAITING, STATE.ATTENTION].includes(session.state)) return true
-      // An idle discovery placeholder has no verified conversation activity.
-      // This is the empty "Hermes · AgentBase" pad that used to consume space.
+      // An idle provider thread must have verified conversation activity.
       return (Number(session.activityAt) || 0) > 0
     })
     const byId = new Map(eligible.map((session) => [session.id, session]))

@@ -6,7 +6,6 @@ const CATEGORY_LABELS = {
   navigation: 'Views',
   providers: 'Providers',
   goals: 'Goals',
-  workflows: 'Workflows',
   threads: 'Threads',
   turns: 'Turn actions',
   skills: 'Skills',
@@ -14,7 +13,7 @@ const CATEGORY_LABELS = {
 }
 
 const ACTION_GLYPHS = {
-  navigation: '↗', providers: '✦', goals: '◇', workflows: '⌁', threads: '☷', turns: '→', skills: '✣', ambientic: '◎'
+  navigation: '↗', providers: '✦', goals: '◇', threads: '☷', turns: '→', skills: '✣', ambientic: '◎'
 }
 
 function bindingLabel (key = '') {
@@ -49,7 +48,7 @@ function EditView ({ template, view, onClose, onSave, onDelete }) {
   return <div className="hardware-modal" role="dialog" aria-modal="true" aria-label="Edit hardware view"><form onSubmit={(event) => { event.preventDefault(); onSave(name) }}><span>View details</span><h2>Edit {view.name}</h2><p>Renaming keeps every link intact. Deleting a secondary view also clears pads that link to it.</p><label>View name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={80} /></label><footer className="hardware-modal__split">{canDelete && <button type="button" className="danger" onClick={onDelete}>Delete view</button>}<span /><button type="button" onClick={onClose}>Cancel</button><button type="submit" className="primary">Save view</button></footer></form></div>
 }
 
-function AssignmentInspector ({ template, view, slot, actions, sessions, goals, workflows, connectors, binding, learning, onAssign, onLearn, onClearBinding, onCreateLinkedView }) {
+function AssignmentInspector ({ template, view, slot, actions, sessions, goals, connectors, binding, learning, onAssign, onLearn, onClearBinding, onCreateLinkedView }) {
   const existing = view?.assignments?.[slot] || null
   const [draft, setDraft] = useState(existing || { actionId: '', label: '', targetId: '', targetLabel: '', prompt: '', provider: 'codex', trigger: 'press' })
   useEffect(() => setDraft(existing || { actionId: '', label: '', targetId: '', targetLabel: '', prompt: '', provider: 'codex', trigger: 'press' }), [slot, existing?.actionId, existing?.targetId, existing?.prompt])
@@ -61,13 +60,11 @@ function AssignmentInspector ({ template, view, slot, actions, sessions, goals, 
     ? sessions.map((item) => ({ id: item.id, label: item.task || item.label || item.summary || 'Untitled thread' }))
     : definition?.target === 'goal'
         ? goals.map((item) => ({ id: item.id, label: item.title }))
-        : definition?.target === 'workflow'
-            ? workflows.map((item) => ({ id: item.id, label: item.name }))
-            : definition?.target === 'provider'
-                ? connectors.filter((item) => ['codex', 'claude', 'hermes'].includes(item.id)).map((item) => ({ id: item.id, label: item.label }))
-                : definition?.target === 'view'
-                    ? template.views.filter((item) => item.id !== view.id).map((item) => ({ id: item.id, label: item.name }))
-                    : []
+        : definition?.target === 'provider'
+            ? connectors.filter((item) => ['codex', 'claude', 'hermes'].includes(item.id)).map((item) => ({ id: item.id, label: item.label }))
+            : definition?.target === 'view'
+                ? template.views.filter((item) => item.id !== view.id).map((item) => ({ id: item.id, label: item.name }))
+                : []
   if (draft.targetId && !targetOptions.some((item) => item.id === draft.targetId) && definition?.target && !['none', 'skill'].includes(definition.target)) targetOptions.push({ id: draft.targetId, label: draft.targetLabel || 'Unavailable target' })
   const needsPrompt = definition?.inputs?.includes('prompt')
   const needsProvider = definition?.inputs?.includes('provider')
@@ -90,7 +87,7 @@ function TemplateLibrary ({ templates, activeId, onSelect, onCreate, onImport })
   return <aside className="hardware-library"><header><span>Local library</span><button type="button" onClick={onCreate}>＋</button></header><div>{templates.map((template) => <button type="button" key={template.id} data-selected={template.id === activeId} onClick={() => onSelect(template.id)}><i>{template.builtIn ? '◎' : '▦'}</i><span><b>{template.name}</b><small>{template.builtIn ? 'Built-in native mode' : `${template.rows}×${template.columns} · ${template.views.length} view${template.views.length === 1 ? '' : 's'}`}</small></span>{template.id === activeId && <em>Live</em>}</button>)}</div><footer><button type="button" onClick={onImport}>⇧ Import template</button><p>Templates stay private on this Mac until you export them.</p></footer></aside>
 }
 
-export function HardwareWorkspace ({ snapshot, midi, sessions, goalsSnapshot, workflowSnapshot, connectors, onOpenThread }) {
+export function HardwareWorkspace ({ snapshot, midi, sessions, goalsSnapshot, connectors, onOpenThread }) {
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState('')
   const [notice, setNotice] = useState('')
@@ -173,7 +170,7 @@ export function HardwareWorkspace ({ snapshot, midi, sessions, goalsSnapshot, wo
         })}</div></div>
         <footer className="hardware-stage__footer"><span><i data-connected={Boolean(midi.connected)} />{midi.connected ? `${midi.model} · ${midi.gridLabel}` : 'Input-only keyboard mapping is available without MIDI'}</span><p className={snapshot.lastResult ? 'hardware-action-result' : ''} data-state={snapshot.lastResult?.pending ? 'pending' : snapshot.lastResult?.ok === false ? 'error' : 'ok'}>{snapshot.lastResult?.message || (snapshot.mode === 'map' ? 'Choose a virtual pad, then touch the physical control.' : snapshot.mode === 'edit' ? 'Select a pad to assign an action or create a linked view.' : snapshot.mode === 'test' ? 'Actions run, but confirmation boundaries remain active.' : 'Your active view follows the same controls on screen and hardware.')}</p></footer>
       </main>
-      {template.builtIn ? <aside className="hardware-inspector hardware-native"><span>Native profile</span><div><i>◎</i><h3>Protected by design</h3><p>The APC session grid, RGB task truth, voice controls, and Vibe restoration remain stable here.</p><button type="button" onClick={() => window.controller.hardwareDuplicateTemplate(template.id)}>Fork to customize</button></div></aside> : <AssignmentInspector template={template} view={view} slot={selectedSlot} actions={snapshot.actions} sessions={sessions} goals={goalsSnapshot.goals || []} workflows={workflowSnapshot.workflows || []} connectors={connectors} binding={bindingsBySlot[selectedSlot]} learning={learning} onAssign={(assignment) => window.controller.hardwareAssignPad(template.id, view.id, selectedSlot, assignment)} onLearn={() => learning ? window.controller.hardwareCancelLearn() : window.controller.hardwareLearnPad(template.id, selectedSlot)} onClearBinding={() => window.controller.hardwareClearBinding(template.id, selectedSlot)} onCreateLinkedView={() => setViewCreation({ linked: true })} />}
+      {template.builtIn ? <aside className="hardware-inspector hardware-native"><span>Native profile</span><div><i>◎</i><h3>Protected by design</h3><p>The APC session grid, RGB task truth, voice controls, and Vibe restoration remain stable here.</p><button type="button" onClick={() => window.controller.hardwareDuplicateTemplate(template.id)}>Fork to customize</button></div></aside> : <AssignmentInspector template={template} view={view} slot={selectedSlot} actions={snapshot.actions} sessions={sessions} goals={goalsSnapshot.goals || []} connectors={connectors} binding={bindingsBySlot[selectedSlot]} learning={learning} onAssign={(assignment) => window.controller.hardwareAssignPad(template.id, view.id, selectedSlot, assignment)} onLearn={() => learning ? window.controller.hardwareCancelLearn() : window.controller.hardwareLearnPad(template.id, selectedSlot)} onClearBinding={() => window.controller.hardwareClearBinding(template.id, selectedSlot)} onCreateLinkedView={() => setViewCreation({ linked: true })} />}
     </div>
     {notice && <button className="hardware-notice" type="button" onClick={() => setNotice('')}>{notice}<span>×</span></button>}
     {createOpen && <CreateTemplate onClose={() => setCreateOpen(false)} onCreate={createTemplate} />}

@@ -9,23 +9,6 @@ contextBridge.exposeInMainWorld('controller', {
   updateGoal: (goalId, patch) => ipcRenderer.invoke('update-goal', goalId, patch),
   createGoalTask: (goalId, input) => ipcRenderer.invoke('create-goal-task', goalId, input),
   updateGoalTask: (taskId, patch) => ipcRenderer.invoke('update-goal-task', taskId, patch),
-  getWorkflows: () => ipcRenderer.invoke('get-workflows'),
-  chooseCareerProfileFile: (kind) => ipcRenderer.invoke('choose-career-profile-file', kind),
-  installCareerOs: (setup) => ipcRenderer.invoke('install-career-os', setup),
-  getCareerOs: () => ipcRenderer.invoke('get-career-os'),
-  careerUpdateProfile: (profile) => ipcRenderer.invoke('career-update-profile', profile),
-  careerReviewProfile: () => ipcRenderer.invoke('career-review-profile'),
-  careerUpdatePreferences: (preferences) => ipcRenderer.invoke('career-update-preferences', preferences),
-  careerUpdateOpportunity: (opportunityId, patch) => ipcRenderer.invoke('career-update-opportunity', opportunityId, patch),
-  careerPassOpportunity: (opportunityId, reason, note = '') => ipcRenderer.invoke('career-pass-opportunity', opportunityId, reason, note),
-  createWorkflow: (input) => ipcRenderer.invoke('create-workflow', input),
-  updateWorkflow: (workflowId, input) => ipcRenderer.invoke('update-workflow', workflowId, input),
-  duplicateWorkflow: (workflowId) => ipcRenderer.invoke('duplicate-workflow', workflowId),
-  deleteWorkflow: (workflowId) => ipcRenderer.invoke('delete-workflow', workflowId),
-  setWorkflowEnabled: (workflowId, enabled) => ipcRenderer.invoke('set-workflow-enabled', workflowId, enabled),
-  runWorkflow: (workflowId) => ipcRenderer.invoke('run-workflow', workflowId),
-  approveWorkflowRun: (runId, allow) => ipcRenderer.invoke('approve-workflow-run', runId, allow),
-  cancelWorkflowRun: (runId) => ipcRenderer.invoke('cancel-workflow-run', runId),
   getHardwareProfiles: () => ipcRenderer.invoke('get-hardware-profiles'),
   hardwareCreateTemplate: (input) => ipcRenderer.invoke('hardware-create-template', input),
   hardwareUpdateTemplate: (templateId, patch) => ipcRenderer.invoke('hardware-update-template', templateId, patch),
@@ -127,16 +110,6 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('goals', handler)
     return () => ipcRenderer.removeListener('goals', handler)
-  },
-  onWorkflows: (cb) => {
-    const handler = (_e, payload) => cb(payload)
-    ipcRenderer.on('workflows', handler)
-    return () => ipcRenderer.removeListener('workflows', handler)
-  },
-  onCareerOs: (cb) => {
-    const handler = (_e, payload) => cb(payload)
-    ipcRenderer.on('career-os', handler)
-    return () => ipcRenderer.removeListener('career-os', handler)
   },
   onHardwareProfiles: (cb) => {
     const handler = (_e, payload) => cb(payload)

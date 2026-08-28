@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHardwareProfileService, portableHardwareTemplate } from '../src/main/hardware-profile-service.mjs'
@@ -73,7 +73,7 @@ test('exchanges a sanitized multi-view bundle between clean profiles and restore
   const source = serviceFixture().service
   const template = source.create({ name: 'Shared review deck', rows: 2, columns: 2 })
   const child = source.addView(template.id, { name: 'Review', fromViewId: 'home', fromSlotId: 'pad-1-1' })
-  source.assign(template.id, child.id, 'pad-1-1', { actionId: 'workflow.run', targetId: 'private-workflow-id', targetLabel: 'Client release', label: 'Run release' })
+  source.assign(template.id, child.id, 'pad-1-1', { actionId: 'goal.open', targetId: 'private-goal-id', targetLabel: 'Client release', label: 'Open release goal' })
   source.learn(template.id, 'pad-2-1')
   source.handleInput({ key: 'note:0:36', type: 'note', pressed: true })
   const portable = source.exportTemplate(template.id)
@@ -84,7 +84,7 @@ test('exchanges a sanitized multi-view bundle between clean profiles and restore
   assert.equal(imported.views.length, 2)
   assert.equal(imported.views[1].assignments['pad-1-1'].needsSetup, true)
   assert.equal(imported.views[1].assignments['pad-1-1'].targetId, '')
-  assert.doesNotMatch(JSON.stringify(imported), /private-workflow-id|Client release|note:0:36/)
+  assert.doesNotMatch(JSON.stringify(imported), /private-goal-id|Client release|note:0:36/)
 
   const restarted = createHardwareProfileService({ file: destinationFixture.file })
   assert.equal(restarted.active().name, 'Shared review deck')
@@ -106,7 +106,7 @@ test('rejects malformed or incompatible imported view graphs', () => {
 test('tracks consequential actions as pending until confirmation resolves', async () => {
   const { service } = serviceFixture(async () => ({ pending: true }))
   const template = service.create({ name: 'Safe deck', rows: 1, columns: 1 })
-  service.assign(template.id, 'home', 'pad-1-1', { actionId: 'workflow.run', targetId: 'workflow-1', label: 'Run workflow' })
+  service.assign(template.id, 'home', 'pad-1-1', { actionId: 'thread.send-prompt', targetId: 'thread-1', prompt: 'Run the release checks', label: 'Run release checks' })
   await service.triggerSlot('pad-1-1')
   assert.equal(service.snapshot().lastResult.pending, true)
   assert.equal(service.snapshot().lastResult.message, 'Waiting for confirmation')
@@ -167,10 +167,40 @@ test('release and hold triggers do not fire as ordinary presses', async () => {
 test('projects active-view assignment tones back onto learned hardware controls', () => {
   const { service } = serviceFixture()
   const template = service.create({ name: 'Light deck', rows: 1, columns: 1 })
-  service.assign(template.id, 'home', 'pad-1-1', { actionId: 'workflow.run', targetId: 'workflow-1', feedback: 'green' })
+  service.assign(template.id, 'home', 'pad-1-1', { actionId: 'goal.open', targetId: 'goal-1', feedback: 'green' })
   service.learn(template.id, 'pad-1-1')
   service.handleInput({ key: 'note:0:36', type: 'note', pressed: true })
   assert.deepEqual(service.feedback(), { 'note:0:36': 'green' })
   service.activate('ambientic-native-sessions')
   assert.equal(service.feedback(), null)
+})
+
+test('ignores retired hardware assignments while preserving supported mappings', () => {
+  const { file } = serviceFixture()
+  const serialized = `${JSON.stringify({
+    version: 1,
+    activeTemplateId: 'legacy-deck',
+    updatedAt: 1000,
+    templates: [{
+      id: 'legacy-deck',
+      schema: 'ambientic.hardware-template',
+      version: 1,
+      name: 'Legacy deck',
+      rows: 1,
+      columns: 2,
+      rootViewId: 'home',
+      views: [{ id: 'home', name: 'Home', assignments: {
+        'pad-1-1': { actionId: ['work', 'flow.run'].join(''), targetId: 'retired-routine' },
+        'pad-1-2': { actionId: 'goal.open', targetId: 'goal-1', label: 'Open goal' }
+      } }],
+      bindings: { 'note:0:36': 'pad-1-1', 'note:0:37': 'pad-1-2' }
+    }]
+  }, null, 2)}\n`
+  writeFileSync(file, serialized)
+
+  const restored = createHardwareProfileService({ file })
+  assert.equal(restored.active().views[0].assignments['pad-1-1'], undefined)
+  assert.equal(restored.active().views[0].assignments['pad-1-2'].actionId, 'goal.open')
+  assert.deepEqual(restored.active().bindings, { 'note:0:36': 'pad-1-1', 'note:0:37': 'pad-1-2' })
+  assert.equal(readFileSync(file, 'utf8'), serialized)
 })

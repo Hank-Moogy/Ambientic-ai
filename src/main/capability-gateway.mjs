@@ -48,9 +48,6 @@ const TOOL_SCOPES = Object.freeze({
   ambientic_remember: 'memory:write',
   ambientic_goals: 'goals:read',
   ambientic_task_update: 'tasks:write',
-  ambientic_career_read: 'career:read',
-  ambientic_jobs_discover: 'career:discover',
-  ambientic_career_update: 'career:write',
   ambientic_capability: 'capabilities:invoke'
 })
 
@@ -153,14 +150,11 @@ class ExternalMcpClient {
 }
 
 export class CapabilityGateway extends EventEmitter {
-  constructor ({ store, contextEngine, goals, career = null, jobDiscovery = null, workflows = () => null, socketPath, requestApproval = async () => false, now = () => Date.now(), id = () => randomUUID() }) {
+  constructor ({ store, contextEngine, goals, socketPath, requestApproval = async () => false, now = () => Date.now(), id = () => randomUUID() }) {
     super()
     this.store = store
     this.contextEngine = contextEngine
     this.goals = goals
-    this.career = career
-    this.jobDiscovery = jobDiscovery
-    this.workflows = workflows
     this.socketPath = socketPath
     this.requestApproval = requestApproval
     this.now = now
@@ -251,30 +245,6 @@ export class CapabilityGateway extends EventEmitter {
       if (args.ownerName !== undefined) patch.ownerName = args.ownerName
       return this.goals.updateTask(args.taskId, patch)
     }
-    if (tool === 'ambientic_career_read') {
-      if (!this.career) throw new Error('Career OS is not installed.')
-      const snapshot = this.career.list()
-      if (args.action === 'snapshot') return snapshot
-      if (args.action === 'profile') return snapshot.profile
-      if (args.action === 'daily_queue') return snapshot.dailyQueue
-      const opportunity = snapshot.opportunities.find((candidate) => candidate.id === args.opportunityId)
-      if (!opportunity) throw new Error('Opportunity not found.')
-      return opportunity
-    }
-    if (tool === 'ambientic_jobs_discover') {
-      if (!this.jobDiscovery) throw new Error('Career OS job discovery is unavailable.')
-      return this.jobDiscovery(args)
-    }
-    if (tool === 'ambientic_career_update') {
-      if (!this.career) throw new Error('Career OS is not installed.')
-      if (args.action === 'profile') return this.career.updateProfile(args.profile || {}, { actor: 'agent' })
-      if (args.action === 'upsert') return this.career.upsertOpportunity(args.opportunity || {}, { actor: 'agent' })
-      if (args.action === 'status') return this.career.updateOpportunity(args.opportunityId, { status: args.status, nextAction: args.nextAction }, { actor: 'agent' })
-      if (args.action === 'pass') return this.career.passOpportunity(args.opportunityId, args.reason, args.note, { actor: 'agent' })
-      if (args.action === 'interview') return this.career.addInterview(args.opportunityId, args.interview || {}, { actor: 'agent' })
-      if (args.action === 'market_scan') return this.career.recordMarketScan({ processed: args.processed, matched: args.matched }, { actor: 'agent' })
-      throw new Error('Unsupported Career OS update action.')
-    }
     if (tool === 'ambientic_capability') {
       if (args.action === 'search') return this.listCapabilities(binding.id, args.query)
       return this.invokeCapability({ binding, capabilityId: args.capabilityId, arguments: args.arguments || {}, idempotencyKey: args.idempotencyKey })
@@ -309,7 +279,7 @@ export class CapabilityGateway extends EventEmitter {
         providerSessionId: binding.providerSessionId,
         bindingId: binding.id,
         tool,
-        permission: tool === 'ambientic_task_update' || tool === 'ambientic_remember' || tool === 'ambientic_career_update' ? 'write' : 'read',
+        permission: tool === 'ambientic_task_update' || tool === 'ambientic_remember' ? 'write' : 'read',
         argumentsDigest: digest(args),
         approval: tool === 'ambientic_task_update' ? (error ? 'rejected_or_failed' : 'approved') : 'automatic',
         resultSummary: error ? `Error: ${error.message}` : cleanText(JSON.stringify(result), 1000),
@@ -415,19 +385,13 @@ export class CapabilityGateway extends EventEmitter {
 
   listConnections () {
     const activeSessions = this.store.listActiveGatewaySessions()
-    const workflows = this.workflows?.()?.workflows || []
     return this.store.listConnections().map((connection) => {
       const capabilities = this.store.listCapabilities({ connectionId: connection.id, limit: 500 })
-      const identifiers = capabilities.flatMap((item) => [item.id, item.name]).filter(Boolean)
-      const dependentWorkflows = workflows.filter((workflow) => {
-        const serialized = JSON.stringify(workflow)
-        return identifiers.some((identifier) => serialized.includes(identifier))
-      }).map((workflow) => ({ id: workflow.id, name: workflow.name || workflow.title || 'Workflow' }))
       return {
         ...connection,
         disabled: !connection.enabled,
         capabilityCount: capabilities.length,
-        dependents: { sessions: activeSessions.length, workflows: dependentWorkflows }
+        dependents: { sessions: activeSessions.length }
       }
     })
   }

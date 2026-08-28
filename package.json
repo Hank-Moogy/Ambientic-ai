@@ -1,7 +1,7 @@
 {
   "name": "ambientic",
   "version": "0.8.1",
-  "description": "Local-first APC40 MKII control surface for Claude Code, Codex, and Hermes agent sessions.",
+  "description": "The hub for all your agents and all your sources of intelligence.",
   "author": "findmecreators",
   "main": "out/main/index.js",
   "scripts": {

@@ -14,9 +14,7 @@ const LOCAL_TARGET_ACTIONS = new Set([
   'thread.interrupt',
   'thread.approve-pending',
   'thread.deny-pending',
-  'goal.open',
-  'workflow.open',
-  'workflow.run'
+  'goal.open'
 ])
 
 function copy (value) { return JSON.parse(JSON.stringify(value)) }

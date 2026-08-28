@@ -1326,7 +1326,7 @@ export class WorkspaceService extends EventEmitter {
     const newCodexThread = session.agent === 'codex' && this.codexStartedThreads.has(this.codexThreadId(session)) && !this.activeTurns.has(id)
     // Codex cannot serve includeTurns between thread/start and the first
     // turn/start. Building the empty local snapshot here prevents that normal
-    // pre-turn state from being emitted as a fatal managed-workflow error.
+    // pre-turn state from being emitted as a fatal managed-session error.
     const snapshot = newCodexThread
       ? { ...this.baseSnapshot(session), ...(this.snapshots.get(id) || {}), messages: [], error: '', running: false, turnStateKnown: false }
       : await this.read(id)
