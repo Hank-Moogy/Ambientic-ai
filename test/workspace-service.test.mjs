@@ -732,6 +732,38 @@ test('a turn reports account usage even for a thread the UI is not showing', () 
   assert.equal(seen[0].event.rate_limit_info.unifiedWindows.five_hour.utilization, 0.12)
 })
 
+test('a granted folder is handed to Claude, not just to the broker', () => {
+  let spawned = null
+  const session = { id: 'thread-roots', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: (path, args) => {
+      spawned = args
+      return { stdout: { on () {} }, stderr: { on () {} }, on () {} }
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.discoverableProjects = () => [{ cwd: '/tmp/other-project', name: 'other' }]
+  // What the user answered "always allow" to, plus a folder inside the project
+  // that needs no grant because working there already implies it.
+  service.grants = [
+    { id: 'g1', scope: 'always', tool: '', root: '/Users/tester/attached', write: true },
+    { id: 'g2', scope: 'always', tool: '', root: '/tmp/project/inside', write: true },
+    { id: 'g3', scope: 'always', tool: '', root: '/Users/tester/readonly', write: false }
+  ]
+
+  service.runClaude(session, 'Continue.', {})
+
+  // Repeated flags, not `--add-dir a b`: the latter grants only the last root.
+  const roots = spawned.filter((arg, index) => spawned[index - 1] === '--add-dir')
+  assert.ok(roots.includes('/Users/tester/attached'), 'an answered grant must be reachable')
+  assert.ok(!roots.includes('/tmp/project/inside'), 'already covered by the working directory')
+  assert.ok(!roots.includes('/Users/tester/readonly'), 'a read-only grant is not a write root')
+  // Scope stays un-pre-granted: a project the agent may merely discover is
+  // named in the prompt and asked about, not handed over up front.
+  assert.ok(!roots.includes('/tmp/other-project'), 'discovery is not a grant')
+})
+
 test('a Claude limit rejection emits usage evidence before failing the turn', () => {
   const handlers = {}
   const failures = []
