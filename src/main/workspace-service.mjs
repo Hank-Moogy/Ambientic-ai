@@ -9,7 +9,7 @@ import { providerSpawnEnv } from './env-path.mjs'
 import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, handoverProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
 import { humanThreadTitle, namesThread } from './summarizer.js'
-import { decideToolPermission, grantedBy } from './permission-policy.mjs'
+import { decideToolPermission } from './permission-policy.mjs'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
@@ -1143,31 +1143,6 @@ export class WorkspaceService extends EventEmitter {
     return applicableGrants(this.grants, sessionId)
   }
 
-  // Folders the user has already said yes to, which Claude has to be told about
-  // separately from the broker.
-  //
-  // Scope is deliberately not pre-granted: the agent is told which projects
-  // exist and the broker is asked about each request. But Claude enforces its
-  // own filesystem boundary on the tools whose target it can read off the
-  // arguments — Edit, Write, NotebookEdit — and refuses a path outside that
-  // boundary *before* the PreToolUse hook is consulted. So an answered "always
-  // allow this folder" stayed unusable: the edit was refused, and the refusal
-  // could not be approved from the app because nothing ever asked. Bash is not
-  // path-checked, which inverts the boundary — the agent could do through a
-  // shell command exactly what it was refused through Edit.
-  //
-  // Only roots behind a real grant are passed. Merely discoverable projects are
-  // still not pre-granted; they are named in the prompt and asked about.
-  claudeToolRoots (session) {
-    const base = resolve(session?.cwd || homedir())
-    const roots = new Set()
-    for (const grant of this.grantsFor(session?.id)) {
-      if (grant?.write && grant.root) roots.add(resolve(String(grant.root)))
-    }
-    // Anything already inside the working directory is reachable by being there.
-    return [...roots].filter((root) => root && !grantedBy([base], root))
-  }
-
   addGrant (grant) {
     if (!grant) return null
     this.grants = [...this.grants, grant]
@@ -1516,11 +1491,6 @@ export class WorkspaceService extends EventEmitter {
     if (model) args.push('--model', model)
     if (effort) args.push('--effort', effort)
     args.push(started ? '--resume' : '--session-id', claudeId)
-    // One `--add-dir` per root. The flag is declared variadic, but passing the
-    // roots as `--add-dir a b` grants only the last of them; repeating the flag
-    // is what actually accumulates (verified against 2.1.246), and the failure
-    // mode of the other form is silent.
-    for (const root of this.claudeToolRoots(session)) args.push('--add-dir', root)
     this.claudeAttempts.set(session.id, { prompt, compacted, mode, model, effort, resultError: '' })
     const child = this.spawnProcess(path, args, { cwd: session.cwd || homedir(), env: providerSpawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
     this.activeTurns.set(session.id, child)
