@@ -715,6 +715,23 @@ test('a failed turn reports why, even when Claude sends an empty result', () => 
   assert.match(detail, /denied Read/)
 })
 
+test('a turn reports account usage even for a thread the UI is not showing', () => {
+  const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
+  const seen = []
+  service.on('provider-usage', (payload) => seen.push(payload))
+
+  // No snapshot is registered for this id: usage is account-wide, so it must
+  // still be reported rather than dropped by the per-thread snapshot guard.
+  service.claudeEvent('thread-unopened', JSON.stringify({
+    type: 'rate_limit_event',
+    rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.12, resetsAt: 1788198000 } } }
+  }))
+
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].provider, 'claude')
+  assert.equal(seen[0].event.rate_limit_info.unifiedWindows.five_hour.utilization, 0.12)
+})
+
 test('a Claude limit rejection emits usage evidence before failing the turn', () => {
   const handlers = {}
   const failures = []

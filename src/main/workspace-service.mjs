@@ -1525,6 +1525,13 @@ export class WorkspaceService extends EventEmitter {
   claudeEvent (id, line) {
     let event
     try { event = JSON.parse(line) } catch { return }
+    // Usage is account-wide, not per-thread, so report it before the snapshot
+    // guard: a turn on a thread the UI is not currently showing still carries
+    // the account's current limits.
+    if (event.type === 'rate_limit_event') {
+      this.emit('provider-usage', { provider: 'claude', event, observedAt: Date.now(), sessionId: id })
+      return
+    }
     const snapshot = this.snapshots.get(id)
     if (!snapshot) return
     if (event.type === 'assistant') {

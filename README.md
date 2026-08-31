@@ -118,6 +118,7 @@ Implemented:
 - Simplified product boundary across runtime, navigation, preload/IPC contracts, capability scopes, hardware actions, styles, and tests.
 - Overview load path: per-source state hydration in place of a single blocking `Promise.all`, an immediate non-blocking `get-connectors` reply backed by a deduplicated background probe, parallel auth and version reads per provider, and staggered skeleton pads while each slice is in flight.
 - Claude limit rejections from managed turns now update the Overview immediately, including a 100% session or weekly window and the provider-reported reset time; that evidence remains authoritative until reset even when Claude's interactive `/usage` panel omits the exhausted window.
+- Claude usage gauges track every managed turn. Claude's `stream-json` output carries a `rate_limit_event` derived from the API's own unified rate-limit headers, so each turn refreshes the 5-hour and weekly gauges exactly, with no extra process launch and no quota cost. The interactive `/usage` scrape is now only a fallback for when no turn has run recently.
 
 Next:
 

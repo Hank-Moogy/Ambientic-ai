@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { knownUsageCommandCandidates, parseClaudeLimitError, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
+import { knownUsageCommandCandidates, parseClaudeLimitError, parseClaudeRateLimitEvent, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
 
 test('finds the Codex binary bundled in ChatGPT when no shell command exists', () => {
   const candidates = knownUsageCommandCandidates('codex', '/Users/tester')
@@ -101,6 +101,68 @@ test('keeps a still-open window when a sibling window has already reset', () => 
   assert.deepEqual(result.windows.map(({ id, usedPercent }) => ({ id, usedPercent })), [
     { id: 'seven-day', usedPercent: 3 }
   ])
+})
+
+// Captured verbatim from `claude -p --output-format stream-json` on 2.1.246.
+const RATE_LIMIT_EVENT = {
+  type: 'rate_limit_event',
+  rate_limit_info: {
+    status: 'allowed',
+    resetsAt: 1788198000,
+    rateLimitType: 'five_hour',
+    unifiedWindows: {
+      five_hour: { utilization: 0.12, resetsAt: 1788198000 },
+      seven_day: { utilization: 0.19, resetsAt: 1788404400 }
+    }
+  }
+}
+
+test('a managed turn reports both Claude windows as live percentages', () => {
+  const reading = parseClaudeRateLimitEvent(RATE_LIMIT_EVENT)
+  assert.equal(reading.source, 'claude-turn-stream')
+  assert.deepEqual(reading.windows, [
+    { id: 'five-hour', label: 'All models', period: 'short', durationMins: 300, usedPercent: 12, resetAt: 1788198000, resetText: null },
+    { id: 'seven-day', label: 'All models', period: 'week', durationMins: 10080, usedPercent: 19, resetAt: 1788404400, resetText: null }
+  ])
+})
+
+test('a turn observation supplies the 5-hour window the /usage panel omits', async () => {
+  const service = new UsageService({
+    collectors: {
+      // What the panel scrape returns while the session window is exhausted.
+      claude: async () => ({ plan: 'subscription', windows: [{ id: 'seven-day', period: 'week', usedPercent: 19 }] }),
+      codex: async () => ({ windows: [] }),
+      kimi: async () => ({ windows: [] })
+    }
+  })
+  const future = Math.floor(Date.now() / 1000) + 3600
+  const event = { ...RATE_LIMIT_EVENT, rate_limit_info: { ...RATE_LIMIT_EVENT.rate_limit_info, unifiedWindows: { five_hour: { utilization: 0.42, resetsAt: future }, seven_day: { utilization: 0.19, resetsAt: future } } } }
+
+  assert.equal(service.observeClaudeWindows(event), true)
+  await service.refresh()
+
+  const windows = service.getState().providers.claude.windows
+  assert.equal(windows.find((window) => window.id === 'five-hour').usedPercent, 42)
+  assert.equal(windows.find((window) => window.id === 'seven-day').usedPercent, 19)
+})
+
+test('a successful turn clears a limit rejection the account has moved past', () => {
+  const service = new UsageService({ collectors: {} })
+  const future = Math.floor(Date.now() / 1000) + 3600
+  service.observeClaudeLimit(`You've hit your session limit · resets ${new Date(future * 1000).getHours() % 12 || 12}:00pm`)
+  assert.equal(service.getState().providers.claude.quotaStatus, 'CLAUDE_RATE_LIMITED')
+
+  service.observeClaudeWindows({ ...RATE_LIMIT_EVENT, rate_limit_info: { ...RATE_LIMIT_EVENT.rate_limit_info, unifiedWindows: { five_hour: { utilization: 0.05, resetsAt: future } } } })
+
+  const claude = service.getState().providers.claude
+  assert.equal(claude.quotaStatus, null)
+  assert.equal(claude.windows.find((window) => window.id === 'five-hour').usedPercent, 5)
+})
+
+test('a stream event without unified windows is ignored rather than blanking the gauge', () => {
+  assert.equal(parseClaudeRateLimitEvent({ type: 'result', is_error: false }), null)
+  assert.equal(parseClaudeRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' } }), null)
+  assert.equal(new UsageService({ collectors: {} }).observeClaudeWindows('not json'), false)
 })
 
 test('turn rejection becomes a 100% Claude session window with its real reset', () => {

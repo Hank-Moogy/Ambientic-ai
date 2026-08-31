@@ -1553,6 +1553,9 @@ app.whenReady().then(() => {
   workspace.on('provider-limit', ({ provider, error, observedAt }) => {
     if (provider === 'claude') usage.observeClaudeLimit(error, observedAt)
   })
+  workspace.on('provider-usage', ({ provider, event, observedAt }) => {
+    if (provider === 'claude') usage.observeClaudeWindows(event, observedAt)
+  })
   workspace.on('provider-auth', async (payload) => {
     if (payload.loginId && payload.loginId === pendingCodexLogin && ['connected', 'failed'].includes(payload.status)) pendingCodexLogin = ''
     await refreshConnectors()

@@ -177,6 +177,54 @@ export function parseClaudeLimitError (value, observedAt = Date.now()) {
   }
 }
 
+// The window shapes Claude reports for its unified subscription limits.
+const CLAUDE_UNIFIED_WINDOWS = {
+  five_hour: { id: 'five-hour', period: 'short', durationMins: 300 },
+  seven_day: { id: 'seven-day', period: 'week', durationMins: 7 * 24 * 60 }
+}
+
+// Every managed turn already tells us the account's real limits. Claude's
+// `--output-format stream-json` stream carries a `rate_limit_event` built from
+// the API's own anthropic-ratelimit-unified-* response headers, so it is exact,
+// costs no extra process launch or quota, and arrives on each turn rather than
+// once per scrape interval. It is also the only source that reliably carries
+// BOTH windows: the interactive `/usage` panel omits the 5-hour row at 100%,
+// which is what left the Overview showing a weekly-only figure. Treat this as
+// the primary source and the panel scrape as the fallback.
+export function parseClaudeRateLimitEvent (event, observedAt = Date.now()) {
+  const payload = typeof event === 'string' ? JSON.parse(event) : event
+  if (!payload || payload.type !== 'rate_limit_event') return null
+  const info = payload.rate_limit_info
+  const unified = info?.unifiedWindows
+  if (!unified || typeof unified !== 'object') return null
+  const windows = []
+  for (const [key, shape] of Object.entries(CLAUDE_UNIFIED_WINDOWS)) {
+    const value = unified[key]
+    if (!value || typeof value !== 'object') continue
+    // The header reports a 0..1 fraction; the Overview gauges read a percentage.
+    const usedPercent = clampPercent(Number(value.utilization) * 100)
+    if (usedPercent === null) continue
+    const resetAt = Number(value.resetsAt)
+    windows.push({
+      id: shape.id,
+      label: 'All models',
+      period: shape.period,
+      durationMins: shape.durationMins,
+      usedPercent,
+      resetAt: Number.isFinite(resetAt) ? resetAt : null,
+      resetText: null
+    })
+  }
+  if (!windows.length) return null
+  return {
+    plan: 'subscription',
+    source: 'claude-turn-stream',
+    status: String(info.status || ''),
+    observedAt,
+    windows
+  }
+}
+
 export function parseClaudeUsage (stdout) {
   const envelope = JSON.parse(stdout)
   const text = typeof envelope.result === 'string' ? envelope.result : ''
@@ -741,6 +789,34 @@ export class UsageService extends EventEmitter {
       quotaStatus: 'CLAUDE_RATE_LIMITED',
       quotaError: `Claude ${window.period === 'week' ? 'weekly' : 'session'} limit reached · resets ${window.resetText}`
     })
+    return true
+  }
+
+  // Record the exact windows a managed turn just reported. These readings are
+  // live rather than sticky: a later turn's numbers replace an earlier turn's,
+  // and a successful reading clears a previous rejection, because the account is
+  // demonstrably no longer limited once a turn goes through.
+  observeClaudeWindows (event, observedAt = Date.now()) {
+    let reading = null
+    try { reading = parseClaudeRateLimitEvent(event, observedAt) } catch { return false }
+    if (!reading) return false
+    for (const window of reading.windows) {
+      this.limitObservations.set(`claude:${window.id}`, { provider: 'claude', observedAt, window })
+    }
+    const previous = this.state.providers.claude || blankProvider()
+    const allowed = reading.status !== 'rejected'
+    this.state = { ...this.state, updatedAt: observedAt }
+    this.applyProvider('claude', {
+      ...previous,
+      status: 'ok',
+      error: null,
+      plan: previous.plan || reading.plan,
+      source: reading.source,
+      ...(allowed ? { quotaStatus: null, quotaError: null } : {})
+    })
+    // Persist so a restart, and every passive refresh, keeps showing these
+    // numbers without launching Claude's /usage panel at all.
+    writeClaudeUsageCache(reading.plan, reading.windows).catch(() => {})
     return true
   }
 
