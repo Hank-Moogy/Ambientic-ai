@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { knownUsageCommandCandidates, parseClaudeLimitError, parseClaudeRateLimitEvent, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
+
+// Observing usage persists it. Tests must never write over the real reading in
+// the user's home directory, so every service here gets a throwaway cache.
+const CACHE_PATH = join(tmpdir(), `ambientic-usage-test-${process.pid}.json`)
+const usageService = (options = {}) => new UsageService({ cachePath: CACHE_PATH, ...options })
 
 test('finds the Codex binary bundled in ChatGPT when no shell command exists', () => {
   const candidates = knownUsageCommandCandidates('codex', '/Users/tester')
@@ -127,7 +134,7 @@ test('a managed turn reports both Claude windows as live percentages', () => {
 })
 
 test('a turn observation supplies the 5-hour window the /usage panel omits', async () => {
-  const service = new UsageService({
+  const service = usageService({
     collectors: {
       // What the panel scrape returns while the session window is exhausted.
       claude: async () => ({ plan: 'subscription', windows: [{ id: 'seven-day', period: 'week', usedPercent: 19 }] }),
@@ -147,7 +154,7 @@ test('a turn observation supplies the 5-hour window the /usage panel omits', asy
 })
 
 test('a successful turn clears a limit rejection the account has moved past', () => {
-  const service = new UsageService({ collectors: {} })
+  const service = usageService({ collectors: {} })
   const future = Math.floor(Date.now() / 1000) + 3600
   service.observeClaudeLimit(`You've hit your session limit · resets ${new Date(future * 1000).getHours() % 12 || 12}:00pm`)
   assert.equal(service.getState().providers.claude.quotaStatus, 'CLAUDE_RATE_LIMITED')
@@ -162,7 +169,7 @@ test('a successful turn clears a limit rejection the account has moved past', ()
 test('a stream event without unified windows is ignored rather than blanking the gauge', () => {
   assert.equal(parseClaudeRateLimitEvent({ type: 'result', is_error: false }), null)
   assert.equal(parseClaudeRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' } }), null)
-  assert.equal(new UsageService({ collectors: {} }).observeClaudeWindows('not json'), false)
+  assert.equal(usageService({ collectors: {} }).observeClaudeWindows('not json'), false)
 })
 
 test('turn rejection becomes a 100% Claude session window with its real reset', () => {
@@ -190,7 +197,7 @@ test('observed Claude limit survives a weekly-only usage refresh until reset', a
   const reset = new Date(observedAt + 2 * 60 * 60 * 1000)
   const hours = reset.getHours() % 12 || 12
   const resetText = `${hours}:${String(reset.getMinutes()).padStart(2, '0')}${reset.getHours() >= 12 ? 'pm' : 'am'} (local)`
-  const service = new UsageService({
+  const service = usageService({
     collectors: {
       claude: async () => ({ plan: 'subscription', windows: [{ id: 'seven-day', period: 'week', usedPercent: 18 }] }),
       codex: async () => ({ windows: [] }),
@@ -212,7 +219,7 @@ test('queues a genuinely fresh provider pass when login completes during a refre
   let claudeCalls = 0
   const firstGate = new Promise((resolve) => { releaseFirst = resolve })
   const usage = (provider) => ({ plan: 'test', windows: [{ id: `${provider}-week`, period: 'week', usedPercent: 1 }] })
-  const service = new UsageService({
+  const service = usageService({
     collectors: {
       claude: async () => {
         claudeCalls += 1

@@ -316,13 +316,11 @@ async function readClaudeUsageCache () {
   return parseClaudeStatusLineUsage(await readFile(claudeUsageCachePath(), 'utf8'))
 }
 
-// Persist a freshly scraped observation in the same document the status-line
-// bridge writes. Current Claude builds no longer supply rate_limits to the
-// status line, so without this the cache is never written and every passive
-// refresh falls back to "waiting for an observation" — the long-standing reason
-// Claude usage did not display. Written atomically; failures are non-fatal.
-async function writeClaudeUsageCache (plan, windows) {
-  const file = claudeUsageCachePath()
+// Persist a freshly observed reading so passive refreshes — and the next app
+// launch — keep showing real numbers without launching Claude's /usage panel.
+// The destination is injectable so tests never write over the real observation
+// in the user's home directory. Written atomically; failures are non-fatal.
+async function writeClaudeUsageCache (plan, windows, file = claudeUsageCachePath()) {
   const document = {
     version: 1,
     provider: 'claude',
@@ -716,12 +714,13 @@ async function collectKimi () {
 }
 
 export class UsageService extends EventEmitter {
-  constructor ({ collectors } = {}) {
+  constructor ({ collectors, cachePath } = {}) {
     super()
     this.state = initialState()
     this.timer = null
     this.inFlight = null
     this.limitObservations = new Map()
+    this.cachePath = cachePath || claudeUsageCachePath()
     this.collectors = collectors || { claude: collectClaude, codex: collectCodex, kimi: collectKimi }
   }
 
@@ -816,7 +815,7 @@ export class UsageService extends EventEmitter {
     })
     // Persist so a restart, and every passive refresh, keeps showing these
     // numbers without launching Claude's /usage panel at all.
-    writeClaudeUsageCache(reading.plan, reading.windows).catch(() => {})
+    writeClaudeUsageCache(reading.plan, reading.windows, this.cachePath).catch(() => {})
     return true
   }
 
