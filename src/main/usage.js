@@ -123,7 +123,7 @@ async function resolveCommand (name) {
   return resolved
 }
 
-export function resetTextToEpoch (text) {
+export function resetTextToEpoch (text, now = new Date()) {
   if (!text) return null
   const clean = text.replace(/\s*\([^)]*\)\s*$/, '').replace(/\sat\s/i, ' ').trim()
   // A time-only reset like "7:09pm" (Claude's 5-hour window) means the next
@@ -137,7 +137,6 @@ export function resetTextToEpoch (text) {
   const dated = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(clean)
   const timeOnly = !dated && clean.match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i)
   if (timeOnly) {
-    const now = new Date()
     let hour = Number(timeOnly[1]) % 12
     if (/pm/i.test(timeOnly[3])) hour += 12
     const reset = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, Number(timeOnly[2] || 0), 0, 0)
@@ -146,11 +145,36 @@ export function resetTextToEpoch (text) {
   }
   const compactTime = clean.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2})(?::(\d{2}))?(am|pm)$/i)
   const normalized = compactTime
-    ? `${compactTime[1]} ${compactTime[2]} ${new Date().getFullYear()} ${compactTime[3]}:${compactTime[4] || '00'} ${compactTime[5].toUpperCase()}`
+    ? `${compactTime[1]} ${compactTime[2]} ${now.getFullYear()} ${compactTime[3]}:${compactTime[4] || '00'} ${compactTime[5].toUpperCase()}`
     : clean
-  const withYear = /\b\d{4}\b/.test(normalized) ? normalized : `${normalized} ${new Date().getFullYear()}`
+  const withYear = /\b\d{4}\b/.test(normalized) ? normalized : `${normalized} ${now.getFullYear()}`
   const value = Date.parse(withYear)
   return Number.isFinite(value) ? Math.floor(value / 1000) : null
+}
+
+// Claude's managed-turn error is more authoritative than its interactive
+// `/usage` panel while a limit is active: current builds can omit the session
+// row from that panel at exactly 100%, even though the rejected turn includes
+// the limit type and reset time. Normalize that provider signal into the same
+// window shape used by the Overview.
+export function parseClaudeLimitError (value, observedAt = Date.now()) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  const match = text.match(/(?:you(?:'|’)ve\s+)?hit your\s+(.{0,40}?limit)\s*[·-]?\s*resets?\s+(.+)$/i)
+  if (!match) return null
+  const kind = match[1].toLowerCase()
+  const resetText = match[2].trim()
+  const weekly = /week/.test(kind)
+  const session = /session|5\s*-?\s*hour|rate/.test(kind)
+  if (!weekly && !session) return null
+  return {
+    id: weekly ? 'seven-day' : 'five-hour',
+    label: weekly ? 'All models' : 'Current session',
+    period: weekly ? 'week' : 'short',
+    durationMins: weekly ? 7 * 24 * 60 : 300,
+    usedPercent: 100,
+    resetAt: resetTextToEpoch(resetText, new Date(observedAt)),
+    resetText
+  }
 }
 
 export function parseClaudeUsage (stdout) {
@@ -649,6 +673,7 @@ export class UsageService extends EventEmitter {
     this.state = initialState()
     this.timer = null
     this.inFlight = null
+    this.limitObservations = new Map()
     this.collectors = collectors || { claude: collectClaude, codex: collectCodex, kimi: collectKimi }
   }
 
@@ -680,11 +705,43 @@ export class UsageService extends EventEmitter {
   }
 
   applyProvider (name, provider) {
+    const now = Date.now()
+    const observed = [...this.limitObservations.values()]
+      .filter((item) => item.provider === name && (!item.window.resetAt || item.window.resetAt * 1000 > now))
+    for (const [key, item] of this.limitObservations) {
+      if (item.window.resetAt && item.window.resetAt * 1000 <= now) this.limitObservations.delete(key)
+    }
+    if (observed.length) {
+      const windows = [...(provider.windows || [])]
+      for (const item of observed) {
+        const index = windows.findIndex((window) => window.id === item.window.id)
+        if (index >= 0) windows[index] = item.window
+        else windows.push(item.window)
+      }
+      provider = { ...provider, windows }
+    }
     this.state = {
       ...this.state,
       providers: { ...this.state.providers, [name]: provider }
     }
     this.emitState()
+  }
+
+  observeClaudeLimit (value, observedAt = Date.now()) {
+    const window = parseClaudeLimitError(value, observedAt)
+    if (!window) return false
+    this.limitObservations.set(`claude:${window.id}`, { provider: 'claude', observedAt, window })
+    const previous = this.state.providers.claude || blankProvider()
+    this.state = { ...this.state, updatedAt: observedAt }
+    this.applyProvider('claude', {
+      ...previous,
+      status: 'ok',
+      error: null,
+      source: 'claude-turn-limit',
+      quotaStatus: 'CLAUDE_RATE_LIMITED',
+      quotaError: `Claude ${window.period === 'week' ? 'weekly' : 'session'} limit reached · resets ${window.resetText}`
+    })
+    return true
   }
 
   async doRefresh (force = false) {

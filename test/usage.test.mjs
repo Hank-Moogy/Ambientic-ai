@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { knownUsageCommandCandidates, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
+import { knownUsageCommandCandidates, parseClaudeLimitError, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
 
 test('finds the Codex binary bundled in ChatGPT when no shell command exists', () => {
   const candidates = knownUsageCommandCandidates('codex', '/Users/tester')
@@ -101,6 +101,48 @@ test('keeps a still-open window when a sibling window has already reset', () => 
   assert.deepEqual(result.windows.map(({ id, usedPercent }) => ({ id, usedPercent })), [
     { id: 'seven-day', usedPercent: 3 }
   ])
+})
+
+test('turn rejection becomes a 100% Claude session window with its real reset', () => {
+  const observedAt = new Date(2026, 7, 28, 18, 45).getTime()
+  const result = parseClaudeLimitError("You've hit your session limit · resets 9:10pm (Europe/Paris)", observedAt)
+  assert.deepEqual({
+    id: result.id,
+    period: result.period,
+    durationMins: result.durationMins,
+    usedPercent: result.usedPercent,
+    resetHour: new Date(result.resetAt * 1000).getHours(),
+    resetMinute: new Date(result.resetAt * 1000).getMinutes()
+  }, {
+    id: 'five-hour',
+    period: 'short',
+    durationMins: 300,
+    usedPercent: 100,
+    resetHour: 21,
+    resetMinute: 10
+  })
+})
+
+test('observed Claude limit survives a weekly-only usage refresh until reset', async () => {
+  const observedAt = Date.now()
+  const reset = new Date(observedAt + 2 * 60 * 60 * 1000)
+  const hours = reset.getHours() % 12 || 12
+  const resetText = `${hours}:${String(reset.getMinutes()).padStart(2, '0')}${reset.getHours() >= 12 ? 'pm' : 'am'} (local)`
+  const service = new UsageService({
+    collectors: {
+      claude: async () => ({ plan: 'subscription', windows: [{ id: 'seven-day', period: 'week', usedPercent: 18 }] }),
+      codex: async () => ({ windows: [] }),
+      kimi: async () => ({ windows: [] })
+    }
+  })
+
+  assert.equal(service.observeClaudeLimit(`You've hit your session limit · resets ${resetText}`, observedAt), true)
+  assert.equal(service.getState().providers.claude.windows.find((window) => window.id === 'five-hour').usedPercent, 100)
+
+  await service.refresh()
+  const windows = service.getState().providers.claude.windows
+  assert.equal(windows.find((window) => window.id === 'five-hour').usedPercent, 100)
+  assert.equal(windows.find((window) => window.id === 'seven-day').usedPercent, 18)
 })
 
 test('queues a genuinely fresh provider pass when login completes during a refresh', async () => {

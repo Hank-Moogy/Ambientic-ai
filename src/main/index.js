@@ -1550,6 +1550,9 @@ app.whenReady().then(() => {
     sendToWindows('thread', snapshot)
     scheduleWorkspaceThreads()
   })
+  workspace.on('provider-limit', ({ provider, error, observedAt }) => {
+    if (provider === 'claude') usage.observeClaudeLimit(error, observedAt)
+  })
   workspace.on('provider-auth', async (payload) => {
     if (payload.loginId && payload.loginId === pendingCodexLogin && ['connected', 'failed'].includes(payload.status)) pendingCodexLogin = ''
     await refreshConnectors()

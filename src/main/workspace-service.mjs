@@ -1515,6 +1515,9 @@ export class WorkspaceService extends EventEmitter {
       // A failed turn is the single most common bug report ("chat just fails"),
       // and the binary plus Claude's own error text are what make it diagnosable.
       console.error(`[claude] turn failed (exit ${code}) via ${path}: ${String(errorText).slice(0, 500)}`)
+      if (/hit your\s+.{0,40}limit/i.test(errorText)) {
+        this.emit('provider-limit', { provider: 'claude', error: String(errorText), observedAt: Date.now(), sessionId: session.id })
+      }
       this.fail(session.id, new Error(this.claudeResultError(session.id, errorText)))
     })
   }

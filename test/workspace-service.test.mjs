@@ -715,6 +715,33 @@ test('a failed turn reports why, even when Claude sends an empty result', () => 
   assert.match(detail, /denied Read/)
 })
 
+test('a Claude limit rejection emits usage evidence before failing the turn', () => {
+  const handlers = {}
+  const failures = []
+  const session = { id: 'thread-limit', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => ({
+      stdout: { on () {} },
+      stderr: { on: (event, handler) => { handlers.stderr = handler } },
+      on: (event, handler) => { handlers[event] = handler }
+    })
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.fail = (id, error) => failures.push({ id, error: error.message })
+  let evidence = null
+  service.on('provider-limit', (payload) => { evidence = payload })
+
+  service.runClaude(session, 'Continue.', {})
+  handlers.stderr(Buffer.from("You've hit your session limit · resets 9:10pm (Europe/Paris)"))
+  handlers.exit(1)
+
+  assert.equal(evidence.provider, 'claude')
+  assert.equal(evidence.sessionId, 'thread-limit')
+  assert.match(evidence.error, /session limit/)
+  assert.equal(failures.length, 1)
+})
+
 function brokerService (session, projects = []) {
   const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
   service.recentProjects = () => projects
