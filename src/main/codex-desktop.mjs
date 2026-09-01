@@ -3,6 +3,7 @@ import { open, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { humanThreadTitle } from './summarizer.js'
+import { awaitsUserReply } from './turn-signals.mjs'
 
 const MAX_DESKTOP_THREADS = 8
 const ACTIVE_LOOKBACK_DAYS = 7
@@ -45,6 +46,8 @@ export function codexDesktopState (rolloutText, now = Date.now(), activityMs = 0
   let completedAt = 0
   let approvalAt = 0
   let rolloutActivityAt = 0
+  let questionAt = 0
+  let repliedAt = 0
 
   for (const line of String(rolloutText || '').split('\n')) {
     if (!line.trim()) continue
@@ -56,10 +59,20 @@ export function codexDesktopState (rolloutText, now = Date.now(), activityMs = 0
       if (type === 'task_started') startedAt = Math.max(startedAt, timestamp)
       if (type === 'task_complete') completedAt = Math.max(completedAt, timestamp)
       if (/approval_request|request_approval/i.test(String(type || ''))) approvalAt = Math.max(approvalAt, timestamp)
+      // Codex asks for input by ending its turn on a question rather than by
+      // emitting an event for it, so the message text is the only signal. A
+      // later user message is the answer, which is what keeps a long-resolved
+      // question from holding the pad red forever.
+      if (type === 'agent_message' && awaitsUserReply(event?.payload?.message)) questionAt = Math.max(questionAt, timestamp)
+      if (type === 'user_message') repliedAt = Math.max(repliedAt, timestamp)
     } catch {}
   }
 
   if (approvalAt > completedAt && approvalAt >= startedAt) return 'attention'
+  // An unanswered question outranks "finished". The turn did complete, but it
+  // completed by handing the decision back — which the native app shows as a
+  // prompt while Ambientic showed the thread as idle.
+  if (questionAt > repliedAt && questionAt >= startedAt) return 'attention'
   const activeActivityAt = Math.max(rolloutActivityAt, Number(activityMs) || 0)
   if (startedAt > completedAt) {
     return activeActivityAt && now - activeActivityAt <= ACTIVE_TURN_ACTIVITY_MS ? 'running' : 'idle'

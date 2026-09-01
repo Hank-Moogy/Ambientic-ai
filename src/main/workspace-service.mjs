@@ -11,6 +11,7 @@ import { assembleProviderPrompt, stripAmbienticContext } from './context-assembl
 import { humanThreadTitle, namesThread } from './summarizer.js'
 import { decideToolPermission } from './permission-policy.mjs'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
+import { awaitsUserReply } from './turn-signals.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -368,8 +369,16 @@ function codexActiveTurnId (thread) {
 function codexAwaitsReply (thread) {
   const last = thread?.turns?.at(-1)?.items?.at(-1)
   if (last?.type !== 'agentMessage') return false
-  const text = String(last.text || '').replace(/[\s*_"'`)\]]+$/, '')
-  return /\?$/.test(text)
+  return awaitsUserReply(last.text)
+}
+
+// The same question, read from a snapshot instead of a provider thread. Claude
+// and Hermes report their transcript into the snapshot rather than through a
+// readable thread object, and without this they end a turn on a question and
+// show up as plain idle — the same pause Codex surfaces as needing you.
+function snapshotAwaitsReply (snapshot) {
+  const last = [...(snapshot?.messages || [])].reverse().find((entry) => entry?.role === 'assistant' || entry?.role === 'user')
+  return last?.role === 'assistant' && awaitsUserReply(last.text)
 }
 
 function codexEventTurnId (event) {
@@ -1357,6 +1366,10 @@ export class WorkspaceService extends EventEmitter {
     })
     snapshot.messages = [...snapshot.messages, pending]
     snapshot.running = true
+    // The message being sent is the answer, so the question no longer stands.
+    // `awaitingReply` outranks `running` in effectiveState, so leaving it set
+    // keeps a thread red for the whole turn the user just started.
+    snapshot.awaitingReply = false
     snapshot.turnStateKnown = true
     snapshot.updatedAt = Date.now()
     this.ingestLifecycle(id, 'prompt')
@@ -1728,6 +1741,11 @@ export class WorkspaceService extends EventEmitter {
         } catch (error) {
           console.error('[ambientic] Codex transcript reconciliation failed:', error.message)
         }
+      } else {
+        // Every other provider ends its turn in the snapshot, where the last
+        // assistant message carries the same signal.
+        awaitingReply = snapshotAwaitsReply(snapshot)
+        snapshot.awaitingReply = awaitingReply
       }
       for (const entry of snapshot.messages) delete entry.streaming
       snapshot.updatedAt = Date.now()

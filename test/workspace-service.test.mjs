@@ -715,6 +715,54 @@ test('a failed turn reports why, even when Claude sends an empty result', () => 
   assert.match(detail, /denied Read/)
 })
 
+test('a Claude turn that ends by asking surfaces as needing you, like Codex', async () => {
+  const session = { id: 'claude-question', agent: 'claude', cwd: '/tmp/project', state: 'running' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, {
+    id: session.id,
+    provider: 'claude',
+    messages: [{ id: 'm1', role: 'assistant', text: 'Which database should I point it at?' }],
+    artifacts: [],
+    approvals: [],
+    running: true,
+    state: 'running'
+  })
+
+  await service.finish(session.id)
+
+  assert.equal(service.snapshots.get(session.id).awaitingReply, true)
+  assert.equal(service.effectiveState(session, service.snapshots.get(session.id)), 'attention')
+})
+
+test('a Claude turn that simply reports work stays idle', async () => {
+  const session = { id: 'claude-done', agent: 'claude', cwd: '/tmp/project', state: 'running' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, {
+    id: session.id,
+    provider: 'claude',
+    messages: [{ id: 'm1', role: 'assistant', text: 'Deployed and verified.' }],
+    artifacts: [],
+    approvals: [],
+    running: true,
+    state: 'running'
+  })
+
+  await service.finish(session.id)
+
+  assert.equal(service.snapshots.get(session.id).awaitingReply, false)
+  assert.equal(service.effectiveState(session, service.snapshots.get(session.id)), 'idle')
+})
+
+test('answering a question clears it, so the thread is not red while it works', () => {
+  const session = { id: 'answered', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  // awaitingReply outranks running, so a stale flag would keep the pad red for
+  // the whole turn the user just started by answering.
+  const snapshot = { id: session.id, provider: 'claude', messages: [], artifacts: [], approvals: [], awaitingReply: true, running: true, turnStateKnown: true }
+  assert.equal(service.effectiveState(session, snapshot), 'attention')
+  assert.equal(service.effectiveState(session, { ...snapshot, awaitingReply: false }), 'running')
+})
+
 test('a turn reports account usage even for a thread the UI is not showing', () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
   const seen = []
