@@ -15,6 +15,7 @@ import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { signAsync } from '@electron/osx-sign'
+import { installedAppPids as findInstalledAppPids } from './installed-app-pids.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(scriptDirectory, '..')
@@ -22,6 +23,7 @@ const manifestPath = join(root, 'resources', 'build-info.json')
 const lockPath = join(tmpdir(), 'ambientic-local-release.lock')
 const lockOwnerPath = join(lockPath, 'owner.json')
 const installedApp = '/Applications/Ambientic.app'
+const installedAppExecutable = join(installedApp, 'Contents', 'MacOS', 'Ambientic')
 
 function run (command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -124,14 +126,7 @@ function sleep (milliseconds) {
 }
 
 function installedAppPids () {
-  try {
-    return output('pgrep', ['-f', '^/Applications/Ambientic\\.app/Contents/MacOS/Ambientic$'])
-      .split(/\s+/)
-      .map(Number)
-      .filter((pid) => Number.isInteger(pid) && pid > 0)
-  } catch {
-    return []
-  }
+  return findInstalledAppPids(installedAppExecutable)
 }
 
 function parentPid (pid) {

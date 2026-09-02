@@ -120,11 +120,11 @@ Implemented:
 - Claude limit rejections from managed turns now update the Overview immediately, including a 100% session or weekly window and the provider-reported reset time; that evidence remains authoritative until reset even when Claude's interactive `/usage` panel omits the exhausted window.
 - Claude usage gauges track every managed turn. Claude's `stream-json` output carries a `rate_limit_event` derived from the API's own unified rate-limit headers, so each turn refreshes the 5-hour and weekly gauges exactly, with no extra process launch and no quota cost. The interactive `/usage` scrape is now only a fallback for when no turn has run recently.
 - Claude's refusals are read as limits regardless of wording. An exhausted subscription window on an account whose extra usage cannot cover the overflow is reported by Claude Code as missing usage credits or as an organization that disabled Claude Code, never as a limit; Ambientic now recognises those and reports a 100% session window, and the thread explains what actually happened instead of repeating a message about an administrator.
+- The local release finds the running installed app through `ps` rather than `pgrep -f`. The old lookup reported no match for a demonstrably running app when a release was started from a Claude session Ambientic had spawned, and both callers read an empty result as "not running" — so the guard against releasing from inside Ambientic never fired and the wait for the old process returned immediately, which is exactly how a bundle gets replaced underneath a live app. Helper and MCP-shim processes running the same binary are still excluded.
 - Safety & approvals now has one persisted provider-neutral default: Ask me, Work in project, or Approve routine work. Ambientic compiles that intent into an explicit Codex sandbox/reviewer policy, Claude's native permission mode, and conservative Hermes ACP decisions; Hermes project edits can proceed quietly while dangerous commands still require the user because Hermes exposes no equivalent automatic reviewer.
 
 Next:
 
-- Install and smoke the signed milestone build after committing the completed cleanup.
 - Run a full installed-app acceptance pass across Claude Code, Codex, Hermes, and one real external MCP server.
 - Complete physical APC validation for two-view navigation, confirmations, voice input, and RGB state restoration.
 - Improve artifact review, thread-to-goal evidence linking, source visibility, and cross-device supervision.
@@ -133,8 +133,10 @@ Next:
 
 Verification on 2026-09-02:
 
-- `npm test`: 297 tests, 295 passed, 2 intentional transport skips, 0 failures.
+- `npm test`: 302 tests, 300 passed, 2 intentional transport skips, 0 failures.
 - `npm run build`: production main, preload, and renderer bundles built successfully.
-- Signed installation, relaunch, build-identity, health, and physical APC smoke remain the release step after commit.
+- `npm run release:local`: packaged, signed, installed into `/Applications/Ambientic.app`, relaunched, and reported healthy; installed build identity confirmed against the release commit and `codesign --verify --deep --strict` passed.
+- The `ps` lookup was checked against the live installed app, not only in tests: it returns the running app's pid from a session where `pgrep -f` had previously returned nothing.
+- Physical APC smoke remains outstanding.
 
 The durable visual direction is defined in [ART_DIRECTION.md](ART_DIRECTION.md), the product contract in [PRODUCT.md](PRODUCT.md), and the forward architecture in [PRODUCT_DIRECTION.md](PRODUCT_DIRECTION.md).
