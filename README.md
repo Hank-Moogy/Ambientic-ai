@@ -106,7 +106,7 @@ The canonical installed-app milestone gate is `npm run release:local`. It rebuil
 
 ## Current status
 
-Last updated: 2026-09-01
+Last updated: 2026-09-02
 
 Implemented:
 
@@ -119,6 +119,7 @@ Implemented:
 - Overview load path: per-source state hydration in place of a single blocking `Promise.all`, an immediate non-blocking `get-connectors` reply backed by a deduplicated background probe, parallel auth and version reads per provider, and staggered skeleton pads while each slice is in flight.
 - Claude limit rejections from managed turns now update the Overview immediately, including a 100% session or weekly window and the provider-reported reset time; that evidence remains authoritative until reset even when Claude's interactive `/usage` panel omits the exhausted window.
 - Claude usage gauges track every managed turn. Claude's `stream-json` output carries a `rate_limit_event` derived from the API's own unified rate-limit headers, so each turn refreshes the 5-hour and weekly gauges exactly, with no extra process launch and no quota cost. The interactive `/usage` scrape is now only a fallback for when no turn has run recently.
+- Claude's refusals are read as limits regardless of wording. An exhausted subscription window on an account whose extra usage cannot cover the overflow is reported by Claude Code as missing usage credits or as an organization that disabled Claude Code, never as a limit; Ambientic now recognises those and reports a 100% session window, and the thread explains what actually happened instead of repeating a message about an administrator.
 - Safety & approvals now has one persisted provider-neutral default: Ask me, Work in project, or Approve routine work. Ambientic compiles that intent into an explicit Codex sandbox/reviewer policy, Claude's native permission mode, and conservative Hermes ACP decisions; Hermes project edits can proceed quietly while dangerous commands still require the user because Hermes exposes no equivalent automatic reviewer.
 
 Next:
@@ -130,9 +131,9 @@ Next:
 - Develop Ambientic Coach as an opt-in, evidence-backed recommendation layer without automatic mutation.
 - Validate privacy-safe hardware template exchange before considering public sharing or accounts.
 
-Verification on 2026-09-01:
+Verification on 2026-09-02:
 
-- `npm test`: 293 tests, 291 passed, 2 intentional transport skips, 0 failures.
+- `npm test`: 297 tests, 295 passed, 2 intentional transport skips, 0 failures.
 - `npm run build`: production main, preload, and renderer bundles built successfully.
 - Signed installation, relaunch, build-identity, health, and physical APC smoke remain the release step after commit.
 

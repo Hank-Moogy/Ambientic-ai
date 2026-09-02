@@ -13,6 +13,7 @@ import { decideToolPermission } from './permission-policy.mjs'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
 import { awaitsUserReply } from './turn-signals.mjs'
 import { claudePermissionMode, codexApprovalSettings, hermesAutoApproval, normalizeApprovalProfile } from './approval-profile.mjs'
+import { isClaudeLimitRejection } from './usage.js'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -1555,7 +1556,7 @@ export class WorkspaceService extends EventEmitter {
       // A failed turn is the single most common bug report ("chat just fails"),
       // and the binary plus Claude's own error text are what make it diagnosable.
       console.error(`[claude] turn failed (exit ${code}) via ${path}: ${String(errorText).slice(0, 500)}`)
-      if (/hit your\s+.{0,40}limit/i.test(errorText)) {
+      if (isClaudeLimitRejection(errorText)) {
         this.emit('provider-limit', { provider: 'claude', error: String(errorText), observedAt: Date.now(), sessionId: session.id })
       }
       this.fail(session.id, new Error(this.claudeResultError(session.id, errorText)))
@@ -1637,6 +1638,14 @@ export class WorkspaceService extends EventEmitter {
   // Claude Code does, so point the user at the ways forward.
   claudeResultError (id, result) {
     const text = String(result || 'Claude returned an error')
+    // Claude Code reports an exhausted subscription window through whichever
+    // fallback it just failed to reach, so the user is told about usage credits
+    // or an organization administrator when the real event is simply that the
+    // 5-hour window is full and this account has no paid overflow. Say that
+    // plainly; keep the provider's own sentence so nothing is hidden.
+    if (/out of usage credits|organization has disabled claude subscription access/i.test(text)) {
+      return `Claude Code refused this turn: the subscription window is used up and this account has no extra usage to fall back on, so Claude offered an API key or an admin as the alternative. Nothing is wrong with your organization or your login. Wait for the window to reset, switch this thread to a smaller Claude model, or hand it off to another provider.\n\nClaude Code said: ${text}`
+    }
     if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(text)) {
       const cwd = this.sessionFor(id)?.cwd || ''
       return `This conversation is too long for Claude to resume — its history exceeds the model's context window, and non-interactive turns can't compact it. Start a new task${cwd ? ` in ${cwd}` : ''}, or resume it in a terminal (\`claude --resume ${id}\`) and run /compact, then continue here.`

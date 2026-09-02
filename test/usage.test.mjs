@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { knownUsageCommandCandidates, parseClaudeLimitError, parseClaudeRateLimitEvent, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
+import { isClaudeLimitRejection, knownUsageCommandCandidates, parseClaudeLimitError, parseClaudeRateLimitEvent, parseClaudeStatusLineUsage, parseCodexRateLimits, resetTextToEpoch, UsageService } from '../src/main/usage.js'
 
 // Observing usage persists it. Tests must never write over the real reading in
 // the user's home directory, so every service here gets a throwaway cache.
@@ -212,6 +212,74 @@ test('observed Claude limit survives a weekly-only usage refresh until reset', a
   const windows = service.getState().providers.claude.windows
   assert.equal(windows.find((window) => window.id === 'five-hour').usedPercent, 100)
   assert.equal(windows.find((window) => window.id === 'seven-day').usedPercent, 18)
+})
+
+test('the refusals Claude actually sends for an exhausted window are read as a limit', () => {
+  // The account these came from had `overageStatus: rejected` with
+  // `overageDisabledReason: out_of_credits`, so a full 5-hour window surfaced
+  // as a billing or administrator problem instead of a limit. Reading only the
+  // "hit your ... limit" wording left the Overview showing 27% while every turn
+  // in the thread was refused.
+  const refusals = [
+    'Your organization has disabled Claude subscription access for Claude Code \u00b7 Use an Anthropic API key instead, or ask your admin to enable access',
+    "You're out of usage credits. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue."
+  ]
+  for (const text of refusals) {
+    assert.equal(isClaudeLimitRejection(text), true)
+    const window = parseClaudeLimitError(text)
+    assert.equal(window.id, 'five-hour')
+    assert.equal(window.usedPercent, 100)
+    assert.equal(window.resetAt, null)
+  }
+
+  assert.equal(isClaudeLimitRejection('Claude exited with code 1'), false)
+  assert.equal(parseClaudeLimitError('Claude exited with code 1'), null)
+})
+
+test('a limit rejection with no reset time is reported without a null reset', () => {
+  const service = usageService({ collectors: {} })
+  service.observeClaudeLimit("You're out of usage credits. Switch to another model, to continue.")
+  const claude = service.getState().providers.claude
+  assert.equal(claude.quotaStatus, 'CLAUDE_RATE_LIMITED')
+  assert.equal(claude.quotaError, 'Claude session limit reached')
+})
+
+test('a limit whose reset time cannot be parsed expires with its own window', async () => {
+  const service = usageService({
+    collectors: {
+      claude: async () => ({ plan: 'subscription', windows: [{ id: 'seven-day', period: 'week', usedPercent: 18 }] }),
+      codex: async () => ({ windows: [] }),
+      kimi: async () => ({ windows: [] })
+    }
+  })
+
+  // Claude phrases some rejections relatively, which leaves no reset timestamp
+  // to expire on. Treating that as permanent kept the Overview and the
+  // in-thread handover banner claiming a limit long after it had lifted.
+  const observedAt = Date.now() - 6 * 60 * 60 * 1000
+  assert.equal(service.observeClaudeLimit("You've hit your session limit \u00b7 resets in 42 minutes", observedAt), true)
+  assert.equal(parseClaudeLimitError("You've hit your session limit \u00b7 resets in 42 minutes", observedAt).resetAt, null)
+
+  await service.refresh()
+  const windows = service.getState().providers.claude.windows
+  assert.equal(windows.find((window) => window.id === 'five-hour'), undefined)
+  assert.equal(windows.find((window) => window.id === 'seven-day').usedPercent, 18)
+})
+
+test('a limit whose reset time cannot be parsed still holds for its window', async () => {
+  const service = usageService({
+    collectors: {
+      claude: async () => ({ plan: 'subscription', windows: [{ id: 'seven-day', period: 'week', usedPercent: 18 }] }),
+      codex: async () => ({ windows: [] }),
+      kimi: async () => ({ windows: [] })
+    }
+  })
+
+  assert.equal(service.observeClaudeLimit("You've hit your session limit \u00b7 resets in 42 minutes", Date.now()), true)
+
+  await service.refresh()
+  const windows = service.getState().providers.claude.windows
+  assert.equal(windows.find((window) => window.id === 'five-hour').usedPercent, 100)
 })
 
 test('queues a genuinely fresh provider pass when login completes during a refresh', async () => {

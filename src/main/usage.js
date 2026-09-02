@@ -154,13 +154,55 @@ export function resetTextToEpoch (text, now = new Date()) {
 
 // Claude's managed-turn error is more authoritative than its interactive
 // `/usage` panel while a limit is active: current builds can omit the session
-// row from that panel at exactly 100%, even though the rejected turn includes
-// the limit type and reset time. Normalize that provider signal into the same
-// window shape used by the Overview.
+// row from that panel at exactly 100%, even though the rejected turn carries
+// the refusal. Normalize that provider signal into the same window shape used
+// by the Overview.
+//
+// Only one of Claude Code's refusals names the limit and its reset time. The
+// rest describe the *consequence* of an exhausted window on an account whose
+// extra usage cannot cover the overflow -- "You're out of usage credits" and
+// "Your organization has disabled Claude subscription access for Claude Code"
+// are both what a used-up 5-hour window looks like when `overageStatus` is
+// rejected. Reading only the first wording left the Overview reporting a
+// comfortable 27% while every turn in the thread was being refused, and handed
+// the user a message about an administrator that had nothing to do with it.
+const CLAUDE_LIMIT_WITH_RESET = /(?:you(?:'|’)ve\s+)?hit your\s+(.{0,40}?limit)\s*[·\-]?\s*resets?\s+(.+)$/i
+// Refusals that prove a window is exhausted but name neither window nor reset.
+// They expire on the window's own duration; see `observationExpiry`.
+const CLAUDE_LIMIT_WITHOUT_RESET = [
+  /out of usage credits/i,
+  /usage limit reached/i,
+  /organization has disabled claude subscription access/i,
+  /manage usage credits at/i
+]
+
+// Whether a provider error is Claude refusing the turn on entitlement grounds.
+// Shared with the workspace so the thread and the Overview never disagree about
+// what just happened.
+export function isClaudeLimitRejection (value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text) return false
+  return CLAUDE_LIMIT_WITH_RESET.test(text) || CLAUDE_LIMIT_WITHOUT_RESET.some((pattern) => pattern.test(text))
+}
+
 export function parseClaudeLimitError (value, observedAt = Date.now()) {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
-  const match = text.match(/(?:you(?:'|’)ve\s+)?hit your\s+(.{0,40}?limit)\s*[·-]?\s*resets?\s+(.+)$/i)
-  if (!match) return null
+  const match = text.match(CLAUDE_LIMIT_WITH_RESET)
+  if (!match) {
+    // No window named. The 5-hour window is the one that runs out first and is
+    // the one the /usage panel drops at 100%, so attribute it there rather than
+    // claiming a weekly exhaustion we cannot evidence.
+    if (!CLAUDE_LIMIT_WITHOUT_RESET.some((pattern) => pattern.test(text))) return null
+    return {
+      id: 'five-hour',
+      label: 'Current session',
+      period: 'short',
+      durationMins: 300,
+      usedPercent: 100,
+      resetAt: null,
+      resetText: null
+    }
+  }
   const kind = match[1].toLowerCase()
   const resetText = match[2].trim()
   const weekly = /week/.test(kind)
@@ -713,6 +755,21 @@ async function collectKimi () {
   return parseKimiUsage(await response.json())
 }
 
+// When a limit observation stops being evidence. Claude reports the reset time
+// on most rejections, but not all of them: "resets in 42 minutes" and other
+// relative phrasings leave `resetAt` null. Treating a null reset as "never
+// expires" pinned the provider at 100% for the life of the process, so the
+// Overview and the in-thread handover banner kept announcing a limit the
+// account was no longer under. A window cannot outlive its own duration, so
+// fall back to that bound measured from when the rejection was observed.
+function observationExpiry (item) {
+  const resetAt = Number(item?.window?.resetAt)
+  if (Number.isFinite(resetAt) && resetAt > 0) return resetAt * 1000
+  const durationMins = Number(item?.window?.durationMins)
+  const observedAt = Number(item?.observedAt) || 0
+  return observedAt + (Number.isFinite(durationMins) && durationMins > 0 ? durationMins : 300) * 60_000
+}
+
 export class UsageService extends EventEmitter {
   constructor ({ collectors, cachePath } = {}) {
     super()
@@ -753,11 +810,10 @@ export class UsageService extends EventEmitter {
 
   applyProvider (name, provider) {
     const now = Date.now()
-    const observed = [...this.limitObservations.values()]
-      .filter((item) => item.provider === name && (!item.window.resetAt || item.window.resetAt * 1000 > now))
     for (const [key, item] of this.limitObservations) {
-      if (item.window.resetAt && item.window.resetAt * 1000 <= now) this.limitObservations.delete(key)
+      if (observationExpiry(item) <= now) this.limitObservations.delete(key)
     }
+    const observed = [...this.limitObservations.values()].filter((item) => item.provider === name)
     if (observed.length) {
       const windows = [...(provider.windows || [])]
       for (const item of observed) {
@@ -786,7 +842,9 @@ export class UsageService extends EventEmitter {
       error: null,
       source: 'claude-turn-limit',
       quotaStatus: 'CLAUDE_RATE_LIMITED',
-      quotaError: `Claude ${window.period === 'week' ? 'weekly' : 'session'} limit reached · resets ${window.resetText}`
+      // Not every refusal names a reset time; say what is known rather than
+      // rendering "resets null" at the user.
+      quotaError: `Claude ${window.period === 'week' ? 'weekly' : 'session'} limit reached${window.resetText ? ` · resets ${window.resetText}` : ''}`
     })
     return true
   }
