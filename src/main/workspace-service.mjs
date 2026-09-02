@@ -12,6 +12,7 @@ import { humanThreadTitle, namesThread } from './summarizer.js'
 import { decideToolPermission } from './permission-policy.mjs'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
 import { awaitsUserReply } from './turn-signals.mjs'
+import { claudePermissionMode, codexApprovalSettings, hermesAutoApproval, normalizeApprovalProfile } from './approval-profile.mjs'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -510,6 +511,8 @@ export class WorkspaceService extends EventEmitter {
     aliases = {},
     grants = [],
     onGrantsChange = null,
+    approvalProfile = 'ask',
+    onApprovalProfileChange = null,
     onAliasesChange,
     taskWorkspaceRoot = join(homedir(), '.ambientic', 'workspaces'),
     contextEngine = null,
@@ -553,6 +556,8 @@ export class WorkspaceService extends EventEmitter {
     // "for this session" that survived a restart would be a promise broken.
     this.grants = Array.isArray(grants) ? grants.filter((grant) => grant?.scope === 'always') : []
     this.onGrantsChange = onGrantsChange
+    this.approvalProfile = normalizeApprovalProfile(approvalProfile)
+    this.onApprovalProfileChange = onApprovalProfileChange
     // approvalId -> promise of the user's answer, awaited by the provider bridge.
     this.pendingToolDecisions = new Map()
     // Memory-export sessions are deliberately isolated from Ambientic's own
@@ -1039,6 +1044,14 @@ export class WorkspaceService extends EventEmitter {
   providerApproval (provider, rpc, request) {
     const providerSessionId = request.params?.sessionId || request.params?.threadId || request.params?.conversationId || ''
     const sessionId = this.uiSessionId(provider, providerSessionId)
+    const session = this.sessionFor(sessionId)
+    if (provider === 'hermes') {
+      const automatic = hermesAutoApproval(this.approvalProfile, request, session?.cwd || '')
+      if (automatic) {
+        rpc.respond(request.id, { outcome: automatic })
+        return
+      }
+    }
     const id = `${provider}:${request.id}`
     const scopes = provider === 'codex' ? codexApprovalScopes(request) : ['once']
     const approval = {
@@ -1171,6 +1184,18 @@ export class WorkspaceService extends EventEmitter {
     return this.grants.map((grant) => ({ ...grant }))
   }
 
+  getApprovalProfile () {
+    return this.approvalProfile
+  }
+
+  setApprovalProfile (value) {
+    const profile = normalizeApprovalProfile(value)
+    if (profile === this.approvalProfile) return profile
+    this.approvalProfile = profile
+    this.onApprovalProfileChange?.(profile)
+    return profile
+  }
+
   // Keeps the session store's approval flag in step with what is actually
   // pending, so the APC grid shows a thread waiting on the user as waiting.
   syncApprovalLight (sessionId) {
@@ -1195,8 +1220,10 @@ export class WorkspaceService extends EventEmitter {
       input,
       cwd: cwd || session.cwd || '',
       projectRoots: this.discoverableProjects(cwd || session.cwd || '').map((item) => item.cwd),
-      grants: this.grantsFor(sessionId)
+      grants: this.grantsFor(sessionId),
+      approvalProfile: this.approvalProfile
     })
+    if (verdict.decision === 'defer') return null
     if (verdict.decision !== 'ask') return { decision: verdict.decision, reason: verdict.reason }
 
     const id = `tool:${randomUUID()}`
@@ -1400,12 +1427,12 @@ export class WorkspaceService extends EventEmitter {
           input
         })
       } else {
+        const approvalSettings = codexApprovalSettings(this.approvalProfile, { cwd, mode: promptOptions.mode })
         const result = await rpc.request('turn/start', {
           threadId,
           input,
           clientUserMessageId: pending.id,
-          approvalPolicy: 'on-request',
-          approvalsReviewer: 'user',
+          ...approvalSettings,
           ...(collaborationMode
             ? { collaborationMode }
             : {
@@ -1445,10 +1472,10 @@ export class WorkspaceService extends EventEmitter {
       const rpc = await this.codexClient()
       const normalized = normalizePromptOptions({ model, effort, mode }, provider)
       const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding, gatewayScopes })
+      const approvalSettings = codexApprovalSettings(this.approvalProfile, { cwd: workingDirectory, mode: normalized.mode, thread: true })
       const result = await rpc.request('thread/start', {
         cwd: workingDirectory,
-        approvalPolicy: 'on-request',
-        approvalsReviewer: 'user',
+        ...approvalSettings,
         ...(normalized.model ? { model: normalized.model } : {}),
         ...(context?.binding?.capsuleText ? { developerInstructions: context.binding.capsuleText } : {}),
         ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
@@ -1494,7 +1521,7 @@ export class WorkspaceService extends EventEmitter {
     // found with session ID" and exits non-zero ("Claude exited with code 1").
     const claudeId = this.claudeSessionId(session)
     const started = Boolean(this.claudeTranscriptFor(session))
-    const permissionMode = mode === 'build' ? 'acceptEdits' : 'plan'
+    const permissionMode = claudePermissionMode(this.approvalProfile, mode)
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', permissionMode]
     if (!this.contextSuppressedSessions.has(session.id)) context ||= this.ensureContext(session, { prompt })
     if (context?.capsulePath) args.push('--append-system-prompt-file', context.capsulePath)

@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('controller', {
   // `remember` is 'once' | 'session' | 'always' — the button the user pressed.
   resolveApproval: (id, allow, remember = 'once') => ipcRenderer.invoke('resolve-approval', id, allow, remember),
   listPermissionGrants: () => ipcRenderer.invoke('list-permission-grants'),
+  getApprovalProfile: () => ipcRenderer.invoke('get-approval-profile'),
+  setApprovalProfile: (profile) => ipcRenderer.invoke('set-approval-profile', profile),
   revokePermissionGrant: (grantId) => ipcRenderer.invoke('revoke-permission-grant', grantId),
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
@@ -172,6 +174,11 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('permission-grants', handler)
     return () => ipcRenderer.removeListener('permission-grants', handler)
+  },
+  onApprovalProfile: (cb) => {
+    const handler = (_e, profile) => cb(profile)
+    ipcRenderer.on('approval-profile', handler)
+    return () => ipcRenderer.removeListener('approval-profile', handler)
   },
   onMemoryBootstrap: (cb) => {
     const handler = (_e, payload) => cb(payload)

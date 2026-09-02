@@ -30,6 +30,18 @@ test('writes are confirmed, and a grant stops asking for every file in the folde
   assert.equal(decideToolPermission({ ...base, tool: 'Write', input: { file_path: '/Users/person/notes/a.md' }, grants: readOnly }).decision, 'ask')
 })
 
+test('work-in-project profiles quiet edits without widening the project boundary', () => {
+  const file = '/Users/person/projects/ambientic/src/main/index.js'
+  assert.equal(decideToolPermission({ ...base, tool: 'Edit', input: { file_path: file }, approvalProfile: 'project' }).decision, 'allow')
+  assert.equal(decideToolPermission({ ...base, tool: 'Edit', input: { file_path: '/Users/person/notes/a.js' }, approvalProfile: 'project' }).decision, 'ask')
+  assert.equal(decideToolPermission({ ...base, tool: 'Bash', input: { command: 'npm test' }, approvalProfile: 'project' }).decision, 'ask')
+})
+
+test('approve-routine defers opaque actions to the provider safety reviewer', () => {
+  assert.equal(decideToolPermission({ ...base, tool: 'Bash', input: { command: 'npm test' }, approvalProfile: 'auto' }).decision, 'defer')
+  assert.equal(decideToolPermission({ ...base, tool: 'UnknownTool', input: {}, approvalProfile: 'auto' }).decision, 'defer')
+})
+
 test('a shell command can be remembered, so it stops asking on every call', () => {
   // Without a scope the card offers no way to remember, which is what made a
   // shell command prompt on every single invocation.

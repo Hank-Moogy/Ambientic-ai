@@ -2,6 +2,7 @@ import { homedir } from 'node:os'
 import { isAbsolute, resolve, sep } from 'node:path'
 import { canGrantToolRoot } from './project-scope.mjs'
 import { matchingGrant } from './permission-grants.mjs'
+import { normalizeApprovalProfile } from './approval-profile.mjs'
 
 // One policy for every provider. A Claude PreToolUse hook, a Codex JSON-RPC
 // permission request, and a Hermes one all describe the same thing — a tool is
@@ -10,11 +11,17 @@ import { matchingGrant } from './permission-grants.mjs'
 
 // Tools that only observe. Reading inside somewhere the user already works is
 // not a decision worth interrupting them for.
-const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'NotebookRead', 'LS', 'TodoWrite'])
+//
+// `BashOutput` and `KillShell` act on a shell this agent already started, and
+// starting it was the approved decision: asking again to read that command's
+// output, or to stop it, is a prompt with no choice left in it. `WebSearch`
+// returns results and cannot reach the machine — unlike `WebFetch`, which takes
+// a URL the agent chose and so is still confirmed.
+const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'NotebookRead', 'LS', 'TodoWrite', 'BashOutput', 'KillShell', 'WebSearch'])
 
 // Tools whose reach cannot be read off their arguments. A shell command can
 // touch anything, so its path arguments prove nothing about its scope.
-const OPAQUE_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Task'])
+const OPAQUE_TOOLS = new Set(['Bash', 'WebFetch', 'Task'])
 
 const PATH_KEYS = ['file_path', 'path', 'notebook_path', 'edit_file_path']
 
@@ -50,8 +57,10 @@ export function decideToolPermission ({
   cwd = '',
   projectRoots = [],
   grants = [],
+  approvalProfile = 'ask',
   home = homedir()
 } = {}) {
+  const profile = normalizeApprovalProfile(approvalProfile)
   const trusted = [cwd, ...projectRoots].filter(Boolean)
   const paths = toolPaths(input)
 
@@ -72,6 +81,10 @@ export function decideToolPermission ({
   }
 
   if (OPAQUE_TOOLS.has(tool)) {
+    // In Approve routine mode, Claude's native auto reviewer has substantially
+    // more command context than this path-only broker. Returning `defer` lets
+    // that reviewer decide while Ambientic retains the protected-path ceiling.
+    if (profile === 'auto') return { decision: 'defer', reason: 'Use the provider safety reviewer for this action.', scope: '' }
     // Anchored to where it runs, not to nothing: without a scope the approval
     // card could offer no way to remember the answer, so a shell command asked
     // again on every single call.
@@ -83,7 +96,9 @@ export function decideToolPermission ({
     // native permission behaviour, not ours to widen.
     return READ_ONLY_TOOLS.has(tool)
       ? { decision: 'allow', reason: 'Read-only tool with no filesystem target.', scope: '' }
-      : { decision: 'ask', reason: `${tool || 'This tool'} was not recognised, so it is not granted automatically.`, scope: '' }
+      : profile === 'auto'
+        ? { decision: 'defer', reason: 'Use the provider safety reviewer for this action.', scope: '' }
+        : { decision: 'ask', reason: `${tool || 'This tool'} was not recognised, so it is not granted automatically.`, scope: '' }
   }
 
   const outside = paths.filter((target) => !grantedBy(trusted, target))
@@ -96,5 +111,6 @@ export function decideToolPermission ({
   if (READ_ONLY_TOOLS.has(tool)) {
     return { decision: 'allow', reason: 'Reading inside a project you already work in.', scope: '' }
   }
+  if (profile !== 'ask') return { decision: 'allow', reason: 'Changing files inside the selected project.', scope: '' }
   return { decision: 'ask', reason: `${tool || 'This tool'} changes files, so it is confirmed before it runs.`, scope: paths[0] }
 }

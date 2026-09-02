@@ -1140,7 +1140,7 @@ const settingsSections = [
   { id: 'inference', title: 'Inference providers', label: 'Inference', hint: 'Hosted models for Ambientic', assurance: 'Your account, your keys', assuranceNote: 'Ambientic stores each inference API key in your macOS keychain and uses it only for the workloads you route through it.' },
   { id: 'memory', title: 'Memory', label: 'Memory', hint: 'Profile, projects, and history', assurance: 'Local and reviewable', assuranceNote: 'Imported and learned context stays on this Mac. You can edit, supersede, exclude, or forget it at any time.' },
   { id: 'tools', title: 'Apps & tools', label: 'Apps & Tools', hint: 'Shared MCP capabilities', assurance: 'One permission boundary', assuranceNote: 'Ambientic brokers capabilities and approvals so agents never receive third-party credentials.' },
-  { id: 'permissions', title: 'Standing permissions', label: 'Permissions', hint: 'What agents may reach', assurance: 'Yours to revoke', assuranceNote: 'Every standing permission was granted by you from an approval, applies to every provider, and stops applying the moment you revoke it here.' },
+  { id: 'permissions', title: 'Safety & approvals', label: 'Safety & Approvals', hint: 'How agents ask to act', assurance: 'One intent, enforced safely', assuranceNote: 'Ambientic translates your chosen safety level into each provider’s native controls and falls back to asking whenever a provider cannot enforce it safely.' },
   { id: 'usage', title: 'Usage & billing', label: 'Usage & Billing', hint: 'Limits, resets, and spend', assurance: 'Measured honestly', assuranceNote: 'Quota, provider credits, and currency spend remain distinct so estimates never look like verified charges.' },
   { id: 'ambient', title: 'Ambient mode', label: 'Ambient Mode', hint: 'Sleep prevention and safety', assurance: 'Temporary and reversible', assuranceNote: 'Ambient mode is always user-controlled and releases its assertion when the app quits.' },
   { id: 'midi', title: 'MIDI hardware', label: 'MIDI Hardware', hint: 'Controller and native mode', assurance: 'One controller at a time', assuranceNote: 'Ambientic opens only the selected MIDI device. Your provider and agent configuration is unaffected.' }
@@ -1149,27 +1149,57 @@ const settingsSections = [
 function PermissionSettings () {
   const [grants, setGrants] = useState([])
   const [loaded, setLoaded] = useState(false)
+  const [profile, setProfile] = useState('auto')
+  const [saving, setSaving] = useState(false)
+  const profiles = [
+    { id: 'ask', label: 'Ask me', summary: 'Reads stay quiet. Changes, commands, network, and external actions wait for you.' },
+    { id: 'project', label: 'Work in project', summary: 'Agents may read and edit the selected project. Boundary crossings and risky commands wait for you.' },
+    { id: 'auto', label: 'Approve routine work', summary: 'Routine project work is handled automatically. Sensitive, destructive, or unsupported actions still wait for you.', recommended: true }
+  ]
   const refresh = () => window.controller.listPermissionGrants().then((list) => {
     setGrants(Array.isArray(list) ? list : [])
     setLoaded(true)
   }).catch(() => setLoaded(true))
   useEffect(() => {
     refresh()
-    return window.controller.onPermissionGrants?.((list) => setGrants(Array.isArray(list) ? list : []))
+    window.controller.getApprovalProfile().then((value) => setProfile(value || 'auto')).catch(() => {})
+    const offGrants = window.controller.onPermissionGrants?.((list) => setGrants(Array.isArray(list) ? list : []))
+    const offProfile = window.controller.onApprovalProfile?.((value) => setProfile(value || 'auto'))
+    return () => { offGrants?.(); offProfile?.() }
   }, [])
+  const chooseProfile = async (value) => {
+    if (saving || value === profile) return
+    const previous = profile
+    setProfile(value)
+    setSaving(true)
+    try { setProfile(await window.controller.setApprovalProfile(value)) } catch { setProfile(previous) } finally { setSaving(false) }
+  }
   // Only standing grants belong here. A "for this thread" answer expires on its
   // own, and listing it as something to manage would overstate what it is.
   const standing = grants.filter((grant) => grant.scope === 'always')
   return (
     <div className="permission-settings">
       <div className="provider-settings__intro">
-        <span className="eyebrow"><i /> Standing permissions</span>
-        <h2>What you have told agents they may reach.</h2>
-        <p>Each of these came from an approval where you chose <b>Always allow</b>. They apply to every thread and every provider. Anything not listed here is still asked for, every time.</p>
+        <span className="eyebrow"><i /> Safety &amp; approvals</span>
+        <h2>Choose how much routine work needs you.</h2>
+        <p>Ambientic applies one clear intent across Codex, Claude Code, and Hermes. Project boundaries stay enforced, and providers fall back to asking when they cannot safely match your choice.</p>
       </div>
+      <div className="approval-profile-grid" aria-label="Default approval level">{profiles.map((item) => (
+        <button type="button" key={item.id} data-selected={profile === item.id} disabled={saving} onClick={() => chooseProfile(item.id)}>
+          <span>{item.recommended ? 'Recommended' : 'Safety level'}</span>
+          <b>{item.label}</b>
+          <small>{item.summary}</small>
+        </button>
+      ))}</div>
+      <div className="approval-provider-map">
+        <div><b>Codex</b><span>{profile === 'auto' ? 'Workspace sandbox · automatic reviewer' : profile === 'project' ? 'Workspace sandbox · asks at the boundary' : 'Read-only sandbox · asks before changes'}</span></div>
+        <div><b>Claude Code</b><span>{profile === 'auto' ? 'Native Auto mode · protected paths retained' : profile === 'project' ? 'Accept edits · risky commands still ask' : 'Manual mode · changes ask first'}</span></div>
+        <div><b>Hermes</b><span>{profile === 'ask' ? 'Every edit and dangerous command asks' : 'Project edits proceed · dangerous commands still ask'}</span></div>
+      </div>
+      <div className="permission-subhead"><div><b>Standing exceptions</b><span>Explicit permissions you can revoke at any time.</span></div></div>
       {!loaded ? <div className="permission-empty">Reading permissions…</div>
         : standing.length === 0
-          ? <div className="permission-empty">No standing permissions. Every request outside a task's own project is confirmed with you.</div>
+          ? <div className="permission-empty">No standing exceptions. Requests outside a task's project follow the safety level you selected above.</div>
           : <ul className="permission-list">{standing.map((grant) => (
             <li key={grant.id}>
               <div>

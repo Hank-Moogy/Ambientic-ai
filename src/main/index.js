@@ -971,6 +971,12 @@ ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))
 ipcMain.handle('resolve-approval', (_event, id, allow, remember) => workspace.resolveApproval(id, allow, remember))
 ipcMain.handle('list-permission-grants', () => workspace.listGrants())
+ipcMain.handle('get-approval-profile', () => workspace.getApprovalProfile())
+ipcMain.handle('set-approval-profile', (_event, value) => {
+  const profile = workspace.setApprovalProfile(value)
+  sendToWindows('approval-profile', profile)
+  return profile
+})
 ipcMain.handle('revoke-permission-grant', (_event, grantId) => {
   const revoked = workspace.revokeGrant(String(grantId || ''))
   if (revoked) sendToWindows('permission-grants', workspace.listGrants())
@@ -1528,6 +1534,8 @@ app.whenReady().then(() => {
     onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases }),
     grants: prefs.permissionGrants,
     onGrantsChange: (permissionGrants) => savePrefs({ ...loadPrefs(), permissionGrants }),
+    approvalProfile: prefs.approvalProfile || 'auto',
+    onApprovalProfileChange: (approvalProfile) => savePrefs({ ...loadPrefs(), approvalProfile }),
     contextEngine,
     capabilityGateway,
     gatewayExecutable: process.execPath,

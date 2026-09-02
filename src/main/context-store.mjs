@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { canonicalPath } from './canonical-path.mjs'
 
 const require = createRequire(import.meta.url)
 
@@ -278,6 +279,39 @@ export class ContextStore {
     this.db.pragma('foreign_keys = ON')
     this.db.pragma('busy_timeout = 5000')
     this.migrate()
+    this.normalizeProjectRoots()
+  }
+
+  // Rows written before a project's identity was its canonical path can hold
+  // two spellings of one folder. Fold them together on open, so the picker
+  // never offers the same directory twice. The oldest row survives, and
+  // everything scoped to a duplicate is repointed at it first — memory carries
+  // the project id in an untyped `scope_id` with no foreign key, so deleting
+  // the row without moving it would quietly orphan that project's memory.
+  normalizeProjectRoots () {
+    const rows = this.db.prepare('SELECT id, root_path FROM projects WHERE root_path IS NOT NULL ORDER BY created_at').all()
+    const groups = new Map()
+    for (const row of rows) {
+      const path = canonicalPath(row.root_path)
+      if (!path) continue
+      if (!groups.has(path)) groups.set(path, [])
+      groups.get(path).push(row)
+    }
+    this.db.transaction(() => {
+      for (const [path, group] of groups) {
+        if (group.length === 1 && group[0].root_path === path) continue
+        // Prefer a row already stored canonically, so renaming the survivor
+        // below cannot collide with it on the unique root_path.
+        const winner = group.find((row) => row.root_path === path) || group[0]
+        for (const row of group) {
+          if (row.id === winner.id) continue
+          this.db.prepare('UPDATE session_bindings SET project_id=? WHERE project_id=?').run(winner.id, row.id)
+          this.db.prepare("UPDATE memory_records SET scope_id=? WHERE scope='project' AND scope_id=?").run(winner.id, row.id)
+          this.db.prepare('DELETE FROM projects WHERE id=?').run(row.id)
+        }
+        if (winner.root_path !== path) this.db.prepare('UPDATE projects SET root_path=? WHERE id=?').run(path, winner.id)
+      }
+    })()
   }
 
   migrate () {
@@ -306,7 +340,10 @@ export class ContextStore {
 
   upsertProject (input = {}) {
     const now = this.now()
-    const rootPath = cleanText(input.rootPath, 2000) || null
+    // A project is its directory, so the path is the identity and has to be one
+    // spelling. Without this, /tmp/x and /private/tmp/x — or AgentBase and
+    // agentbase — become two projects for one folder.
+    const rootPath = canonicalPath(cleanText(input.rootPath, 2000)) || null
     const existing = input.id
       ? this.db.prepare('SELECT * FROM projects WHERE id = ?').get(input.id)
       : (rootPath ? this.db.prepare('SELECT * FROM projects WHERE root_path = ?').get(rootPath) : null)
@@ -331,7 +368,7 @@ export class ContextStore {
   }
 
   getProject (id) { return rowProject(this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id)) }
-  projectByRoot (rootPath) { return rowProject(this.db.prepare('SELECT * FROM projects WHERE root_path = ?').get(rootPath)) }
+  projectByRoot (rootPath) { return rowProject(this.db.prepare('SELECT * FROM projects WHERE root_path = ?').get(canonicalPath(rootPath))) }
   listProjects () { return this.db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all().map(rowProject) }
 
   createBinding (input = {}) {
