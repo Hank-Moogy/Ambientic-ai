@@ -8,6 +8,7 @@ import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
 import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
+import { assistantPartMessage, describeToolCall, parseClaudeTranscript } from './claude-transcript.mjs'
 import { decideToolPermission } from './permission-policy.mjs'
 import { fallbackTitle, isUserPromptRow, promptText, threadTitle } from './thread-title.mjs'
 
@@ -85,73 +86,10 @@ function message (role, text, extra = {}) {
 
 // Claude's PermissionRequest hook reports only the tool name and its raw input,
 // so an approval card titled "Bash" or "Edit" never says what is actually being
-// asked for. Build a one-line, human-readable request title — the thing the user
-// reads to decide yes or no — from the tool's own input fields. Values are
-// truncated (never parsed or executed) so a long command or file list cannot
-// blow out the card.
-const APPROVAL_TITLE_LIMIT = 120
-
-function shortPath (value) {
-  const text = String(value || '').trim()
-  if (!text) return ''
-  const home = homedir()
-  const tidy = text.startsWith(home) ? `~${text.slice(home.length)}` : text
-  // Keep the final two segments: enough to identify the file without the noise
-  // of a deep absolute path.
-  const parts = tidy.split('/').filter(Boolean)
-  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : tidy
-}
-
-function clip (value, limit = APPROVAL_TITLE_LIMIT) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim()
-  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
-}
-
+// asked for. Approval cards and collapsed activity rows describe the same
+// action, so both read it from the same describer.
 export function describeApprovalRequest (toolName, toolInput = {}) {
-  const name = String(toolName || '').trim()
-  const input = toolInput && typeof toolInput === 'object' ? toolInput : {}
-  const files = Array.isArray(input.edits) ? input.edits.length : 0
-  switch (name) {
-    case 'Bash':
-    case 'BashOutput':
-      // Claude supplies its own short `description` for Bash; prefer it and keep
-      // the command itself for the detail line beneath the title.
-      return clip(input.description ? `Run: ${input.description}` : `Run: ${input.command || 'a shell command'}`)
-    case 'Edit':
-      return clip(`Edit ${shortPath(input.file_path)}${files > 1 ? ` (${files} changes)` : ''}` )
-    case 'MultiEdit':
-      return clip(`Edit ${shortPath(input.file_path)}${files ? ` (${files} changes)` : ''}`)
-    case 'Write':
-      return clip(`Write ${shortPath(input.file_path)}`)
-    case 'NotebookEdit':
-      return clip(`Edit notebook ${shortPath(input.notebook_path || input.file_path)}`)
-    case 'Read':
-      return clip(`Read ${shortPath(input.file_path)}`)
-    case 'Glob':
-      return clip(`Find files matching ${input.pattern || ''}`)
-    case 'Grep':
-      return clip(`Search for ${input.pattern || ''}${input.path ? ` in ${shortPath(input.path)}` : ''}`)
-    case 'WebFetch': {
-      let host = ''
-      try { host = new URL(String(input.url)).hostname } catch { host = String(input.url || '') }
-      return clip(`Fetch ${host}`)
-    }
-    case 'WebSearch':
-      return clip(`Web search: ${input.query || ''}`)
-    case 'Task':
-      return clip(`Run ${input.subagent_type || 'an'} agent: ${input.description || ''}`)
-    case 'KillShell':
-      return clip('Stop a running shell')
-    default:
-      break
-  }
-  // MCP tools arrive as mcp__<server>__<tool>; surface both halves plainly.
-  const mcp = name.match(/^mcp__([^_]+(?:_[^_]+)*)__(.+)$/)
-  if (mcp) return clip(`${mcp[1]}: ${mcp[2].replace(/_/g, ' ')}`)
-  // Unknown tool: fall back to the name plus the most identifying input value.
-  const hint = input.command || input.file_path || input.path || input.url || input.query || input.pattern
-  if (name && hint) return clip(`${name}: ${typeof hint === 'string' ? hint : ''}`)
-  return clip(name || 'Claude Code tool')
+  return describeToolCall(toolName, toolInput)
 }
 
 export function reconcileProviderMessage (messages, incoming) {
@@ -316,25 +254,7 @@ function codexStatusIsRunning (status) {
 
 function claudeMessages (path) {
   if (!path || !existsSync(path)) return []
-  const output = []
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    if (!line.trim()) continue
-    let row
-    try { row = JSON.parse(line) } catch { continue }
-    if (row.type === 'user') {
-      const text = stripAmbienticContext(textContent(row.message?.content))
-      if (text && !text.startsWith('<task-notification>')) output.push(message('user', text, { id: row.uuid }))
-    } else if (row.type === 'assistant') {
-      for (const part of row.message?.content || []) {
-        if (part.type === 'text' && part.text) output.push(message('assistant', part.text, { id: `${row.uuid}:text` }))
-        if (part.type === 'tool_use') {
-          const files = [part.input?.file_path, part.input?.path].filter(Boolean)
-          output.push(message('activity', JSON.stringify(part.input || {}, null, 2), { id: part.id, kind: 'tool', title: part.name || 'Tool', files }))
-        }
-      }
-    }
-  }
-  return output.slice(-300)
+  return parseClaudeTranscript(readFileSync(path, 'utf8'))
 }
 
 // The auto-compaction seed is one long synthetic user message. Hide it from the
@@ -1400,9 +1320,23 @@ export class WorkspaceService extends EventEmitter {
     const snapshot = this.snapshots.get(id)
     if (!snapshot) return
     if (event.type === 'assistant') {
+      // Same mapping the transcript parser uses, so a live turn and the same
+      // turn re-read from disk render identically instead of reshuffling.
       for (const part of event.message?.content || []) {
-        if (part.type === 'text') snapshot.messages.push(message('assistant', part.text))
-        if (part.type === 'tool_use') snapshot.messages.push(message('activity', JSON.stringify(part.input || {}, null, 2), { kind: 'tool', title: part.name, files: [part.input?.file_path, part.input?.path].filter(Boolean) }))
+        const item = assistantPartMessage(part, { uuid: event.message?.id || '' })
+        if (item) snapshot.messages.push(item)
+      }
+      snapshot.updatedAt = Date.now()
+      this.emitSnapshot({ ...snapshot })
+    } else if (event.type === 'user') {
+      // Tool results stream back as `user` rows; fold each onto the activity row
+      // for the call it answers rather than posting it as the user's message.
+      for (const part of event.message?.content || []) {
+        if (part?.type !== 'tool_result') continue
+        const target = snapshot.messages.findLast((entry) => entry.id === part.tool_use_id)
+        if (!target) continue
+        target.status = part.is_error ? 'failed' : 'done'
+        target.text = String(typeof part.content === 'string' ? part.content : (part.content || []).map((piece) => piece?.text || '').filter(Boolean).join('\n')).slice(0, 4000)
       }
       snapshot.updatedAt = Date.now()
       this.emitSnapshot({ ...snapshot })

@@ -272,6 +272,8 @@ Last updated: 2026-08-16
 
 ### Completed
 
+- 2026-10-27 release checkpoint: Claude transcript parsing folds tool results into their calls and hides synthetic user rows; consecutive activity renders as collapsible step groups. Packaging the current workspace as a signed Apple-silicon app is in progress.
+
 - [x] Added the versioned `ambientic.workflow-pack` contract, schema-bounded private setup values, idempotent local pack installation, workflow-to-pack identity, and private-context execution injection without leaking user values into portable definitions or renderer snapshots.
 - [x] Shipped Career OS as the first built-in pack with outcome-first install/start UI, Profile → Target → Constraints → Calibrate → Connect → Routine setup, five inspectable workflows, a time-boxed daily action queue, separate Candidate Fit/Career Fit instructions, truthful application preparation, and explicit approval before consequential work.
 - [x] Added an evidence-first Profile Builder: user-selected CV and LinkedIn documents, an optional LinkedIn URL, manual additions, and explicitly selected reviewed Ambientic memories are mined into a private structured Career Profile. The extracted profile remains `needs_review`, is excluded from trusted ranking context until approval, and can be opened from Career OS Home for review.
@@ -526,6 +528,8 @@ Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*.
 - [ ] Extend the ambient art direction into coordinated screen transitions, preview presentation, optional sound, and user-selectable hardware compositions while respecting reduced motion.
 
 ### Verification
+
+- 2026-10-27 signing preparation: the sandboxed test run hit the known simulated Claude OAuth URL timeout. The canonical release gate will rerun the full suite with host access before packaging. Developer ID Application identity is available; notarization remains a separate distribution step.
 
 - 2026-08-26 pre-granting removed: with the broker confirmed working against the running app, `--add-dir` came out entirely. It pre-granted through the provider's sandbox exactly the access the user asked to be consulted about, so leaving it in would have kept the feature half-defeated. Scope is now decided per request in one place. Two regressions were rewritten rather than deleted, so the behaviour they protected is still covered: a task launched without a project is asserted to be *told* what exists (no `--add-dir` present), and an attached file is asserted not to prompt, since attaching it was already the user's decision. That second test also caught a real property worth keeping — attachments are `statSync`-validated before they are trusted, so a path that does not exist grants nothing. Suite passes 238/240 runnable with 2 intentional skips and 0 failures.
 

@@ -16,6 +16,7 @@ import { AppsToolsSettings, LaunchContext, MemoryWorkspace, ThreadContextPanel }
 import { InferenceProviderSettings } from './InferenceProviders.jsx'
 import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
+import { groupThreadMessages, stepsAreLive, stepsSummary } from './thread-transcript.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
 import { taskCreationError } from './new-task-state.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
@@ -153,20 +154,51 @@ const MarkdownMessageBody = memo(function MarkdownMessageBody ({ text }) {
   return <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
 })
 
+const STEP_GLYPHS = { files: '↗', command: '›_', read: '≡', web: '◉', agent: '◈', reasoning: '∵', tool: '◇', system: '○' }
+
+// One tool call, collapsed to its human title. The raw input and the output it
+// returned live behind the disclosure, because they answer a question the
+// reader only sometimes has.
+function Step ({ step }) {
+  const body = [step.detail, step.text].filter(Boolean).join('\n\n')
+  return (
+    <details className="step" data-status={step.status || ''}>
+      <summary>
+        <span className="step__glyph">{STEP_GLYPHS[step.kind] || STEP_GLYPHS.tool}</span>
+        <b>{step.title || step.tool || 'Agent activity'}</b>
+        {step.status === 'failed' && <em data-tone="failed">failed</em>}
+        {step.status === 'running' && <em>running</em>}
+      </summary>
+      {body ? <pre>{body}</pre> : <p className="step__empty">No output.</p>}
+    </details>
+  )
+}
+
+// A run of tool calls between two things that were actually said. Collapsed to
+// a single line while idle; open, and narrating its current step, while live.
+function StepGroup ({ steps, live }) {
+  const [open, setOpen] = useState(false)
+  const summary = stepsSummary(steps, { running: live })
+  const expanded = open || live
+  return (
+    <section className="steps" data-live={live || undefined} data-open={expanded || undefined}>
+      <button type="button" className="steps__summary" aria-expanded={expanded} onClick={() => setOpen((current) => !current)}>
+        <span className="steps__glyph">{live ? <i className="steps__pulse" /> : '∴'}</span>
+        <b>{summary.label}</b>
+        {live && summary.count > 1 && <em>{summary.count} steps</em>}
+        <span className="steps__chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+      </button>
+      {expanded && <div className="steps__list">{steps.map((step, index) => <Step key={step.id || index} step={step} />)}</div>}
+    </section>
+  )
+}
+
 function Message ({ item, providerLabel }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     await window.controller.copyText(item.text)
     setCopied(true)
     setTimeout(() => setCopied(false), 1400)
-  }
-  if (item.role === 'activity') {
-    return (
-      <details className="activity" open={item.status === 'inProgress'}>
-        <summary><span>{item.kind === 'files' ? '↗' : item.kind === 'command' ? '›_' : '◇'}</span>{item.title || 'Agent activity'}<em>{item.status || ''}</em></summary>
-        {item.text && <pre>{item.text}</pre>}
-      </details>
-    )
   }
   return (
     <article className="message" data-role={item.role}>
@@ -1317,6 +1349,9 @@ export default function Workspace () {
     if (transcriptAtBottomRef.current) scrollToLatest('auto')
   }, [thread?.messages?.length, thread?.messages?.at(-1)?.text])
 
+  // Conversation first, work folded: consecutive activity becomes one group.
+  const transcript = useMemo(() => groupThreadMessages(thread?.messages), [thread?.messages])
+
   const threadGroups = useMemo(() => organizeThreads(
     sessions.map((session) => ({ ...session, task: sessionTitle(session) })),
     { interactions: threadInteractions, provider: providerFilter, query }
@@ -1466,7 +1501,9 @@ export default function Workspace () {
             <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} />
             {loading && <div className="loading">Loading local conversation…</div>}
             {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. Ambientic will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
-            {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
+            {transcript.map((group, index) => (group.type === 'steps'
+              ? <StepGroup key={group.id || index} steps={group.steps} live={stepsAreLive(group, index, transcript, thread?.running)} />
+              : <Message key={group.id || index} item={group.item} providerLabel={thread.providerLabel} />))}
             {thread?.running && !thread.messages?.some((item) => item.streaming) && <TypingIndicator providerLabel={thread.providerLabel} />}
             {showJumpToLatest && <button className="thread-jump-latest" type="button" onClick={() => scrollToLatest('smooth')} aria-label="Jump to the latest message">↓ Latest</button>}
           </div>
