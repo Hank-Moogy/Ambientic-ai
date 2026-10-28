@@ -272,7 +272,7 @@ Last updated: 2026-08-16
 
 ### Completed
 
-- 2026-10-27 release checkpoint: Claude transcript parsing folds tool results into their calls and hides synthetic user rows; consecutive activity renders as collapsible step groups. Packaging the current workspace as a signed Apple-silicon app is in progress.
+- 2026-10-27 release checkpoint: Claude transcript parsing folds tool results into their calls and hides synthetic user rows; consecutive activity renders as collapsible step groups. Apple-silicon packaging and the production build succeed. On 2026-10-28, Developer ID private-key access was verified successfully; the canonical signed installation is being rerun.
 
 - [x] Added the versioned `ambientic.workflow-pack` contract, schema-bounded private setup values, idempotent local pack installation, workflow-to-pack identity, and private-context execution injection without leaking user values into portable definitions or renderer snapshots.
 - [x] Shipped Career OS as the first built-in pack with outcome-first install/start UI, Profile → Target → Constraints → Calibrate → Connect → Routine setup, five inspectable workflows, a time-boxed daily action queue, separate Candidate Fit/Career Fit instructions, truthful application preparation, and explicit approval before consequential work.
@@ -529,7 +529,7 @@ Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*.
 
 ### Verification
 
-- 2026-10-27 signing preparation: the sandboxed test run hit the known simulated Claude OAuth URL timeout. The canonical release gate will rerun the full suite with host access before packaging. Developer ID Application identity is available; notarization remains a separate distribution step.
+- 2026-10-27 signing preparation: the sandboxed test run hit the known simulated Claude OAuth URL timeout. The canonical gate reran successfully with host access: 288 tests passed, zero failed, two skipped. Packaging succeeded, but Developer ID signing returned `errSecInternalComponent`; the Mac is locked, preventing keychain authorization. The installed app was not replaced during that attempt. On 2026-10-28 a direct signing check succeeded with the Developer ID identity, allowing the complete release gate to resume. Notarization remains a separate distribution step.
 
 - 2026-08-26 pre-granting removed: with the broker confirmed working against the running app, `--add-dir` came out entirely. It pre-granted through the provider's sandbox exactly the access the user asked to be consulted about, so leaving it in would have kept the feature half-defeated. Scope is now decided per request in one place. Two regressions were rewritten rather than deleted, so the behaviour they protected is still covered: a task launched without a project is asserted to be *told* what exists (no `--add-dir` present), and an attached file is asserted not to prompt, since attaching it was already the user's decision. That second test also caught a real property worth keeping — attachments are `statSync`-validated before they are trusted, so a path that does not exist grants nothing. Suite passes 238/240 runnable with 2 intentional skips and 0 failures.
 
