@@ -272,7 +272,7 @@ Last updated: 2026-08-16
 
 ### Completed
 
-- 2026-10-27 release checkpoint: Claude transcript parsing folds tool results into their calls and hides synthetic user rows; consecutive activity renders as collapsible step groups. Apple-silicon packaging and the production build succeed. On 2026-10-28, Developer ID private-key access was verified successfully; the canonical signed installation is being rerun.
+- 2026-10-27 release checkpoint: Claude transcript parsing folds tool results into their calls and hides synthetic user rows; consecutive activity renders as collapsible step groups. Apple-silicon packaging and the production build succeed. On 2026-10-28, Ambientic 0.8.1 (`efa72073`) was signed with Developer ID Application, installed, relaunched, and verified healthy. The signed arm64 ZIP is `release/Ambientic-0.8.1-efa72073-mac-arm64-signed.zip`; notarization remains next for external distribution.
 
 - [x] Added the versioned `ambientic.workflow-pack` contract, schema-bounded private setup values, idempotent local pack installation, workflow-to-pack identity, and private-context execution injection without leaking user values into portable definitions or renderer snapshots.
 - [x] Shipped Career OS as the first built-in pack with outcome-first install/start UI, Profile → Target → Constraints → Calibrate → Connect → Routine setup, five inspectable workflows, a time-boxed daily action queue, separate Candidate Fit/Career Fit instructions, truthful application preparation, and explicit approval before consequential work.
@@ -528,6 +528,8 @@ Specified in `PRODUCT.md` → *Deferred — context kernel and gateway backlog*.
 - [ ] Extend the ambient art direction into coordinated screen transitions, preview presentation, optional sound, and user-selectable hardware compositions while respecting reduced motion.
 
 ### Verification
+
+- 2026-10-28 signed release complete: 288 tests passed, zero failed, two skipped; production build and strict deep signature verification pass for both packaged and installed apps. Installed identity is commit `efa720731b2e33f6848075542279eef9734fd9d7`, version 0.8.1, Developer ID team `K78PT544J5`; `/health` returned `{"ok":true,"sessions":10}`. The installer’s overlay copy retained two stale native-module files, so the previous bundle was preserved at `/Applications/Ambientic.previous-20261028-efa72073.app` and a fresh bundle installed and verified. Next release-tooling work: replace overlay copying with fresh-bundle installation and verify the installed signature. Signed ZIP SHA-256: `9c4cc8597c714726e700429a219862edebc82c87d178ca6177ffb8ebadcb71a4`. This archive is signed but not notarized.
 
 - 2026-10-27 signing preparation: the sandboxed test run hit the known simulated Claude OAuth URL timeout. The canonical gate reran successfully with host access: 288 tests passed, zero failed, two skipped. Packaging succeeded, but Developer ID signing returned `errSecInternalComponent`; the Mac is locked, preventing keychain authorization. The installed app was not replaced during that attempt. On 2026-10-28 a direct signing check succeeded with the Developer ID identity, allowing the complete release gate to resume. Notarization remains a separate distribution step.
 
