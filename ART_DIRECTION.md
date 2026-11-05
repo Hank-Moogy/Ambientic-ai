@@ -159,3 +159,7 @@ Only connected task providers receive space. Header identity uses a restrained p
 ## Conversation-first pad navigation — 2026-11-05
 
 A pad opens the conversation in the user's chosen surface: Native or Ambientic. Never automatically arrange a browser preview while selecting a thread. Prioritize active work within each provider's allocation. Keep user/assistant prose readable, with technical activity collapsed and machine context excluded from human message bubbles. Permission cards explicitly identify Ambientic ownership; native permissions stay with their native runtime.
+
+## Homepage destination choice — 2026-11-05
+
+Place the pad destination above the Overview hero as a generous two-option control: Show Native / Show Ambientic. A pale mint selected surface and dark text make the current choice unmistakable without borrowing agent status lights. Keep both options visible, include a short destination explanation, wrap gracefully on narrow windows, and support keyboard focus and reduced motion.

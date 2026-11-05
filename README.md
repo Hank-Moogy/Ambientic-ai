@@ -186,3 +186,9 @@ Verification: 306 regression tests, 304 passed, 2 intentional skips; production 
 - Pending requests and running jobs rank ahead of idle history within each provider's columns. Native Codex discovery reads up to forty recent threads; its activity remains an estimate based on local rollout/index events, not a subscription to native UI state.
 - Chat hides Claude tool-result user rows, metadata, compaction summaries, and known injected context wrappers. Actual question answers remain visible. Technical activity is collapsed separately; source transcripts are unchanged. This is a cleaner conversation view, not an embedded replica of the native interface.
 - Verified: 312 regression tests, 310 passed, 2 intentional skips; production build and Electron SQLite/FTS5 smoke passed. Relaunched development app reports APC40 MKII connected, this Codex task Working, and zero needs-input tasks. End-to-end pad clicks remain unverified because desktop input automation failed with ScreenCaptureKit error -3812. Signed installation remains outstanding as documented above.
+
+## Homepage destination switch — 2026-11-05
+
+- Overview now starts with a prominent Show Native / Show Ambientic control. The selected option is highlighted, keyboard accessible, and saved through the same pad preference used by Hardware settings. It applies to physical and on-screen pads.
+- Saving disables repeat clicks; failures show an inline retry message. Existing native-unavailable and Ambientic-owned approval fallback remains in effect.
+- Verification: production build and pad-navigation regression test passed. In the relaunched development app, both homepage options were clicked and their selected state and explanatory text verified; restored Native afterward. Layout visually checked at the current window size. Physical pad end-to-end acceptance remains open.

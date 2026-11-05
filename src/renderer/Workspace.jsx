@@ -851,6 +851,29 @@ function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }
   )
 }
 
+function PadDestinationSwitch ({ target = 'native' }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const select = async (value) => {
+    if (saving || value === target) return
+    setSaving(true)
+    setError('')
+    try { await window.controller.midiSetPadTarget(value) }
+    catch { setError('Could not save your choice. Please try again.') }
+    finally { setSaving(false) }
+  }
+  return (
+    <section className="pad-destination" aria-label="Pad destination">
+      <div className="pad-destination__copy"><span className="eyebrow">When you press a pad</span><b>Your conversation, your view.</b><p>{target === 'native' ? 'Open Codex or Claude Code. If unavailable, open in Ambientic.' : 'Open the conversation right here in Ambientic.'}</p></div>
+      <div className="pad-destination__switch" role="group" aria-label="Choose where pads open conversations" aria-busy={saving}>
+        <button type="button" aria-pressed={target === 'native'} disabled={saving} onClick={() => select('native')}><span aria-hidden="true">↗</span>Show Native</button>
+        <button type="button" aria-pressed={target === 'ambientic'} disabled={saving} onClick={() => select('ambientic')}><span aria-hidden="true">◈</span>Show Ambientic</button>
+      </div>
+      {error && <p className="pad-destination__error" role="alert">{error}</p>}
+    </section>
+  )
+}
+
 function Dashboard ({ sessions, connectors, usage, midi, ambientMode, sessionsLoaded, usageLoaded, onCreate, onOpenThreads, onOpenProvider, onOpenThread, onStandbyMenu, onVibe, onRefreshUsage, onToggleAmbientMode }) {
   const live = sessions.filter((session) => !session.history)
   const active = live.filter((session) => session.state === 'running').length
@@ -861,6 +884,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, sessionsLo
     <section className="dashboard">
       <header className="dashboard-topbar"><span>Agent operating system</span><div><button type="button" onClick={onOpenThreads}>All threads</button><button className="dashboard-topbar__ambient" type="button" data-active={Boolean(ambientMode.enabled)} aria-pressed={Boolean(ambientMode.enabled)} title={ambientMode.enabled ? 'Ambient mode is keeping this Mac awake while the display may sleep.' : 'Keep this Mac awake so agents can continue working.'} onClick={() => onToggleAmbientMode(!ambientMode.enabled)}><i />Ambient mode · {ambientMode.enabled ? 'On' : 'Off'}</button><button className="dashboard-topbar__vibe" type="button" disabled={!midi.connected} data-active={Boolean(midi.vibeActive)} title="Play the next APC composition · ⌘⇧V" onClick={onVibe}><i />Vibe</button></div></header>
       <div className="dashboard-scroll">
+        <PadDestinationSwitch target={midi.padOpenTarget} />
         <section className="dashboard-hero">
           <div className="dashboard-hero__copy"><span className="eyebrow"><i /> Local intelligence, online</span><h1>Your agents,<br /><em>in one field.</em></h1><p>See who is working, who needs you, and where to send the next idea—without starting from a chat list.</p><div className="dashboard-statline" data-loading={!sessionsLoaded}>{sessionsLoaded ? <><span><b>{active}</b> active</span><span><b>{needsInput}</b> need input</span><span><b>{sessions.length}</b> threads</span></> : <>{['active', 'need input', 'threads'].map((label, index) => <span key={label}><Skeleton className="skeleton--stat" delay={index * 0.09} /> {label}</span>)}</>}<span><b>{midi.connected ? 'On' : 'Off'}</b> {midi.shortModel || 'APC'}</span></div></div>
           <OverviewUsageBalance sessions={sessions} connectors={connectors} usage={usage} loading={!usageLoaded} onRefresh={onRefreshUsage} />
