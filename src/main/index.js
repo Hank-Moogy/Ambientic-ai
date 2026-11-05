@@ -1,3 +1,4 @@
+import { padDestination, padOpenTarget } from '../shared/pad-navigation.mjs'
 import { recentThreadGrid, connectedPadProviders, providerColumnLayout, validColumnWidths } from '../shared/recent-thread-grid.mjs'
 import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
 import { join, dirname, resolve, sep } from 'node:path'
@@ -511,7 +512,7 @@ function providerPadLayout () {
 }
 
 function midiSnapshot () {
-  return { ...(midiController?.getStatus() || { connected: false, model: 'Akai APC controller' }), ...providerPadLayout() }
+  return { ...(midiController?.getStatus() || { connected: false, model: 'Akai APC controller' }), ...providerPadLayout(), padOpenTarget: padOpenTarget(loadPrefs().padOpenTarget) }
 }
 
 function pushMidi () {
@@ -652,8 +653,20 @@ async function selectWorkspaceSession (id) {
   lastFocusedSessionId = id
   midiController?.select(liveSession ? id : null)
   showWorkspace(id)
-  const preview = liveSession ? await presentWorkspacePreview(id) : { ok: false, reason: 'history-session' }
-  return { ok: true, sessionId: id, preview }
+  return { ok: true, sessionId: id }
+}
+
+async function openPadThread (id) {
+  const session = workspace?.sessionFor(id)
+  const destination = padDestination(session, loadPrefs().padOpenTarget, workspace?.hasPendingApproval(id))
+  if (destination === 'unavailable') return { ok: false, reason: 'not-found' }
+  if (destination === 'native') {
+    try {
+      const result = await queueFocus(id)
+      if (result.ok) return { ...result, destination }
+    } catch (error) { console.error(`[pads] Native destination unavailable: ${error.message}`) }
+  }
+  return { ...(await selectWorkspaceSession(id)), destination: 'ambientic' }
 }
 
 function runInstaller () {
@@ -954,6 +967,13 @@ ipcMain.handle('connect-provider', async (_event, agentId, options = {}) => {
 ipcMain.handle('claude-auth-input', (_event, input) => claudeAuth?.input(input) || false)
 ipcMain.handle('claude-auth-cancel', () => claudeAuth?.cancel() || false)
 ipcMain.handle('get-midi', midiSnapshot)
+ipcMain.handle('midi-set-pad-target', (_event, target) => {
+  if (!['ambientic', 'native'].includes(target)) throw new Error('Unknown pad destination')
+  savePrefs({ ...loadPrefs(), padOpenTarget: target })
+  pushMidi()
+  return midiSnapshot()
+})
+ipcMain.handle('open-pad-thread', (_event, id) => openPadThread(id))
 ipcMain.handle('midi-set-provider-columns', (_event, widths) => {
   const providers = connectedPadProviders(connectors)
   if (widths !== null && !validColumnWidths(providers, widths)) throw new Error('Provider connections changed. Please adjust the current layout again.')
@@ -1129,7 +1149,7 @@ function setPreviewDisplay (displayId) {
 }
 
 async function focusById (id) {
-  const s = store.list().find((x) => x.id === id)
+  const s = workspace?.sessionFor(id) || store.list().find((x) => x.id === id)
   if (!s) return { ok: false, reason: 'not-found' }
   store.acknowledge(id)
 
@@ -1150,12 +1170,6 @@ async function focusById (id) {
     return { ok: false, permission: true }
   }
 
-  // The first tap arranges this pad's preview. A repeat tap on the selected
-  // pad only refocuses its terminal, so a correct browser route cannot be
-  // replaced or reloaded by another context-ranking pass.
-  const companion = lastFocusedSessionId === id
-    ? { ok: true, skipped: 'already-focused', results: [] }
-    : await companions.present(s, previewDisplay())
   const res = await focusSession(s, controllerDisplay())
   if (!res.ok && res.reason === 'terminal-not-found') {
     store.remove(id)
@@ -1165,7 +1179,7 @@ async function focusById (id) {
   if (!res.ok && res.permission) { accessibilityGranted(true); openAccessibilitySettings() }
   if (res.ok) lastFocusedSessionId = id
   if (res.ok) midiController?.select(id)
-  return { ...res, companion }
+  return res
 }
 
 // Prevent rapid clicks (or an external focus request) from launching competing
@@ -1323,13 +1337,13 @@ async function executeHardwareAssignment ({ assignment }) {
   if (actionId === 'session.capture-selected') return handleMidiAction('capture-selected')
   if (actionId === 'thread.open-next-attention') {
     const session = relativeSession(1, (candidate) => ['waiting', 'attention'].includes(candidate.state))
-    return session ? selectWorkspaceSession(session.id) : false
+    return session ? openPadThread(session.id) : false
   }
   if (actionId === 'thread.open-latest-provider') {
     const session = (await workspace.list()).find((candidate) => candidate.agent === assignment.targetId)
-    return session ? selectWorkspaceSession(session.id) : false
+    return session ? openPadThread(session.id) : false
   }
-  if (actionId === 'thread.open') return assignment.targetId ? selectWorkspaceSession(assignment.targetId) : false
+  if (actionId === 'thread.open') return assignment.targetId ? openPadThread(assignment.targetId) : false
   if (actionId === 'thread.send-prompt') {
     const session = selectedHardwareSession(assignment.targetId)
     if (!session || !assignment.prompt) return false
@@ -1616,7 +1630,7 @@ app.whenReady().then(() => {
     pushVoice()
   })
   midiController = createMidiController(store, {
-    onPadPress: selectWorkspaceSession,
+    onPadPress: openPadThread,
     getSessions: (padCount) => recentThreadGrid(recentHardwareThreads, padCount, providerPadLayout().providerLayout),
     onAction: handleMidiAction,
     onControl: (control) => hardwareProfiles?.handleInput(control) || false,

@@ -76,3 +76,11 @@ test('a pad on screen says exactly what the pad on the desk says', () => {
   assert.equal(padLightForSession({ state: 'attention', unseen: true }).motion, PAD_MOTION.BLINK)
   assert.equal(padLightForSession({ state: 'attention' }).motion, PAD_MOTION.STILL)
 })
+
+test('older running jobs and pending requests stay visible ahead of idle history', () => {
+  const sessions = Array.from({ length: 50 }, (_, i) => ({ id: `idle-${i}`, agent: 'claude', updatedAt: 100 + i }))
+  sessions.push({ id: 'running', agent: 'claude', state: 'running', updatedAt: 2 })
+  sessions.push({ id: 'approval', agent: 'claude', awaitingApproval: true, updatedAt: 1 })
+  const grid = padGridSessions(sessions, 40, providerColumnLayout(['claude']))
+  assert.deepEqual(grid.slice(0, 3).map(row => row.id), ['approval', 'running', 'idle-49'])
+})

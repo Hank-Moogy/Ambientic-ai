@@ -164,7 +164,7 @@ function Message ({ item, providerLabel }) {
   }
   if (item.role === 'activity') {
     return (
-      <details className="activity" open={item.status === 'inProgress'}>
+      <details className="activity">
         <summary><span>{item.kind === 'files' ? '↗' : item.kind === 'command' ? '›_' : '◇'}</span>{item.title || 'Agent activity'}<em>{item.status || ''}</em></summary>
         {item.text && <pre>{item.text}</pre>}
       </details>
@@ -337,7 +337,7 @@ function Approval ({ approval, onResolve }) {
     <section className="approval" data-risk={destructive ? 'destructive' : approval.risk || approval.permission || 'write'}>
       {/* Lead with what is being requested — the user decides yes/no from this
           line — and keep the tool name as secondary context. */}
-      <div><b>{approval.title || 'Permission requested'}</b><span>{context.join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
+      <div><b>{approval.title || 'Permission requested'}</b><span>Handled in Ambientic · {context.join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
       {/* Three answers, widest last, each saying plainly how far it reaches. A
           destructive action is only ever allowed once — a standing yes to
           something irreversible is not a choice worth offering. */}
@@ -845,7 +845,7 @@ function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }
       </div>
       <footer className="pad-summary">
         <span>{loading ? `Reading your threads…` : `${occupied} of ${padCount} pads in use`}</span>
-        <span>Connected providers · newest conversations first</span>
+        <span>Running jobs first · then recent conversations</span>
       </footer>
     </section>
   )
@@ -871,7 +871,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, sessionsLo
           <button className="provider-pad provider-pad--new" type="button" onClick={() => onCreate('')}><span className="provider-pad--new__plus">＋</span><b>Create an agent task</b><small>Choose a provider and start</small></button>
         </section>
 
-        <ThreadPadGrid sessions={sessions} midi={midi} loading={!sessionsLoaded} onOpenThread={onOpenThread} onStandbyMenu={onStandbyMenu} />
+        <ThreadPadGrid sessions={sessions} midi={midi} loading={!sessionsLoaded} onOpenThread={(id) => window.controller.openPadThread(id)} onStandbyMenu={onStandbyMenu} />
       </div>
     </section>
   )
@@ -975,6 +975,7 @@ function MidiHardwareSettings ({ midi, onSelect }) {
     <>
       <div className="provider-settings__intro"><span className="eyebrow"><i /> Physical control</span><h2>Choose your Ambientic controller.</h2><p>Select which Akai device Ambientic owns. Automatic mode prefers the APC40 MKII when both controllers are connected; choosing a model explicitly prevents Ambientic from opening the other device.</p></div>
       <div className="midi-device-status" data-connected={Boolean(midi?.connected)}><i /><div><b>{midi?.connected ? `${midi.model} connected` : 'Waiting for the selected controller'}</b><span>{midi?.connected ? `${midi.device} · ${midi.gridLabel} grid · ${midi.padCount} agent pads` : 'Connect the hardware by USB, then choose its profile below.'}</span></div></div>
+      <section className="midi-profile-guide"><div><b>When I press a pad</b><select aria-label="Pad click destination" value={midi?.padOpenTarget || 'native'} onChange={(event) => window.controller.midiSetPadTarget(event.target.value)}><option value="native">Open native app</option><option value="ambientic">Open in Ambientic</option></select><p>Pad clicks never open browser previews. If the native thread cannot be opened, or its pending request belongs to Ambientic, the conversation opens here.</p></div></section>
       <div className="midi-profile-list">
         {profiles.map((profile) => {
           const selected = midi?.selectedProfile === profile.id
@@ -1698,7 +1699,8 @@ export default function Workspace () {
             <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} onUnavailable={chooseHandoffProject} />
             {loading && <div className="loading">Loading local conversation…</div>}
             {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. Ambientic will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
-            {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
+            {thread?.messages?.filter((item) => item.role !== 'activity').map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
+            {thread?.messages?.some((item) => item.role === 'activity') && <details className="activity"><summary>Technical activity ({thread.messages.filter((item) => item.role === 'activity').length})</summary>{thread.messages.filter((item) => item.role === 'activity').map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}</details>}
             {thread?.running && !thread.messages?.some((item) => item.streaming) && <TypingIndicator providerLabel={thread.providerLabel} />}
             {showJumpToLatest && <button className="thread-jump-latest" type="button" onClick={() => scrollToLatest('smooth')} aria-label="Jump to the latest message">↓ Latest</button>}
           </div>

@@ -44,9 +44,10 @@ export function recentThreadGrid (sessions = [], padCount = 40, layout = []) {
     seen.add(session.id)
     return true
   })
+  const priority = (session) => session.awaitingApproval ? 3 : session.state === 'running' ? 2 : session.state === 'attention' ? 1 : 0
   for (const group of layout) {
     const recent = threads.filter((session) => (session.agent || session.provider) === group.id)
-      .sort((a, b) => Number(b.updatedAt || b.activityAt || b.lastSeen || 0) - Number(a.updatedAt || a.activityAt || a.lastSeen || 0) || String(a.id).localeCompare(String(b.id)))
+      .sort((a, b) => priority(b) - priority(a) || Number(b.updatedAt || b.activityAt || b.lastSeen || 0) - Number(a.updatedAt || a.activityAt || a.lastSeen || 0) || String(a.id).localeCompare(String(b.id)))
       .slice(0, Math.floor(padCount / 8) * group.columns)
     recent.forEach((session, rank) => {
       const index = Math.floor(rank / group.columns) * 8 + group.start + rank % group.columns

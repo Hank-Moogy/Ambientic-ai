@@ -155,3 +155,7 @@ Recent conversations is the default, with aligned provider headers on Home and H
 ## Adjustable provider columns — 2026-11-05
 
 Only connected task providers receive space. Header identity uses a restrained provider accent while pad colors retain lifecycle meaning. Headers share the exact eight-column geometry of the physical grid, including narrow windows; never reflow the pad grid into four or six columns. Drag a divider to transfer whole columns between adjacent providers, with at least one column each. Preview on screen during the gesture; commit to the controller on release. Arrow keys offer the same adjustment and Equal split restores automatic allocation. Save overrides per connected-provider combination, so a connection change gets a balanced default without erasing a prior layout.
+
+## Conversation-first pad navigation — 2026-11-05
+
+A pad opens the conversation in the user's chosen surface: Native or Ambientic. Never automatically arrange a browser preview while selecting a thread. Prioritize active work within each provider's allocation. Keep user/assistant prose readable, with technical activity collapsed and machine context excluded from human message bubbles. Permission cards explicitly identify Ambientic ownership; native permissions stay with their native runtime.

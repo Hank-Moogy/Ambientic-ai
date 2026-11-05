@@ -1,3 +1,4 @@
+import { conversationText, visibleUserText } from '../shared/conversation-messages.mjs'
 import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -11,7 +12,6 @@ import { assembleProviderPrompt, stripAmbienticContext } from './context-assembl
 import { humanThreadTitle, namesThread } from './summarizer.js'
 import { decideToolPermission } from './permission-policy.mjs'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
-import { awaitsUserReply } from './turn-signals.mjs'
 import { claudePermissionMode, codexApprovalSettings, hermesAutoApproval, normalizeApprovalProfile } from './approval-profile.mjs'
 import { isClaudeLimitRejection } from './usage.js'
 
@@ -343,7 +343,10 @@ function codexInputs (text, attachments) {
 
 function codexItem (item) {
   if (!item) return null
-  if (item.type === 'userMessage') return message('user', stripAmbienticContext(textContent(item.content)), { id: item.id })
+  if (item.type === 'userMessage') {
+    const text = visibleUserText(stripAmbienticContext(conversationText(item.content)))
+    return text ? message('user', text, { id: item.id }) : null
+  }
   if (item.type === 'agentMessage') return message('assistant', item.text, { id: item.id })
   if (item.type === 'reasoning') return message('activity', textContent(item.summary || item.content), { id: item.id, kind: 'reasoning', title: 'Reasoning' })
   if (item.type === 'commandExecution') return message('activity', item.aggregatedOutput || item.command || '', { id: item.id, kind: 'command', title: item.command || 'Command', status: item.status })
@@ -363,25 +366,13 @@ function codexActiveTurnId (thread) {
   return [...(thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id || ''
 }
 
-// Codex has no distinct protocol signal for "the agent is asking the user
-// something and stopped to wait for a reply" — a clarifying question ends the
-// turn exactly like a completed task does. When the turn's last item is an
-// agent message ending in a question, this is that case, and the thread
-// should surface as needing you rather than going quietly idle.
+// Only explicit provider input flags indicate a blocked turn. Punctuation in
+// ordinary assistant prose is not an approval or actionable input request.
 function codexAwaitsReply (thread) {
-  const last = thread?.turns?.at(-1)?.items?.at(-1)
-  if (last?.type !== 'agentMessage') return false
-  return awaitsUserReply(last.text)
+  return Boolean(thread?.status?.activeFlags?.includes('waitingOnUserInput'))
 }
 
-// The same question, read from a snapshot instead of a provider thread. Claude
-// and Hermes report their transcript into the snapshot rather than through a
-// readable thread object, and without this they end a turn on a question and
-// show up as plain idle — the same pause Codex surfaces as needing you.
-function snapshotAwaitsReply (snapshot) {
-  const last = [...(snapshot?.messages || [])].reverse().find((entry) => entry?.role === 'assistant' || entry?.role === 'user')
-  return last?.role === 'assistant' && awaitsUserReply(last.text)
-}
+function snapshotAwaitsReply () { return false }
 
 function codexEventTurnId (event) {
   return event?.params?.turn?.id || event?.params?.turnId || ''
@@ -391,7 +382,7 @@ function codexStatusIsRunning (status) {
   return (status?.type || status) === 'active'
 }
 
-function claudeMessages (path) {
+export function claudeMessages (path) {
   if (!path || !existsSync(path)) return []
   const output = []
   for (const line of readFileSync(path, 'utf8').split('\n')) {
@@ -399,7 +390,8 @@ function claudeMessages (path) {
     let row
     try { row = JSON.parse(line) } catch { continue }
     if (row.type === 'user') {
-      const text = stripAmbienticContext(textContent(row.message?.content))
+      if (row.isMeta || row.isCompactSummary) continue
+      const text = visibleUserText(stripAmbienticContext(conversationText(row.message?.content)))
       if (text && !text.startsWith('<task-notification>')) output.push(message('user', text, { id: row.uuid }))
     } else if (row.type === 'assistant') {
       for (const part of row.message?.content || []) {
@@ -821,6 +813,7 @@ export class WorkspaceService extends EventEmitter {
     const id = session?.id ?? snapshot?.id
     if (snapshot?.error) return 'attention'
     if (this.hasPendingApproval(id)) return 'attention'
+    if (session?.externalSource === 'codex-desktop' && !this.activeTurns.has(id)) return session.state || 'idle'
     if (snapshot?.awaitingReply) return 'attention'
     if (session?.state === 'attention' || session?.state === 'waiting') return session.state
     // A provider-native turn/read result is authoritative. Discovery and hooks
@@ -882,19 +875,20 @@ export class WorkspaceService extends EventEmitter {
         // mutable name/preview may seed an otherwise unnamed thread, but never
         // overwrite an Ambientic name or a user alias.
         snapshot.title = this.aliasFor(session) || session.task || humanThreadTitle(result.thread?.name || result.thread?.preview, snapshot.title)
-        snapshot.running = codexStatusIsRunning(result.thread?.status)
+        const external = session.externalSource === 'codex-desktop' && !this.activeTurns.has(id)
+        snapshot.running = external ? session.state === 'running' : codexStatusIsRunning(result.thread?.status)
         snapshot.awaitingReply = !snapshot.running && codexAwaitsReply(result.thread)
-        snapshot.turnStateKnown = true
+        snapshot.turnStateKnown = !external
         const activeTurnId = codexActiveTurnId(result.thread)
-        if (snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
+        if (!external && snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
         else if (!snapshot.running) this.activeTurns.delete(id)
         // Reading dormant history must not promote it onto the live hardware
         // surface. A genuinely active provider turn is promoted immediately;
         // existing live sessions are also corrected back to idle — unless
         // Codex ended its last turn by asking the user a question, which
         // still needs a reply to move forward.
-        if (snapshot.running) this.ingestLifecycle(id, 'tool')
-        else if (!session.history && !session.tty) {
+        if (!external && snapshot.running) this.ingestLifecycle(id, 'tool')
+        else if (!external && !session.history && !session.tty) {
           this.ingestLifecycle(id, snapshot.awaitingReply ? 'notification' : 'stop_idle')
         }
       } else if (session.agent === 'claude') {
@@ -1075,7 +1069,7 @@ export class WorkspaceService extends EventEmitter {
     const providerSessionId = explicitSessionId || event.session_id || ''
     const sessionId = this.uiSessionId(provider, providerSessionId)
     const session = this.sessionFor(sessionId)
-    if (!session) return Promise.resolve(null)
+    if (!session || !this.isManagedThread(session)) return Promise.resolve(null)
     const id = `${provider}:${randomUUID()}`
     const suggestions = Array.isArray(event.permission_suggestions) ? event.permission_suggestions : []
     const toolInput = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {}
@@ -1206,7 +1200,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   isManagedThread (session) {
-    return Boolean(session) && !session.tty && !session.history
+    return Boolean(session) && this.activeTurns.has(session.id) && !session.tty && session.externalSource !== 'codex-desktop'
   }
 
   // One entry point for every provider's "may I?" question. Returns null when
@@ -1731,8 +1725,8 @@ export class WorkspaceService extends EventEmitter {
     const rows = await execJson('/usr/bin/sqlite3', ['-json', db, `select id,role,content,tool_name,tool_calls,timestamp from messages where session_id='${escaped}' and active=1 order by timestamp asc limit 300`])
     return rows.map((row) => row.tool_name
       ? message('activity', row.content || row.tool_calls || '', { id: `hermes:${row.id}`, kind: 'tool', title: row.tool_name })
-      : message(row.role === 'assistant' ? 'assistant' : 'user', row.role === 'assistant' ? (row.content || '') : stripAmbienticContext(row.content || ''), { id: `hermes:${row.id}` }))
-      .filter((entry) => entry.role === 'activity' || entry.text.trim())
+      : ['assistant', 'user'].includes(row.role) ? message(row.role, row.role === 'assistant' ? (row.content || '') : visibleUserText(stripAmbienticContext(row.content || '')), { id: `hermes:${row.id}` }) : null)
+      .filter((entry) => entry && (entry.role === 'activity' || entry.text.trim()))
   }
 
   interrupt (id) {

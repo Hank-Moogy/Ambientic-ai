@@ -145,7 +145,7 @@ export function HardwareWorkspace ({ snapshot, midi, sessions, goalsSnapshot, co
   const padPress = (slot) => {
     if (template.builtIn) {
       const index = snapshot.slots.findIndex((item) => item.id === slot)
-      if (nativeSessions[index]) onOpenThread(nativeSessions[index].id)
+      if (nativeSessions[index]) window.controller.openPadThread(nativeSessions[index].id)
       return
     }
     if (snapshot.mode === 'play' || snapshot.mode === 'test') window.controller.hardwareTriggerPad(slot)

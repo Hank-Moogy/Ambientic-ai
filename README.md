@@ -177,3 +177,12 @@ This supersedes the initial fixed two-column / ten-thread layout above.
 - Each group fills its capacity with newest conversations rather than stopping at ten. Empty slots indicate no available thread.
 
 Verification: 306 regression tests, 304 passed, 2 intentional skips; production build and Electron SQLite/FTS5 smoke passed. Updated development app relaunched and connected to APC40 MKII. Live drag/drop and reset interaction remains unverified because native UI automation returned `noWindowsAvailable`; allocation and resizing boundaries are covered by automated tests.
+
+## Pad destinations and conversation fidelity — 2026-11-05
+
+- Hardware settings → When I press a pad offers Native (default) or Ambientic. Physical pads, Home/Hardware pad mirrors, and custom thread-opening assignments share this routing. Selecting/focusing a thread no longer automatically launches localhost companion previews; previews remain an explicit action.
+- Native uses a known Codex deep link or terminal target. Threads without a native route fall back to Ambientic. Requests owned by Ambientic open there and say “Handled in Ambientic”; a separate native runtime cannot answer them.
+- Passive Claude sessions no longer enter Ambientic's permission broker. Ordinary assistant questions no longer fabricate a needs-input signal. Reading a native Codex conversation through Ambientic's separate app-server preserves the native discovery state instead of treating that server's notLoaded state as task completion.
+- Pending requests and running jobs rank ahead of idle history within each provider's columns. Native Codex discovery reads up to forty recent threads; its activity remains an estimate based on local rollout/index events, not a subscription to native UI state.
+- Chat hides Claude tool-result user rows, metadata, compaction summaries, and known injected context wrappers. Actual question answers remain visible. Technical activity is collapsed separately; source transcripts are unchanged. This is a cleaner conversation view, not an embedded replica of the native interface.
+- Verified: 312 regression tests, 310 passed, 2 intentional skips; production build and Electron SQLite/FTS5 smoke passed. Relaunched development app reports APC40 MKII connected, this Codex task Working, and zero needs-input tasks. End-to-end pad clicks remain unverified because desktop input automation failed with ScreenCaptureKit error -3812. Signed installation remains outstanding as documented above.
