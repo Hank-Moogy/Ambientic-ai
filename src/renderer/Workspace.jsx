@@ -1047,7 +1047,8 @@ function Onboarding ({ state, connectors, providerAuth, midi, memoryBootstrap, o
   }
   const connect = async (provider) => {
     const connector = connectors.find((item) => item.id === provider.id)
-    if (!connector?.installed) {
+    if (!connector || connector.checking) return
+    if (!connector.installed) {
       await window.controller.openExternalUrl(providerInstallUrls[provider.id])
       setNotice(`${provider.label} installation guide opened. Return here when the CLI is installed.`)
       return
@@ -1072,7 +1073,7 @@ function Onboarding ({ state, connectors, providerAuth, midi, memoryBootstrap, o
   const providerState = (provider) => {
     const connector = connectors.find((item) => item.id === provider.id)
     const auth = providerAuth?.[provider.id]
-    if (!connector) return { tone: 'working', label: 'Checking this Mac…', cta: 'Checking…' }
+    if (!connector || connector.checking) return { tone: 'working', label: 'Checking this Mac…', cta: 'Checking…' }
     if (!connector?.installed) return { tone: 'missing', label: 'Install required', cta: `Install ${provider.label}` }
     if (auth?.status === 'waiting' || ['starting', 'interactive'].includes(auth?.status)) return { tone: 'working', label: 'Connecting…', cta: 'Connecting…' }
     if (auth?.status === 'connected' || (connector.manageable !== false && provider.id !== 'kimi')) return { tone: 'connected', label: 'Connected', cta: 'Connected' }

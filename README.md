@@ -150,3 +150,11 @@ The durable visual direction is defined in [ART_DIRECTION.md](ART_DIRECTION.md),
 - Both APC40 MKII and APC mini mk2 have native profiles. The current MIDI service opens one controller at a time; simultaneous control from both devices remains future work.
 - Electron SQLite/FTS5 smoke passed; `npm run preview` launched and `/health` returned `ok: true`. Startup detected a Keystation 61 MK3 MIDI input. Accessibility was not granted and the Claude CLI was unavailable.
 - Physical APC MIDI acceptance remains outstanding. A signed installed release requires an Apple Development or Developer ID identity; none was available in this environment.
+
+## Provider onboarding reliability — 2026-11-05
+
+- Claude Desktop discovery supports both `version/claude.app` and `version/build-hash/claude.app` layouts. Installed Claude Code uses the existing native login wizard in onboarding step two.
+- Pending provider discovery remains “Checking…” with a disabled action, rather than briefly offering an installation guide.
+- Verified the actual Desktop-managed Claude 2.1.309 executable on this Mac. The earlier missing-CLI startup finding was a discovery bug, now corrected.
+- Verification: 302 local-release tests, 300 passed, 2 skipped; production build and Electron SQLite/FTS5 smoke passed. Interactive account authorization still requires the user's own sign-in.
+- Distribution target: a friend downloads Ambientic and connects their own providers in onboarding step two. Fresh-machine provider installation and signed/notarized distribution remain open; the current missing-provider path opens installation documentation.

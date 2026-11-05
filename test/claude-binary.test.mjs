@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { claudeCommandCandidates, compareClaudeVersionTuples, parseClaudeVersion, pickNewestClaudeCommand } from '../src/main/claude-binary.mjs'
+import { claudeDesktopCandidates, claudeCommandCandidates, compareClaudeVersionTuples, parseClaudeVersion, pickNewestClaudeCommand } from '../src/main/claude-binary.mjs'
 
 test('parses the version out of Claude Code --version output', () => {
   assert.deepEqual(parseClaudeVersion('2.1.220 (Claude Code)'), [2, 1, 220])
@@ -43,4 +43,28 @@ test('still looks in the standard install locations', () => {
   const candidates = claudeCommandCandidates('/Users/tester')
   assert.ok(candidates.includes('/opt/homebrew/bin/claude'))
   assert.ok(candidates.includes('/Users/tester/.local/bin/claude'))
+})
+
+
+test('discovers both direct and build-hash Claude Desktop installations', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join, dirname } = await import('node:path')
+  const home = await mkdtemp(join(tmpdir(), 'ambientic-claude-discovery-'))
+  try {
+    const root = join(home, 'Library', 'Application Support', 'Claude', 'claude-code')
+    const paths = [
+      join(root, '2.1.220', 'claude.app', 'Contents', 'MacOS', 'claude'),
+      join(root, '2.1.309', '5af865b9901c', 'claude.app', 'Contents', 'MacOS', 'claude')
+    ]
+    for (const path of paths) {
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(path, '')
+    }
+    await mkdir(join(root, 'incomplete', 'build'), { recursive: true })
+    assert.deepEqual((await claudeDesktopCandidates(home)).sort(), paths.sort())
+    assert.deepEqual(await claudeDesktopCandidates(join(home, 'missing')), [])
+  } finally {
+    await rm(home, { recursive: true, force: true })
+  }
 })
