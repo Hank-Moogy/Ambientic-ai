@@ -3,18 +3,26 @@ import assert from 'node:assert/strict'
 import { padGridSessions } from '../src/renderer/pad-grid.mjs'
 import { padLightForSession, PAD_MOTION, PAD_TONE } from '../src/shared/pad-light.mjs'
 
-test('pads hold their assigned position rather than reshuffling by recency', () => {
+test('recent history and live threads share fixed provider columns, newest first', () => {
   const sessions = [
-    { id: 'c', padIndex: 2, updatedAt: 900 },
-    { id: 'a', padIndex: 0, updatedAt: 100 },
-    { id: 'b', padIndex: 1, updatedAt: 500 }
+    { id: 'older', agent: 'claude', updatedAt: 100, history: true },
+    { id: 'new', agent: 'claude', updatedAt: 900 },
+    { id: 'codex', agent: 'codex', updatedAt: 500 },
+    { id: 'placeholder', agent: 'claude', discovered: true, updatedAt: 1000 }
   ]
-  assert.deepEqual(padGridSessions(sessions, 4).map((item) => item ? item.id : null), ['a', 'b', 'c', null])
+  const grid = padGridSessions(sessions)
+  assert.deepEqual(grid.slice(0, 4).map((s) => s?.id), ['new', 'older', 'codex', undefined])
+  assert.equal(grid.filter(Boolean).length, 3)
 })
 
-test('sessions without a hardware assignment get no pad', () => {
-  const sessions = [{ id: 'live', padIndex: 0 }, { id: 'old', history: true, padIndex: null }]
-  assert.deepEqual(padGridSessions(sessions, 2).map((item) => item ? item.id : null), ['live', null])
+test('caps each provider at ten without filling another provider columns', () => {
+  const sessions = Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, agent: 'claude', updatedAt: i }))
+  const grid = padGridSessions(sessions, 64)
+  assert.equal(grid.filter(Boolean).length, 10)
+  assert.equal(grid[0].id, 'c11')
+  assert.equal(grid[33].id, 'c2')
+  assert.equal(grid[2], null)
+  assert.equal(grid[40], null)
 })
 
 test('the grid is always exactly as long as the device has pads', () => {

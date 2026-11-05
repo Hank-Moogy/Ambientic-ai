@@ -99,7 +99,7 @@ npm run test:local-release
 npm run build
 ```
 
-The live pad roster only includes threads with verified current-session activity. Provider process discovery and cached thread names enrich the Threads view but cannot put an empty placeholder on a hardware pad.
+The default pad roster includes up to ten recent conversations per provider, including history, in fixed two-column groups: Claude, Codex, Hermes, and Kimi. Providers without discoverable history keep empty pads. Process-discovery placeholders are excluded. Screen and native APC pads use the same layout; conversations refresh by recency within each provider.
 
 Idle live threads can be placed on **Stand by** from the thread header or the Overview pad context menu. Stand by persists locally, holds the on-screen and physical pad solid orange as a check-later reminder, and clears automatically when the next turn begins or when the user removes it.
 
@@ -158,3 +158,10 @@ The durable visual direction is defined in [ART_DIRECTION.md](ART_DIRECTION.md),
 - Verified the actual Desktop-managed Claude 2.1.309 executable on this Mac. The earlier missing-CLI startup finding was a discovery bug, now corrected.
 - Verification: 302 local-release tests, 300 passed, 2 skipped; production build and Electron SQLite/FTS5 smoke passed. Interactive account authorization still requires the user's own sign-in.
 - Distribution target: a friend downloads Ambientic and connects their own providers in onboarding step two. Fresh-machine provider installation and signed/notarized distribution remain open; the current missing-provider path opens installation documentation.
+
+## Recent conversations hardware default — 2026-11-05
+
+- Automatic MIDI detection now rechecks ports while connected, switching from a generic keyboard to a newly attached APC40 MKII/APC mini mk2 and recovering after disconnection.
+- The built-in Recent conversations layout opens the ten newest available threads per provider without manual mapping. Each provider owns two columns in the top five rows; extra APC mini rows remain empty.
+- Hardware and Overview use the shared recent-thread grid. Hardware hides custom templates and editing modes behind Custom mappings; existing custom mappings are preserved.
+- Verified: APC40 mkII appears in both local MIDI input and output ports; 303 regression tests, 301 passed, 2 skipped; production build passed. Relaunched app visibly reports APC40 MKII connected and displays ten Claude plus seven available Codex conversations in the shared grid. Physical pad response still requires hands-on confirmation.

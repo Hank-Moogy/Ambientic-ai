@@ -94,6 +94,7 @@ export function createMidiController (store, {
   onAction,
   onControl,
   getFeedback,
+  getSessions,
   onRecordStart,
   onRecordStop,
   onRecordUnavailable,
@@ -172,6 +173,7 @@ export function createMidiController (store, {
   }
 
   function hardwareSessions () {
+    if (getSessions) return getSessions(activeProfile?.padCount || 40)
     return typeof store.hardwareList === 'function'
       ? store.hardwareList(activeProfile?.padCount)
       : store.list()
@@ -215,7 +217,6 @@ export function createMidiController (store, {
   }
 
   function connect () {
-    if (status.connected && activeProfile) return
     let candidateInput = null
     let candidateOutput = null
     try {
@@ -249,17 +250,20 @@ export function createMidiController (store, {
         match = { profile: genericProfile(inputName), inputIndex, outputIndex }
       }
       if (!match) {
-        candidateInput.closePort()
-        candidateOutput.closePort()
+        close()
         setStatus({ connected: false, device: '', error: '' })
         return
       }
 
+      const nextDevice = candidateInput.getPortName(match.inputIndex)
+      if (status.connected && activeProfile?.id === match.profile.id && status.device === nextDevice) return
+      close()
       activeProfile = match.profile
       mappings = normalizeMappings(mappingsByProfile[activeProfile.id])
       const device = candidateInput.getPortName(match.inputIndex)
       candidateInput.ignoreTypes(false, false, false)
       if (!inputListenerAttached) candidateInput.on('message', (_deltaTime, message) => {
+        if (!activeProfile) return
         const incomingControl = midiEventForMessage(message)
         if (incomingControl && onControl?.(incomingControl)) return
         const recordArm = activeProfile.recordForMessage(message)
@@ -331,8 +335,8 @@ export function createMidiController (store, {
     // This corrects LED drift if the APC firmware or another MIDI client
     // clears a pad after Ambientic's initial state render.
     timer = setInterval(() => {
-      if (!status.connected || !activeProfile) connect()
-      else render()
+      connect()
+      render()
     }, RECONNECT_MS)
     if (timer.unref) timer.unref()
   }
@@ -410,6 +414,7 @@ export function createMidiController (store, {
       connect()
       return true
     },
+    refreshDevices: connect,
     render,
     setVoiceActive: (active) => {
       if (!active && recording) recording = null

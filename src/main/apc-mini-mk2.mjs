@@ -69,6 +69,6 @@ export function miniRecordLedMessages (recording) {
 export function miniSelectedSessionForRecordColumn (sessions, selectedSessionId, column) {
   if (!Number.isInteger(column) || column < 0 || column > 7) return null
   const grid = miniGridSessions(sessions)
-  const index = grid.findIndex((session) => session.id === selectedSessionId)
+  const index = grid.findIndex((session) => session?.id === selectedSessionId)
   return index >= 0 && index % 8 === column ? grid[index] : null
 }

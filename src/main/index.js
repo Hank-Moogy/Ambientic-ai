@@ -1,3 +1,4 @@
+import { recentThreadGrid } from '../shared/recent-thread-grid.mjs'
 import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -110,6 +111,7 @@ let voiceInput = null
 let connectors = []
 let pendingCodexLogin = ''
 const providerAuthState = new Map()
+let recentHardwareThreads = []
 let workspace = null
 let handovers = null
 let consumptionLedger = null
@@ -457,7 +459,11 @@ function pushState () {
 
 async function pushWorkspaceThreads (force = false) {
   if (!workspace) return
-  try { sendToWindows('workspace-threads', await workspace.list({ force })) } catch (error) { console.error('[ambientic] workspace index failed:', error.message) }
+  try {
+    recentHardwareThreads = await workspace.list({ force })
+    sendToWindows('workspace-threads', recentHardwareThreads)
+    midiController?.render()
+  } catch (error) { console.error('[ambientic] workspace index failed:', error.message) }
 }
 
 function scheduleWorkspaceThreads () {
@@ -706,7 +712,11 @@ function createTray () {
 // ── IPC ───────────────────────────────────────────────────────────────────
 ipcMain.handle('get-state', () => store.hardwareList())
 ipcMain.handle('get-build-info', () => buildInfo)
-ipcMain.handle('get-workspace-threads', () => workspace.list())
+ipcMain.handle('get-workspace-threads', async () => {
+  recentHardwareThreads = await workspace.list()
+  midiController?.render()
+  return recentHardwareThreads
+})
 ipcMain.handle('get-goals', () => goals?.list() || { version: 1, goals: [], events: [], updatedAt: null })
 ipcMain.handle('create-goal', (_event, input) => goals.createGoal(input || {}))
 ipcMain.handle('update-goal', (_event, goalId, patch) => goals.updateGoal(goalId, patch || {}))
@@ -1582,6 +1592,7 @@ app.whenReady().then(() => {
   })
   midiController = createMidiController(store, {
     onPadPress: selectWorkspaceSession,
+    getSessions: (padCount) => recentThreadGrid(recentHardwareThreads, padCount),
     onAction: handleMidiAction,
     onControl: (control) => hardwareProfiles?.handleInput(control) || false,
     getFeedback: () => hardwareProfiles?.feedback() || null,
