@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('controller', {
   showWorkspace: (id) => ipcRenderer.invoke('show-workspace', id),
   openArtifact: (id, path) => ipcRenderer.invoke('open-artifact', id, path),
   presentPreview: (id) => ipcRenderer.invoke('present-preview', id),
+  midiSetProviderColumns: (widths) => ipcRenderer.invoke('midi-set-provider-columns', widths),
   getMidi: () => ipcRenderer.invoke('get-midi'),
   getVoice: () => ipcRenderer.invoke('get-voice'),
   toggleVoice: () => ipcRenderer.invoke('toggle-voice'),

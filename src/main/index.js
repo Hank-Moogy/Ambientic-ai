@@ -1,4 +1,4 @@
-import { recentThreadGrid } from '../shared/recent-thread-grid.mjs'
+import { recentThreadGrid, connectedPadProviders, providerColumnLayout, validColumnWidths } from '../shared/recent-thread-grid.mjs'
 import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -504,8 +504,18 @@ function pushCompanions () {
   sendToWindows('companions', companions.getState())
 }
 
+function providerPadLayout () {
+  const providers = connectedPadProviders(connectors)
+  const widths = loadPrefs().providerPadSplits?.[providers.join(',')]
+  return { providerLayout: providerColumnLayout(providers, widths), automaticSplit: !validColumnWidths(providers, widths) }
+}
+
+function midiSnapshot () {
+  return { ...(midiController?.getStatus() || { connected: false, model: 'Akai APC controller' }), ...providerPadLayout() }
+}
+
 function pushMidi () {
-  sendToWindows('midi', midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
+  sendToWindows('midi', midiSnapshot())
 }
 
 function pushHardware () {
@@ -530,6 +540,8 @@ async function refreshConnectors () {
     connectorRefresh = null
   }
   pushConnectors()
+  pushMidi()
+  midiController?.render()
   return connectors
 }
 
@@ -941,7 +953,20 @@ ipcMain.handle('connect-provider', async (_event, agentId, options = {}) => {
 })
 ipcMain.handle('claude-auth-input', (_event, input) => claudeAuth?.input(input) || false)
 ipcMain.handle('claude-auth-cancel', () => claudeAuth?.cancel() || false)
-ipcMain.handle('get-midi', () => midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
+ipcMain.handle('get-midi', midiSnapshot)
+ipcMain.handle('midi-set-provider-columns', (_event, widths) => {
+  const providers = connectedPadProviders(connectors)
+  if (widths !== null && !validColumnWidths(providers, widths)) throw new Error('Provider connections changed. Please adjust the current layout again.')
+  const prefs = loadPrefs()
+  const splits = { ...prefs.providerPadSplits }
+  const key = providers.join(',')
+  if (widths === null) delete splits[key]
+  else splits[key] = Object.fromEntries(providers.map((id) => [id, widths[id]]))
+  savePrefs({ ...prefs, providerPadSplits: splits })
+  midiController?.render()
+  pushMidi()
+  return midiSnapshot()
+})
 ipcMain.handle('midi-set-profile', (_event, profileId) => midiController?.setProfile(profileId) || false)
 ipcMain.handle('midi-vibe', () => midiController?.triggerVibe() || false)
 ipcMain.handle('midi-learn', (_event, actionId) => midiController?.learn(actionId) || false)
@@ -1592,7 +1617,7 @@ app.whenReady().then(() => {
   })
   midiController = createMidiController(store, {
     onPadPress: selectWorkspaceSession,
-    getSessions: (padCount) => recentThreadGrid(recentHardwareThreads, padCount),
+    getSessions: (padCount) => recentThreadGrid(recentHardwareThreads, padCount, providerPadLayout().providerLayout),
     onAction: handleMidiAction,
     onControl: (control) => hardwareProfiles?.handleInput(control) || false,
     getFeedback: () => hardwareProfiles?.feedback() || null,

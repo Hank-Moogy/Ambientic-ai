@@ -17,6 +17,7 @@ import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
 import { taskCreationError } from './new-task-state.mjs'
+import { ProviderPadHeaders, useProviderPadLayout } from './ProviderPadHeaders.jsx'
 import { padGridSessions } from './pad-grid.mjs'
 import { padLightForSession } from '../shared/pad-light.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
@@ -821,7 +822,8 @@ function ThreadPadSkeleton ({ index }) {
 
 function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }) {
   const padCount = Number.isFinite(midi?.padCount) && midi.padCount > 0 ? midi.padCount : APC40_PAD_COUNT
-  const pads = padGridSessions(sessions, padCount)
+  const allocation = useProviderPadLayout(midi)
+  const pads = padGridSessions(sessions, padCount, allocation.layout)
   const occupied = pads.filter(Boolean).length
   return (
     <section className="pad-section">
@@ -835,6 +837,7 @@ function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }
           <span data-tone="idle"><i />Idle</span>
         </div>
       </header>
+      <ProviderPadHeaders {...allocation} padCount={padCount} automatic={midi?.automaticSplit} />
       <div className="pad-grid" data-pads={padCount} data-loading={Boolean(loading)} role="group" aria-label="Agent pads" aria-busy={Boolean(loading)}>
         {loading
           ? Array.from({ length: padCount }, (_, index) => <ThreadPadSkeleton key={`skeleton-${index}`} index={index} />)
@@ -842,7 +845,7 @@ function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }
       </div>
       <footer className="pad-summary">
         <span>{loading ? `Reading your threads…` : `${occupied} of ${padCount} pads in use`}</span>
-        <span>Up to ten recent conversations per provider · newest first</span>
+        <span>Connected providers · newest conversations first</span>
       </footer>
     </section>
   )

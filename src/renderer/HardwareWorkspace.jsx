@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import './hardware.css'
+import { ProviderPadHeaders, useProviderPadLayout } from './ProviderPadHeaders.jsx'
 import { recentThreadGrid } from '../shared/recent-thread-grid.mjs'
 import { AgentIcon } from './AgentIcon.jsx'
 
@@ -99,7 +100,8 @@ export function HardwareWorkspace ({ snapshot, midi, sessions, goalsSnapshot, co
   const template = snapshot.templates.find((item) => item.id === snapshot.activeTemplateId) || snapshot.templates[0]
   const view = template?.views.find((item) => item.id === snapshot.activeViewId) || template?.views[0]
   const nativePadCount = midi.padCount || 40
-  const nativeSessions = recentThreadGrid(sessions, nativePadCount)
+  const allocation = useProviderPadLayout(midi)
+  const nativeSessions = recentThreadGrid(sessions, nativePadCount, allocation.layout)
   const displayRows = template?.builtIn ? nativePadCount / 8 : template?.rows
   const displayColumns = template?.builtIn ? 8 : template?.columns
   const displaySlots = template?.builtIn ? snapshot.slots.slice(0, Math.max(1, Number(midi.padCount) || 40)) : snapshot.slots
@@ -165,8 +167,7 @@ export function HardwareWorkspace ({ snapshot, midi, sessions, goalsSnapshot, co
         <div className="hardware-stage__atmosphere" />
         <header className="hardware-deck-header"><div><span>{template.builtIn ? 'Automatic layout' : `${template.rows} × ${template.columns} control deck`}</span><p>{template.description || 'A programmable Ambientic hardware surface.'}</p></div><div>{!template.builtIn && <button type="button" onClick={() => window.controller.hardwareDuplicateTemplate(template.id)}>Duplicate</button>}{!template.builtIn && <><button type="button" onClick={() => setTemplateEditing(true)}>Edit deck</button><button type="button" onClick={exportTemplate}>Export</button><button type="button" className="danger" onClick={() => window.confirm(`Delete “${template.name}”?`) && window.controller.hardwareDeleteTemplate(template.id)}>Delete</button></>}</div></header>
         {!template.builtIn && <div className="hardware-viewbar"><div>{template.views.map((item, index) => <button type="button" key={item.id} data-selected={item.id === view?.id} onClick={() => window.controller.hardwareOpenView(item.id)}><i>{String(index + 1).padStart(2, '0')}</i>{item.name}</button>)}</div>{!template.builtIn && <><button type="button" onClick={() => setViewEditing(true)}>Edit view</button><button type="button" onClick={() => setViewCreation({ linked: false })}>＋ New view</button></>}</div>}
-        {template.builtIn && <div className="hardware-provider-columns"><span>Claude · 1–2</span><span>Codex · 3–4</span><span>Hermes · 5–6</span><span>Kimi · 7–8</span></div>}
-        <div className="hardware-grid-wrap"><div className="hardware-grid" data-mode={snapshot.mode} style={{ '--hardware-columns': displayColumns, '--hardware-rows': displayRows }}>{displaySlots.map((slot, index) => {
+        <div className="hardware-grid-wrap" data-native={template.builtIn}>{template.builtIn && <ProviderPadHeaders {...allocation} padCount={nativePadCount} automatic={midi?.automaticSplit} />}<div className="hardware-grid" data-mode={snapshot.mode} style={{ '--hardware-columns': displayColumns, '--hardware-rows': displayRows }}>{displaySlots.map((slot, index) => {
           const assignment = template.builtIn ? null : view?.assignments?.[slot.id]
           const session = template.builtIn ? nativeSessions[index] : null
           const definition = snapshot.actions.find((item) => item.id === assignment?.actionId)
@@ -177,7 +178,7 @@ export function HardwareWorkspace ({ snapshot, midi, sessions, goalsSnapshot, co
         })}</div></div>
         <footer className="hardware-stage__footer"><span><i data-connected={Boolean(midi.connected)} />{midi.connected ? `${midi.model} · ${midi.gridLabel}` : 'Input-only keyboard mapping is available without MIDI'}</span><p className={snapshot.lastResult ? 'hardware-action-result' : ''} data-state={snapshot.lastResult?.pending ? 'pending' : snapshot.lastResult?.ok === false ? 'error' : 'ok'}>{snapshot.lastResult?.message || (snapshot.mode === 'map' ? 'Choose a virtual pad, then touch the physical control.' : snapshot.mode === 'edit' ? 'Select a pad to assign an action or create a linked view.' : snapshot.mode === 'test' ? 'Actions run, but confirmation boundaries remain active.' : 'Your active view follows the same controls on screen and hardware.')}</p></footer>
       </main>
-      {template.builtIn ? <aside className="hardware-inspector hardware-native"><span>Default layout</span><div><i>◎</i><h3>Press a pad. Open a thread.</h3><p>Columns 1–2: Claude<br />Columns 3–4: Codex<br />Columns 5–6: Hermes<br />Columns 7–8: Kimi</p><p>Up to ten recent conversations each, newest at the top. Empty pads mean no conversation. Green: running. Orange: review. Red: attention. Blue: idle.</p></div></aside> : <AssignmentInspector template={template} view={view} slot={selectedSlot} actions={snapshot.actions} sessions={sessions} goals={goalsSnapshot.goals || []} connectors={connectors} binding={bindingsBySlot[selectedSlot]} learning={learning} onAssign={(assignment) => window.controller.hardwareAssignPad(template.id, view.id, selectedSlot, assignment)} onLearn={() => learning ? window.controller.hardwareCancelLearn() : window.controller.hardwareLearnPad(template.id, selectedSlot)} onClearBinding={() => window.controller.hardwareClearBinding(template.id, selectedSlot)} onCreateLinkedView={() => setViewCreation({ linked: true })} />}
+      {template.builtIn ? <aside className="hardware-inspector hardware-native"><span>Default layout</span><div><i>◎</i><h3>Press a pad. Open a thread.</h3><p>Connected providers share all eight columns equally by default. Drag a header divider to change the split, or choose Equal split to reset.</p><p>Each column holds the newest available conversations, filling from the top. Empty pads mean no conversation. Green: running. Orange: review. Red: attention. Blue: idle.</p></div></aside> : <AssignmentInspector template={template} view={view} slot={selectedSlot} actions={snapshot.actions} sessions={sessions} goals={goalsSnapshot.goals || []} connectors={connectors} binding={bindingsBySlot[selectedSlot]} learning={learning} onAssign={(assignment) => window.controller.hardwareAssignPad(template.id, view.id, selectedSlot, assignment)} onLearn={() => learning ? window.controller.hardwareCancelLearn() : window.controller.hardwareLearnPad(template.id, selectedSlot)} onClearBinding={() => window.controller.hardwareClearBinding(template.id, selectedSlot)} onCreateLinkedView={() => setViewCreation({ linked: true })} />}
     </div>
     {notice && <button className="hardware-notice" type="button" onClick={() => setNotice('')}>{notice}<span>×</span></button>}
     {createOpen && <CreateTemplate onClose={() => setCreateOpen(false)} onCreate={createTemplate} />}

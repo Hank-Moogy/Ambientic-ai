@@ -99,7 +99,7 @@ npm run test:local-release
 npm run build
 ```
 
-The default pad roster includes up to ten recent conversations per provider, including history, in fixed two-column groups: Claude, Codex, Hermes, and Kimi. Providers without discoverable history keep empty pads. Process-discovery placeholders are excluded. Screen and native APC pads use the same layout; conversations refresh by recency within each provider.
+The default pad roster divides all eight columns equally among connected, authenticated task providers. Each group fills its allocated capacity with recent conversations, including history; missing conversations leave dark pads. Process-discovery placeholders are excluded. Screen and native APC pads use the same layout; conversations refresh by recency within each provider.
 
 Idle live threads can be placed on **Stand by** from the thread header or the Overview pad context menu. Stand by persists locally, holds the on-screen and physical pad solid orange as a check-later reminder, and clears automatically when the next turn begins or when the user removes it.
 
@@ -165,3 +165,15 @@ The durable visual direction is defined in [ART_DIRECTION.md](ART_DIRECTION.md),
 - The built-in Recent conversations layout opens the ten newest available threads per provider without manual mapping. Each provider owns two columns in the top five rows; extra APC mini rows remain empty.
 - Hardware and Overview use the shared recent-thread grid. Hardware hides custom templates and editing modes behind Custom mappings; existing custom mappings are preserved.
 - Verified: APC40 mkII appears in both local MIDI input and output ports; 303 regression tests, 301 passed, 2 skipped; production build passed. Relaunched app visibly reports APC40 MKII connected and displays ten Claude plus seven available Codex conversations in the shared grid. Physical pad response still requires hands-on confirmation.
+
+## Dynamic provider allocation — 2026-11-05
+
+This supersedes the initial fixed two-column / ten-thread layout above.
+
+- Only connected, authenticated task-capable providers receive columns. Two providers split 4/4; three split 3/3/2; one gets all eight.
+- Home and Hardware share aligned provider headers with names, column ranges, and pad capacities. Native grids remain eight columns wide at every viewport size.
+- Drag the divider between headers to resize, or focus it and use arrow keys. The screen previews the split; releasing saves it and updates physical pads. Equal split restores automatic allocation.
+- Overrides persist locally per connected-provider combination; absent providers do not reserve unused columns. Pad colors continue to communicate agent state, not provider identity.
+- Each group fills its capacity with newest conversations rather than stopping at ten. Empty slots indicate no available thread.
+
+Verification: 306 regression tests, 304 passed, 2 intentional skips; production build and Electron SQLite/FTS5 smoke passed. Updated development app relaunched and connected to APC40 MKII. Live drag/drop and reset interaction remains unverified because native UI automation returned `noWindowsAvailable`; allocation and resizing boundaries are covered by automated tests.

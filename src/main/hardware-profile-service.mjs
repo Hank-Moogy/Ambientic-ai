@@ -37,7 +37,7 @@ function nativeTemplate (now) {
     version: 1,
     builtIn: true,
     name: 'Recent conversations',
-    description: 'Your ten latest conversations per provider. Press a pad to open its thread. No mapping required.',
+    description: 'Recent conversations from your connected providers. Drag the dividers above the grid to adjust their share.',
     rows: 8,
     columns: 8,
     rootViewId: 'live-sessions',
