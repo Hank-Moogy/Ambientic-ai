@@ -84,10 +84,11 @@ Ambientic owns the normalized local experience and durable user context. Provide
 
 ## Development
 
-Requirements: macOS, Node.js, npm, and the provider CLIs you want Ambientic to supervise.
+Requirements: macOS, Node.js 22, npm, and the provider CLIs you want Ambientic to supervise. The locked `better-sqlite3@11.8.1` fails to compile against Node.js 26; use Node.js 22 for dependency installation and tests.
 
 ```bash
-npm install
+npm ci
+npm run rebuild:sqlite
 npm run dev
 ```
 
@@ -140,3 +141,12 @@ Verification on 2026-09-02:
 - Physical APC smoke remains outstanding.
 
 The durable visual direction is defined in [ART_DIRECTION.md](ART_DIRECTION.md), the product contract in [PRODUCT.md](PRODUCT.md), and the forward architecture in [PRODUCT_DIRECTION.md](PRODUCT_DIRECTION.md).
+
+## Fresh-checkout verification — 2026-11-05
+
+- Installed the lockfile dependencies using Node.js 22.23.4 on Apple Silicon.
+- `npm run test:local-release`: 301 tests, 299 passed, 2 skipped, 0 failures.
+- `npm run build`: main, preload, and renderer production bundles passed.
+- Both APC40 MKII and APC mini mk2 have native profiles. The current MIDI service opens one controller at a time; simultaneous control from both devices remains future work.
+- Electron SQLite/FTS5 smoke passed; `npm run preview` launched and `/health` returned `ok: true`. Startup detected a Keystation 61 MK3 MIDI input. Accessibility was not granted and the Claude CLI was unavailable.
+- Physical APC MIDI acceptance remains outstanding. A signed installed release requires an Apple Development or Developer ID identity; none was available in this environment.
