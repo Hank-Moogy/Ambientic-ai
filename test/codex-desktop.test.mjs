@@ -8,14 +8,14 @@ const said = (timestamp, type, message) => JSON.stringify({ timestamp, type: 'ev
 // The reported bug: Codex ends a turn by asking, the native app shows the
 // question, and Ambientic showed the thread as plain idle once the completion
 // stopped being recent.
-test('an unanswered Codex question needs you instead of going idle', () => {
+test('ordinary assistant questions do not manufacture pending input requests', () => {
   const now = Date.parse('2026-07-22T13:20:00Z')
   const asked = [
     event('2026-07-22T12:00:00Z', 'task_started'),
     said('2026-07-22T12:00:30Z', 'agent_message', 'Should I deploy to production, or stage it first?'),
     event('2026-07-22T12:01:00Z', 'task_complete')
   ].join('\n')
-  assert.equal(codexDesktopState(asked, now), 'attention')
+  assert.equal(codexDesktopState(asked, now), 'idle')
 
   // Answered: the question is spent and the thread goes quiet like any other.
   assert.equal(codexDesktopState([

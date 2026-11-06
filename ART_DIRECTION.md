@@ -48,10 +48,10 @@ Ambientic’s primary mark is the supplied orbital-circle artwork: nested paths 
 - Prefer spatial waves, opacity drift, blur, and subtle parallax.
 - Respect reduced-motion preferences and never obscure an approval or urgent task state for long.
 - **Orange holds a thread for the person.** A pending approval lights its pad orange because the thread cannot move until it is answered. A user may also place an idle thread on Stand by, keeping the same solid orange warmth as a calm reminder to check it later. The interface always names which meaning applies; Stand by never masquerades as a permission request. Both are held rather than blinking, because blinking remains reserved for unseen attention. Approval orange clears when resolved, while Stand by clears on the next turn or when the user removes it.
-- **The screen grid is the hardware grid.** Overview shows the same pads the controller shows, in the same order, lit in the same language — one instrument seen twice rather than two views of the same data. Pads hold their position and only ever recolour, so a thread never moves under the hand. Meaning resolves through a single shared source (`src/shared/pad-light.mjs`) so the desk and the glass cannot drift apart.
-- **A launch establishes the instrument.** On launch, Ambientic assigns the available pads to the most recently active real threads, with work needing attention first. Empty process-discovery placeholders receive no pad. Those assignments then stay fixed for the app run; new work fills a vacant pad instead of moving existing threads, so recency does not fight muscle memory.
+- **The screen grid is the hardware grid.** Overview shows the same pads the controller shows, in the same order, lit in the same language — one instrument seen twice rather than two views of the same data. Provider headers align exactly with their allocated physical columns; recent conversations refresh within those groups. Meaning resolves through a single shared source (`src/shared/pad-light.mjs`) so the desk and the glass cannot drift apart.
+- **A launch establishes the instrument.** The default layout divides all eight columns equally among connected, authenticated task providers, distributing remainder columns in provider order. Each allocation fills with recent real conversations up to its physical capacity, newest at the top. History is included; empty process placeholders are excluded. The shared recent-thread grid drives both screen and hardware. This intentionally favors recent-thread access over permanent thread positions.
 - **Waiting is drawn as the shape of the answer.** Anything Overview is still reading holds the exact footprint its value will take and sweeps a slow light across it, left to right, in the direction the grid is read. Delays are staggered per pad so the field arrives as one wave rather than a row of independent spinners, and nothing shifts position when the real value lands. A skeleton never disguises a value that is genuinely absent: an unlit pad means no thread, a swept pad means not read yet, and the two must not be confused. A provider still being probed pulses grey and says so in words; it never guesses at a state. Under reduced motion the sweep resolves to a flat resting tone.
-- **A lit pad is a light source, not a coloured tile.** Fluorescent colour fills the whole face and washes softly into the page with no hard-edged halo; an empty pad keeps its moulding and emits nothing, so light on the surface always means a live thread. Every pad breathes on a slow cycle, offset per pad so the field drifts instead of pulsing in unison — unison would read as a progress indicator. Thread names stay large and bold over the light, because a grid you cannot read is decoration.
+- **A lit pad is a light source, not a coloured tile.** Fluorescent colour fills the whole face and washes softly into the page with no hard-edged halo; an empty pad keeps its moulding and emits nothing, so light on the surface always means an available conversation. Every pad breathes on a slow cycle, offset per pad so the field drifts instead of pulsing in unison — unison would read as a progress indicator. Thread names stay large and bold over the light, because a grid you cannot read is decoration.
 
 ## First expression: Vibe
 
@@ -147,3 +147,23 @@ For every material UI or hardware-expression change, ask:
 - Is reduced motion, accessibility, and low-light use respected?
 
 Record meaningful additions or deliberate deviations in this document so the art direction evolves explicitly rather than by accident.
+
+## Default hardware simplicity — 2026-11-05
+
+Recent conversations is the default, with aligned provider headers on Home and Hardware and no mapping step on native APC controllers. Custom templates and editing modes are secondary, disclosed through Custom mappings. Automatic detection keeps polling and prefers an APC over a generic keyboard when one is connected. Empty pads remain dark; recent history is blue, while live state retains its operational colors.
+
+## Adjustable provider columns — 2026-11-05
+
+Only connected task providers receive space. Header identity uses a restrained provider accent while pad colors retain lifecycle meaning. Headers share the exact eight-column geometry of the physical grid, including narrow windows; never reflow the pad grid into four or six columns. Drag a divider to transfer whole columns between adjacent providers, with at least one column each. Preview on screen during the gesture; commit to the controller on release. Arrow keys offer the same adjustment and Equal split restores automatic allocation. Save overrides per connected-provider combination, so a connection change gets a balanced default without erasing a prior layout.
+
+## Conversation-first pad navigation — 2026-11-05
+
+A pad opens the conversation in the user's chosen surface: Native or Ambientic. Never automatically arrange a browser preview while selecting a thread. Prioritize active work within each provider's allocation. Keep user/assistant prose readable, with technical activity collapsed and machine context excluded from human message bubbles. Permission cards explicitly identify Ambientic ownership; native permissions stay with their native runtime.
+
+## Homepage destination choice — 2026-11-05
+
+Place the pad destination above the Overview hero as a generous two-option control: Show Native / Show Ambientic. A pale mint selected surface and dark text make the current choice unmistakable without borrowing agent status lights. Keep both options visible, include a short destination explanation, wrap gracefully on narrow windows, and support keyboard focus and reduced motion.
+
+## Integrated transcript continuity — 2026-11-06
+
+Preserve the signing Mac's conversational timeline: consecutive technical steps collapse in place between human and assistant prose, with tool results folded into their own calls. Native/Ambientic routing and provider column controls keep the PR's behavior. A completed turn's unseen notification remains acknowledgeable; punctuation alone never claims a pending approval. Mixed tool-result rows retain any actual human reply. This reconciles the existing visual language without introducing a separate transcript style.

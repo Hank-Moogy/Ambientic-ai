@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { stripAmbienticContext } from './context-assembler.mjs'
+import { stripPromptMachinery, threadTitle } from './thread-title.mjs'
 
 const WORKLOAD = 'thread-label'
 // An explicit override still wins, so a developer can pin one model without
@@ -8,11 +8,12 @@ const MODEL_OVERRIDE = process.env.AMBIENTIC_SUMMARY_MODEL || process.env.AGENTB
 
 function sourceText (value) {
   // Managed tasks reach here as the assembled provider prompt, which opens with
-  // Ambientic's own context block. Strip that whole element first: dropping only
-  // its tags would leave the preamble behind, and every task launched into the
-  // same project would then be labelled from identical boilerplate.
-  return stripAmbienticContext(value)
-    .replace(/<[^>]+>/g, ' ')
+  // Ambientic's own context block. Strip whole elements, not just their tags:
+  // dropping only the tags leaves the preamble behind, and every task launched
+  // into the same project would then be labelled from identical boilerplate.
+  // stripPromptMachinery covers the Ambientic context block along with system
+  // reminders, command wrappers and local-command caveats.
+  return stripPromptMachinery(value)
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -55,7 +56,9 @@ export function namesThread (text, existingName = '') {
 }
 
 export function humanThreadTitle (text, fallback = 'Current task') {
-  const simplified = sourceText(text)
+  const cleaned = threadTitle(text, { limit: 200 })
+  if (!cleaned) return fallback
+  const simplified = cleaned
     .replace(/^(please\s+|can you\s+|could you\s+|would you\s+|i want (?:you )?to\s+|we need to\s+|let(?:'s| us)\s+)/i, '')
     .replace(/^\d+\s*[/.):~-]?\s*/, '')
   const words = simplified.match(/[\p{L}\p{N}][\p{L}\p{N}'’+_.-]*/gu) || []
@@ -90,6 +93,9 @@ export function createTaskSummarizer (store, { inference = null } = {}) {
   function enqueue (sessionId, rawText) {
     const text = sourceText(rawText)
     if (!sessionId || !text) return
+    // The user has named this thread. Nothing to compute, and nothing this
+    // would be allowed to apply.
+    if (store.taskLocked?.(sessionId)) return
     // A thread is named once, from the prompt that establishes what it is for.
     // Re-labelling on every message is what made names look random: one thread
     // became "Pick up the task", then "Go", then "What do you mean".

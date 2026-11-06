@@ -1,9 +1,54 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WorkspaceService, claudeApprovalScopes, claudePermissionsForScope, codexApprovalScopes, createPrivateTaskWorkspace, describeApprovalRequest } from '../src/main/workspace-service.mjs'
+import { WorkspaceService, claudeApprovalScopes, claudePermissionsForScope, codexApprovalScopes, createPrivateTaskWorkspace, describeApprovalRequest, claudeMessages } from '../src/main/workspace-service.mjs'
+
+test('late Claude output and exit cannot complete a newer turn in the same session', () => {
+  const children = []
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => {
+      const child = new EventEmitter()
+      child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+      children.push(child)
+      return child
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  const finished = []; const events = []
+  service.finish = (id) => finished.push(id)
+  service.claudeEvent = (...args) => events.push(args)
+  service.runClaude(session, 'First', {})
+  service.activeTurns.delete(session.id)
+  service.runClaude(session, 'Second', {})
+  children[0].stdout.emit('data', '{"type":"result"}\n')
+  children[0].emit('exit', 0)
+  assert.equal(events.length, 0)
+  assert.equal(finished.length, 0)
+  assert.equal(service.activeTurns.get(session.id), children[1])
+  children[1].emit('exit', 0)
+  assert.equal(finished.length, 1)
+})
+
+test('Claude spawn failures report completion errors instead of crashing the runtime', () => {
+  const child = new EventEmitter()
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], { spawnProcess: () => child })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.ingestLifecycle = () => {}
+  const completed = []
+  service.on('turn-completed', (event) => completed.push(event))
+  service.runClaude(session, 'Start', {})
+  child.emit('error', new Error('spawn ENOENT'))
+  assert.equal(service.activeTurns.size, 0)
+  assert.deepEqual(completed, [{ sessionId: 'thread-1', error: 'spawn ENOENT' }])
+})
 
 test('managed tasks reject unsafe or unavailable explicit project folders', async () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
@@ -155,12 +200,13 @@ test('reconciles a partial Hermes ACP stream with the completed database transcr
   assert.equal(events.at(-1).messages[0].text, 'The complete saved Hermes response.')
   assert.equal(events.at(-1).messages[0].streaming, undefined)
   assert.equal(events.at(-1).running, false)
-  // A completed turn with no pending approval is idle/done, not red "needs you".
   assert.equal(events.at(-1).state, 'idle')
-  assert.equal(ingested.at(-1).event, 'stop_idle')
+  // A completed turn is your move: `stop` marks the pad unseen so it pulses
+  // until you have actually looked at the result.
+  assert.equal(ingested.at(-1).event, 'stop')
 })
 
-test('a Codex turn that ends by asking the user a question surfaces as needing you', async () => {
+test('a Codex turn that ends by asking the user a question does not create an approval', async () => {
   const session = { id: 'codex-question', agent: 'codex', cwd: '/tmp/project', state: 'running' }
   const ingested = []
   const service = new WorkspaceService({
@@ -190,11 +236,11 @@ test('a Codex turn that ends by asking the user a question surfaces as needing y
 
   await service.finish(session.id)
 
-  assert.equal(events.at(-1).state, 'attention')
-  assert.equal(ingested.at(-1).event, 'notification')
+  assert.equal(events.at(-1).state, 'idle')
+  assert.equal(ingested.at(-1).event, 'stop')
 })
 
-test('a Codex turn that finishes ordinary work without a question stays idle', async () => {
+test('a Codex turn that finishes ordinary work hands the thread back to you', async () => {
   const session = { id: 'codex-done', agent: 'codex', cwd: '/tmp/project', state: 'running' }
   const ingested = []
   const service = new WorkspaceService({
@@ -225,7 +271,9 @@ test('a Codex turn that finishes ordinary work without a question stays idle', a
   await service.finish(session.id)
 
   assert.equal(events.at(-1).state, 'idle')
-  assert.equal(ingested.at(-1).event, 'stop_idle')
+  // Not "attention" — nothing is blocked — but still `stop`, so the pad pulses
+  // as unreviewed rather than going quietly grey.
+  assert.equal(ingested.at(-1).event, 'stop')
 })
 
 test('a completed turn blocked on a pending approval stays "attention"', async () => {
@@ -270,16 +318,16 @@ test('effectiveState is the single source of truth with clear precedence', () =>
   // live terminal hooks remain authoritative even after a passive transcript read
   assert.equal(service.effectiveState({ id: 'live', state: 'running', tty: '/dev/ttys1' }, { id: 'live', running: false }), 'running')
   assert.equal(service.effectiveState({ id: 'live', state: 'waiting', tty: '/dev/ttys1' }, { id: 'live', running: true }), 'waiting')
-  // an explicit provider-native idle result corrects stale discovery state
+  // A separate app-server cannot override the native desktop lifecycle.
   assert.equal(service.effectiveState(
     { id: 'desktop', state: 'running', externalSource: 'codex-desktop' },
     { id: 'desktop', running: false, turnStateKnown: true }
-  ), 'idle')
+  ), 'running')
   // with no managed snapshot, the store's hook-driven lifecycle state is honored
   assert.equal(service.effectiveState({ id: 'x', state: 'waiting' }, null), 'waiting')
 })
 
-test('reading a Codex Desktop thread corrects stale external running state', async () => {
+test('reading a Codex Desktop thread does not replace native activity with local notLoaded', async () => {
   const session = {
     id: 'codex-desktop:thread-live',
     threadId: 'thread-live',
@@ -296,16 +344,16 @@ test('reading a Codex Desktop thread corrects stale external running state', asy
   service.historyRefreshedAt = Date.now()
   service.codexClient = async () => ({
     request: async () => ({
-      thread: { id: 'thread-live', status: { type: 'idle' }, turns: [] }
+      thread: { id: 'thread-live', status: { type: 'notLoaded' }, turns: [] }
     })
   })
 
   const snapshot = await service.read(session.id)
 
-  assert.equal(snapshot.running, false)
-  assert.equal(snapshot.turnStateKnown, true)
-  assert.equal(snapshot.state, 'idle')
-  assert.equal(ingested.at(-1).event, 'stop_idle')
+  assert.equal(snapshot.running, true)
+  assert.equal(snapshot.turnStateKnown, false)
+  assert.equal(snapshot.state, 'running')
+  assert.equal(ingested.length, 0)
 })
 
 test('resolving an approval clears the "attention" state instead of sticking', async () => {
@@ -323,8 +371,8 @@ test('resolving an approval clears the "attention" state instead of sticking', a
   assert.equal(events.at(-1).state, 'idle')
 })
 
-test('bridges Claude thread approval through an in-memory provider permission', async () => {
-  const session = { id: 'claude-terminal', agent: 'claude', cwd: '/tmp/project', state: 'attention', tty: '/dev/ttys1' }
+test('bridges approvals only for a Claude turn owned by Ambientic', async () => {
+  const session = { id: 'claude-managed', agent: 'claude', cwd: '/tmp/project', state: 'attention' }
   const ingested = []
   const service = new WorkspaceService({
     list: () => [session],
@@ -336,6 +384,7 @@ test('bridges Claude thread approval through an in-memory provider permission', 
   }, () => [])
   service.snapshots.set(session.id, { ...service.baseSnapshot(session), messages: [] })
   const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }
+  service.activeTurns.set(session.id, {})
   const decisionPromise = service.requestExternalApproval('claude', {
     session_id: session.id,
     tool_name: 'Bash',
@@ -715,7 +764,7 @@ test('a failed turn reports why, even when Claude sends an empty result', () => 
   assert.match(detail, /denied Read/)
 })
 
-test('a Claude turn that ends by asking surfaces as needing you, like Codex', async () => {
+test('a Claude turn that ends by asking does not create an approval', async () => {
   const session = { id: 'claude-question', agent: 'claude', cwd: '/tmp/project', state: 'running' }
   const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
   service.snapshots.set(session.id, {
@@ -730,8 +779,8 @@ test('a Claude turn that ends by asking surfaces as needing you, like Codex', as
 
   await service.finish(session.id)
 
-  assert.equal(service.snapshots.get(session.id).awaitingReply, true)
-  assert.equal(service.effectiveState(session, service.snapshots.get(session.id)), 'attention')
+  assert.equal(service.snapshots.get(session.id).awaitingReply, false)
+  assert.equal(service.effectiveState(session, service.snapshots.get(session.id)), 'idle')
 })
 
 test('a Claude turn that simply reports work stays idle', async () => {
@@ -809,6 +858,7 @@ test('a Claude limit rejection emits usage evidence before failing the turn', ()
 
 function brokerService (session, projects = []) {
   const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  if (!session.history) service.activeTurns.set(session.id, {})
   service.recentProjects = () => projects
   service.emitSnapshot = (snapshot) => snapshot
   service.baseSnapshot = () => ({ id: session.id, messages: [] })
@@ -871,6 +921,7 @@ test('the hardware light follows pending approvals without each call site saying
   service.recentProjects = () => []
   service.emitSnapshot = (snapshot) => snapshot
   service.baseSnapshot = () => ({ id: session.id, messages: [] })
+  service.activeTurns.set(session.id, {})
 
   const asked = await service.requestToolPermission({
     sessionId: 'sess-6', tool: 'Read', input: { file_path: '/Users/person/elsewhere/x.md' }
@@ -921,6 +972,8 @@ test('Always allow survives into other threads; Allow for this thread does not',
   service.recentProjects = () => []
   service.emitSnapshot = (snapshot) => snapshot
   service.baseSnapshot = (s) => ({ id: s.id, messages: [] })
+  service.activeTurns.set(session.id, {})
+  service.activeTurns.set(other.id, {})
 
   const read = { tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' } }
   const first = await service.requestToolPermission({ sessionId: 'sess-8', ...read })
@@ -942,6 +995,7 @@ test('a shell command stops asking once allowed, which is what made it unbearabl
   service.recentProjects = () => []
   service.emitSnapshot = (snapshot) => snapshot
   service.baseSnapshot = () => ({ id: 'sess-10', messages: [] })
+  service.activeTurns.set(session.id, {})
 
   const bash = { tool: 'Bash', input: { command: 'npm test' } }
   const asked = await service.requestToolPermission({ sessionId: 'sess-10', ...bash })
@@ -958,6 +1012,7 @@ test('revoking a standing permission takes effect immediately', async () => {
   service.recentProjects = () => []
   service.emitSnapshot = (snapshot) => snapshot
   service.baseSnapshot = () => ({ id: 'sess-11', messages: [] })
+  service.activeTurns.set(session.id, {})
 
   const read = { tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' } }
   const asked = await service.requestToolPermission({ sessionId: 'sess-11', ...read })
@@ -965,4 +1020,28 @@ test('revoking a standing permission takes effect immediately', async () => {
   const [grant] = service.listGrants()
   assert.equal(service.revokeGrant(grant.id), true)
   assert.equal((await service.requestToolPermission({ sessionId: 'sess-11', ...read })).decision, 'ask')
+})
+
+test('passive native Claude sessions never create an Ambientic permission request', async () => {
+  const session = { id: 'native-claude', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  assert.equal(await service.requestExternalApproval('claude', { session_id: session.id, tool_name: 'Bash' }, session.id), null)
+  assert.equal(await service.requestToolPermission({ sessionId: session.id, tool: 'Bash', input: { command: 'pwd' } }), null)
+  assert.equal(service.pendingApprovals.size, 0)
+})
+
+test('Claude transcript excludes tool-result user rows and synthetic context', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-transcript-'))
+  const path = join(directory, 'chat.jsonl')
+  const rows = [
+    { type: 'user', uuid: 'human', message: { content: [{ type: 'text', text: 'Please fix it' }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: 'command output' }] } },
+    { type: 'user', isMeta: true, message: { content: 'injected rules' } },
+    { type: 'user', isCompactSummary: true, message: { content: 'summary' } },
+    { type: 'assistant', uuid: 'assistant', message: { content: [{ type: 'text', text: 'Fixed.' }] } }
+  ]
+  try {
+    writeFileSync(path, rows.map(row => JSON.stringify(row)).join('\n'))
+    assert.deepEqual(claudeMessages(path).map(row => [row.role, row.text]), [['user', 'Please fix it'], ['assistant', 'Fixed.']])
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

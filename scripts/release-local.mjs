@@ -10,7 +10,6 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs'
-import { createConnection } from 'node:net'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -98,27 +97,19 @@ function findPackagedApp (directory, depth = 0) {
   return ''
 }
 
-function waitForPort (port, attempts = 30) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    let remaining = attempts
-    const attempt = () => {
-      const socket = createConnection({ host: '127.0.0.1', port })
-      socket.setTimeout(500)
-      socket.once('connect', () => {
-        socket.destroy()
-        resolvePromise()
-      })
-      const retry = () => {
-        socket.destroy()
-        remaining -= 1
-        if (remaining <= 0) rejectPromise(new Error(`Ambientic did not become healthy on port ${port}.`))
-        else setTimeout(attempt, 500)
+async function waitForHealth (port, attempts = 30) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) })
+      const health = await response.json()
+      if (response.ok && health.ok === true && installedAppPids().length) {
+        console.log(`  /health: ${JSON.stringify(health)}`)
+        return
       }
-      socket.once('error', retry)
-      socket.once('timeout', retry)
-    }
-    attempt()
-  })
+    } catch {}
+    await sleep(500)
+  }
+  throw new Error(`Installed Ambientic did not return a healthy JSON response on port ${port}.`)
 }
 
 function sleep (milliseconds) {
@@ -224,16 +215,20 @@ async function main () {
 
     const packagedApp = findPackagedApp(join(root, 'release'))
     if (!packagedApp) throw new Error('Packaging completed, but release/Ambientic.app was not found.')
+    const distribution = process.env.AMBIENTIC_DISTRIBUTION === '1'
+    if (distribution && !signingIdentity.startsWith('Developer ID Application:')) {
+      throw new Error('Distribution requires a Developer ID Application identity.')
+    }
     await signAsync({
       app: packagedApp,
       identity: signingIdentity,
-      type: 'development',
+      type: distribution ? 'distribution' : 'development',
       ignore: 'Versions/Current',
       // Secure timestamps and hardened runtime are distribution concerns. A
       // local Apple Development build keeps its stable team identity without
       // either, avoiding network-dependent timestamp failures on resources.
-      timestamp: 'none',
-      hardenedRuntime: false
+      timestamp: distribution ? undefined : 'none',
+      hardenedRuntime: distribution
     })
     run('codesign', ['--verify', '--deep', '--strict', packagedApp])
     const signature = outputWithStderr('codesign', ['-dv', '--verbose=4', packagedApp])
@@ -271,7 +266,7 @@ async function main () {
     run('codesign', ['--verify', '--deep', '--strict', installedApp])
 
     run('open', [installedApp], { cwd: '/' })
-    await waitForPort(47600)
+    await waitForHealth(47600)
     console.log(`\n✓ Installed and healthy: ${basename(installedApp)} ${buildInfo.version} (${commit.slice(0, 8)})`)
     console.log(`  Built ${buildInfo.builtAt}`)
   } finally {

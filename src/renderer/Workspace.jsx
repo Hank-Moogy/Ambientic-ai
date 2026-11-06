@@ -15,8 +15,10 @@ import { AppsToolsSettings, LaunchContext, MemoryWorkspace, ThreadContextPanel }
 import { InferenceProviderSettings } from './InferenceProviders.jsx'
 import { organizeThreads } from './thread-order.mjs'
 import { isNearThreadBottom } from './thread-scroll.mjs'
+import { groupThreadMessages, stepsAreLive, stepsSummary } from './thread-transcript.mjs'
 import { claudeAuthPresentation } from './provider-auth-ui.mjs'
 import { taskCreationError } from './new-task-state.mjs'
+import { ProviderPadHeaders, useProviderPadLayout } from './ProviderPadHeaders.jsx'
 import { padGridSessions } from './pad-grid.mjs'
 import { padLightForSession } from '../shared/pad-light.mjs'
 import ambienticLogo from './assets/ambientic-logo.png'
@@ -154,20 +156,51 @@ const MarkdownMessageBody = memo(function MarkdownMessageBody ({ text }) {
   return <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{text}</Markdown>
 })
 
+const STEP_GLYPHS = { files: '↗', command: '›_', read: '≡', web: '◉', agent: '◈', reasoning: '∵', tool: '◇', system: '○' }
+
+// One tool call, collapsed to its human title. The raw input and the output it
+// returned live behind the disclosure, because they answer a question the
+// reader only sometimes has.
+function Step ({ step }) {
+  const body = [step.detail, step.text].filter(Boolean).join('\n\n')
+  return (
+    <details className="step" data-status={step.status || ''}>
+      <summary>
+        <span className="step__glyph">{STEP_GLYPHS[step.kind] || STEP_GLYPHS.tool}</span>
+        <b>{step.title || step.tool || 'Agent activity'}</b>
+        {step.status === 'failed' && <em data-tone="failed">failed</em>}
+        {step.status === 'running' && <em>running</em>}
+      </summary>
+      {body ? <pre>{body}</pre> : <p className="step__empty">No output.</p>}
+    </details>
+  )
+}
+
+// A run of tool calls between two things that were actually said. Collapsed to
+// a single line while idle; open, and narrating its current step, while live.
+function StepGroup ({ steps, live }) {
+  const [open, setOpen] = useState(false)
+  const summary = stepsSummary(steps, { running: live })
+  const expanded = open || live
+  return (
+    <section className="steps" data-live={live || undefined} data-open={expanded || undefined}>
+      <button type="button" className="steps__summary" aria-expanded={expanded} onClick={() => setOpen((current) => !current)}>
+        <span className="steps__glyph">{live ? <i className="steps__pulse" /> : '∴'}</span>
+        <b>{summary.label}</b>
+        {live && summary.count > 1 && <em>{summary.count} steps</em>}
+        <span className="steps__chevron" aria-hidden="true">{expanded ? '⌃' : '⌄'}</span>
+      </button>
+      {expanded && <div className="steps__list">{steps.map((step, index) => <Step key={step.id || index} step={step} />)}</div>}
+    </section>
+  )
+}
+
 function Message ({ item, providerLabel }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     await window.controller.copyText(item.text)
     setCopied(true)
     setTimeout(() => setCopied(false), 1400)
-  }
-  if (item.role === 'activity') {
-    return (
-      <details className="activity" open={item.status === 'inProgress'}>
-        <summary><span>{item.kind === 'files' ? '↗' : item.kind === 'command' ? '›_' : '◇'}</span>{item.title || 'Agent activity'}<em>{item.status || ''}</em></summary>
-        {item.text && <pre>{item.text}</pre>}
-      </details>
-    )
   }
   return (
     <article className="message" data-role={item.role}>
@@ -336,7 +369,7 @@ function Approval ({ approval, onResolve }) {
     <section className="approval" data-risk={destructive ? 'destructive' : approval.risk || approval.permission || 'write'}>
       {/* Lead with what is being requested — the user decides yes/no from this
           line — and keep the tool name as secondary context. */}
-      <div><b>{approval.title || 'Permission requested'}</b><span>{context.join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
+      <div><b>{approval.title || 'Permission requested'}</b><span>Handled in Ambientic · {context.join(' · ') || 'Permission requested'}{destructive ? ' · destructive action' : ''}</span>{approval.detail && <code>{typeof approval.detail === 'string' ? approval.detail : JSON.stringify(approval.detail, null, 2)}</code>}</div>
       {/* Three answers, widest last, each saying plainly how far it reaches. A
           destructive action is only ever allowed once — a standing yes to
           something irreversible is not a choice worth offering. */}
@@ -821,7 +854,8 @@ function ThreadPadSkeleton ({ index }) {
 
 function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }) {
   const padCount = Number.isFinite(midi?.padCount) && midi.padCount > 0 ? midi.padCount : APC40_PAD_COUNT
-  const pads = padGridSessions(sessions, padCount)
+  const allocation = useProviderPadLayout(midi)
+  const pads = padGridSessions(sessions, padCount, allocation.layout)
   const occupied = pads.filter(Boolean).length
   return (
     <section className="pad-section">
@@ -835,6 +869,7 @@ function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }
           <span data-tone="idle"><i />Idle</span>
         </div>
       </header>
+      <ProviderPadHeaders {...allocation} padCount={padCount} automatic={midi?.automaticSplit} />
       <div className="pad-grid" data-pads={padCount} data-loading={Boolean(loading)} role="group" aria-label="Agent pads" aria-busy={Boolean(loading)}>
         {loading
           ? Array.from({ length: padCount }, (_, index) => <ThreadPadSkeleton key={`skeleton-${index}`} index={index} />)
@@ -842,8 +877,31 @@ function ThreadPadGrid ({ sessions, midi, loading, onOpenThread, onStandbyMenu }
       </div>
       <footer className="pad-summary">
         <span>{loading ? `Reading your threads…` : `${occupied} of ${padCount} pads in use`}</span>
-        <span>Latest active threads are chosen at launch; assigned pads stay put</span>
+        <span>Running jobs first · then recent conversations</span>
       </footer>
+    </section>
+  )
+}
+
+function PadDestinationSwitch ({ target = 'native' }) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const select = async (value) => {
+    if (saving || value === target) return
+    setSaving(true)
+    setError('')
+    try { await window.controller.midiSetPadTarget(value) }
+    catch { setError('Could not save your choice. Please try again.') }
+    finally { setSaving(false) }
+  }
+  return (
+    <section className="pad-destination" aria-label="Pad destination">
+      <div className="pad-destination__copy"><span className="eyebrow">When you press a pad</span><b>Your conversation, your view.</b><p>{target === 'native' ? 'Open Codex or Claude Code. If unavailable, open in Ambientic.' : 'Open the conversation right here in Ambientic.'}</p></div>
+      <div className="pad-destination__switch" role="group" aria-label="Choose where pads open conversations" aria-busy={saving}>
+        <button type="button" aria-pressed={target === 'native'} disabled={saving} onClick={() => select('native')}><span aria-hidden="true">↗</span>Show Native</button>
+        <button type="button" aria-pressed={target === 'ambientic'} disabled={saving} onClick={() => select('ambientic')}><span aria-hidden="true">◈</span>Show Ambientic</button>
+      </div>
+      {error && <p className="pad-destination__error" role="alert">{error}</p>}
     </section>
   )
 }
@@ -858,6 +916,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, sessionsLo
     <section className="dashboard">
       <header className="dashboard-topbar"><span>Agent operating system</span><div><button type="button" onClick={onOpenThreads}>All threads</button><button className="dashboard-topbar__ambient" type="button" data-active={Boolean(ambientMode.enabled)} aria-pressed={Boolean(ambientMode.enabled)} title={ambientMode.enabled ? 'Ambient mode is keeping this Mac awake while the display may sleep.' : 'Keep this Mac awake so agents can continue working.'} onClick={() => onToggleAmbientMode(!ambientMode.enabled)}><i />Ambient mode · {ambientMode.enabled ? 'On' : 'Off'}</button><button className="dashboard-topbar__vibe" type="button" disabled={!midi.connected} data-active={Boolean(midi.vibeActive)} title="Play the next APC composition · ⌘⇧V" onClick={onVibe}><i />Vibe</button></div></header>
       <div className="dashboard-scroll">
+        <PadDestinationSwitch target={midi.padOpenTarget} />
         <section className="dashboard-hero">
           <div className="dashboard-hero__copy"><span className="eyebrow"><i /> Local intelligence, online</span><h1>Your agents,<br /><em>in one field.</em></h1><p>See who is working, who needs you, and where to send the next idea—without starting from a chat list.</p><div className="dashboard-statline" data-loading={!sessionsLoaded}>{sessionsLoaded ? <><span><b>{active}</b> active</span><span><b>{needsInput}</b> need input</span><span><b>{sessions.length}</b> threads</span></> : <>{['active', 'need input', 'threads'].map((label, index) => <span key={label}><Skeleton className="skeleton--stat" delay={index * 0.09} /> {label}</span>)}</>}<span><b>{midi.connected ? 'On' : 'Off'}</b> {midi.shortModel || 'APC'}</span></div></div>
           <OverviewUsageBalance sessions={sessions} connectors={connectors} usage={usage} loading={!usageLoaded} onRefresh={onRefreshUsage} />
@@ -868,7 +927,7 @@ function Dashboard ({ sessions, connectors, usage, midi, ambientMode, sessionsLo
           <button className="provider-pad provider-pad--new" type="button" onClick={() => onCreate('')}><span className="provider-pad--new__plus">＋</span><b>Create an agent task</b><small>Choose a provider and start</small></button>
         </section>
 
-        <ThreadPadGrid sessions={sessions} midi={midi} loading={!sessionsLoaded} onOpenThread={onOpenThread} onStandbyMenu={onStandbyMenu} />
+        <ThreadPadGrid sessions={sessions} midi={midi} loading={!sessionsLoaded} onOpenThread={(id) => window.controller.openPadThread(id)} onStandbyMenu={onStandbyMenu} />
       </div>
     </section>
   )
@@ -972,6 +1031,7 @@ function MidiHardwareSettings ({ midi, onSelect }) {
     <>
       <div className="provider-settings__intro"><span className="eyebrow"><i /> Physical control</span><h2>Choose your Ambientic controller.</h2><p>Select which Akai device Ambientic owns. Automatic mode prefers the APC40 MKII when both controllers are connected; choosing a model explicitly prevents Ambientic from opening the other device.</p></div>
       <div className="midi-device-status" data-connected={Boolean(midi?.connected)}><i /><div><b>{midi?.connected ? `${midi.model} connected` : 'Waiting for the selected controller'}</b><span>{midi?.connected ? `${midi.device} · ${midi.gridLabel} grid · ${midi.padCount} agent pads` : 'Connect the hardware by USB, then choose its profile below.'}</span></div></div>
+      <section className="midi-profile-guide"><div><b>When I press a pad</b><select aria-label="Pad click destination" value={midi?.padOpenTarget || 'native'} onChange={(event) => window.controller.midiSetPadTarget(event.target.value)}><option value="native">Open native app</option><option value="ambientic">Open in Ambientic</option></select><p>Pad clicks never open browser previews. If the native thread cannot be opened, or its pending request belongs to Ambientic, the conversation opens here.</p></div></section>
       <div className="midi-profile-list">
         {profiles.map((profile) => {
           const selected = midi?.selectedProfile === profile.id
@@ -1047,7 +1107,8 @@ function Onboarding ({ state, connectors, providerAuth, midi, memoryBootstrap, o
   }
   const connect = async (provider) => {
     const connector = connectors.find((item) => item.id === provider.id)
-    if (!connector?.installed) {
+    if (!connector || connector.checking) return
+    if (!connector.installed) {
       await window.controller.openExternalUrl(providerInstallUrls[provider.id])
       setNotice(`${provider.label} installation guide opened. Return here when the CLI is installed.`)
       return
@@ -1072,7 +1133,7 @@ function Onboarding ({ state, connectors, providerAuth, midi, memoryBootstrap, o
   const providerState = (provider) => {
     const connector = connectors.find((item) => item.id === provider.id)
     const auth = providerAuth?.[provider.id]
-    if (!connector) return { tone: 'working', label: 'Checking this Mac…', cta: 'Checking…' }
+    if (!connector || connector.checking) return { tone: 'working', label: 'Checking this Mac…', cta: 'Checking…' }
     if (!connector?.installed) return { tone: 'missing', label: 'Install required', cta: `Install ${provider.label}` }
     if (auth?.status === 'waiting' || ['starting', 'interactive'].includes(auth?.status)) return { tone: 'working', label: 'Connecting…', cta: 'Connecting…' }
     if (auth?.status === 'connected' || (connector.manageable !== false && provider.id !== 'kimi')) return { tone: 'connected', label: 'Connected', cta: 'Connected' }
@@ -1518,6 +1579,9 @@ export default function Workspace () {
     if (transcriptAtBottomRef.current) scrollToLatest('auto')
   }, [thread?.messages?.length, thread?.messages?.at(-1)?.text])
 
+  // Conversation first, work folded: consecutive activity becomes one group.
+  const transcript = useMemo(() => groupThreadMessages(thread?.messages), [thread?.messages])
+
   const threadGroups = useMemo(() => organizeThreads(
     sessions.map((session) => ({ ...session, task: sessionTitle(session) })),
     { interactions: threadInteractions, provider: providerFilter, query }
@@ -1679,7 +1743,7 @@ export default function Workspace () {
           {threadGroups.recent.length > 0 && <section className="thread-group thread-group--recent"><h3>Recent & active<span>{threadGroups.recent.length}</span></h3>{threadGroups.recent.map((session) => <button type="button" key={session.id} data-recent="true" data-latest={threadGroups.latestInteractedId === session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{stateLabel[session.state] || session.state} · {session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
           {threadGroups.earlier.length > 0 && <section className="thread-group thread-group--earlier"><h3>Earlier threads<span>{threadGroups.earlier.length}</span></h3>{threadGroups.earlier.map((session) => <button type="button" key={session.id} data-selected={selectedId === session.id} onClick={() => setSelectedId(session.id)}><span className="thread-list__icon"><AgentIcon agent={session.agent} /><i data-state={session.state} /></span><span className="thread-list__copy"><b>{sessionTitle(session)}</b><small>{session.agent} · {session.project || 'Local task'}</small></span></button>)}</section>}
           {!threadGroups.recent.length && !threadGroups.earlier.length && <div className="sidebar-empty">{sessions.length ? 'No threads match this provider and search.' : 'No live tasks yet. Start one here or install hooks to observe terminal sessions.'}</div>}
-        </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage providers, local memory, and shared tool connections while credentials remain in their native stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : view === 'goals' ? <div className="overview-side"><span>Goal field</span><p>Your outcomes, milestones, and next actions shared across human and agent work.</p><dl><div><dt>Active</dt><dd>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</dd></div><div><dt>Moving</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.active, 0)}</dd></div><div><dt>Blocked</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.blocked, 0)}</dd></div></dl></div> : view === 'hardware' ? <div className="overview-side hardware-side"><span>Hardware field</span><p>Your programmable views, physical bindings, and semantic actions.</p><dl><div><dt>Templates</dt><dd>{hardwareSnapshot.templates.length}</dd></div><div><dt>Views</dt><dd>{hardwareSnapshot.templates.find((item) => item.id === hardwareSnapshot.activeTemplateId)?.views?.length || 0}</dd></div><div><dt>MIDI</dt><dd>{midi.connected ? 'On' : 'Off'}</dd></div></dl><small>Local and portable</small></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
+        </nav></> : view === 'settings' ? <div className="overview-side"><span>Settings</span><p>Manage providers, local memory, and shared tool connections while credentials remain in their native stores.</p><dl><div><dt>Connected</dt><dd>{connectors.filter((item) => item.installed && item.manageable !== false).length}</dd></div><div><dt>Need login</dt><dd>{connectors.filter((item) => item.installed && item.manageable === false).length}</dd></div><div><dt>Providers</dt><dd>{providerCatalog.length}</dd></div></dl></div> : view === 'goals' ? <div className="overview-side"><span>Goal field</span><p>Your outcomes, milestones, and next actions shared across human and agent work.</p><dl><div><dt>Active</dt><dd>{goalsSnapshot.goals.filter((goal) => goal.status === 'active').length}</dd></div><div><dt>Moving</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.active, 0)}</dd></div><div><dt>Blocked</dt><dd>{goalsSnapshot.goals.reduce((sum, goal) => sum + goal.summary.blocked, 0)}</dd></div></dl></div> : view === 'hardware' ? <div className="overview-side hardware-side"><span>Hardware field</span><p>Recent conversations on your controller. Press a pad to open a thread.</p><dl><div><dt>Templates</dt><dd>{hardwareSnapshot.templates.length}</dd></div><div><dt>Views</dt><dd>{hardwareSnapshot.templates.find((item) => item.id === hardwareSnapshot.activeTemplateId)?.views?.length || 0}</dd></div><div><dt>MIDI</dt><dd>{midi.connected ? 'On' : 'Off'}</dd></div></dl><small>Local and portable</small></div> : <div className="overview-side"><span>Command center</span><p>Your providers, live signals, and agent work arranged spatially.</p><dl><div><dt>Working</dt><dd>{sessions.filter((session) => session.state === 'running').length}</dd></div><div><dt>Need you</dt><dd>{sessions.filter((session) => ['waiting', 'attention'].includes(session.state)).length}</dd></div><div><dt>History</dt><dd>{sessions.filter((session) => session.history).length}</dd></div></dl></div>}
         <footer className="hardware"><i data-connected={midi.connected} /><div><b>{midi.shortModel || 'MIDI controller'}</b><span>{midi.connected ? `Connected · ${midi.device || 'ready'}` : 'Waiting for hardware'}</span></div><button type="button" onClick={() => setView('hardware')}>Map</button></footer>
       </aside>
 
@@ -1694,7 +1758,9 @@ export default function Workspace () {
             <HandoverBanner thread={thread} connectors={connectors} usage={usage} onHandover={handoff} onUnavailable={chooseHandoffProject} />
             {loading && <div className="loading">Loading local conversation…</div>}
             {!loading && thread?.messages?.length === 0 && <div className="thread-zero"><h2>This task is ready.</h2><p>Send a prompt below. Ambientic will use your existing {thread.providerLabel || 'provider'} login.</p></div>}
-            {thread?.messages?.map((item, index) => <Message key={item.id || index} item={item} providerLabel={thread.providerLabel} />)}
+            {transcript.map((group, index) => (group.type === 'steps'
+              ? <StepGroup key={group.id || index} steps={group.steps} live={stepsAreLive(group, index, transcript, thread?.running)} />
+              : <Message key={group.id || index} item={group.item} providerLabel={thread.providerLabel} />))}
             {thread?.running && !thread.messages?.some((item) => item.streaming) && <TypingIndicator providerLabel={thread.providerLabel} />}
             {showJumpToLatest && <button className="thread-jump-latest" type="button" onClick={() => scrollToLatest('smooth')} aria-label="Jump to the latest message">↓ Latest</button>}
           </div>

@@ -102,7 +102,7 @@ export function gridSessions (sessions = []) {
 export function selectedSessionForRecordColumn (sessions, selectedSessionId, column) {
   if (!Number.isInteger(column) || column < 0 || column > 7) return null
   const grid = gridSessions(sessions)
-  const index = grid.findIndex((session) => session.id === selectedSessionId)
+  const index = grid.findIndex((session) => session?.id === selectedSessionId)
   return index >= 0 && index % 8 === column ? grid[index] : null
 }
 

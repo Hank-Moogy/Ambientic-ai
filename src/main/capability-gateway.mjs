@@ -48,7 +48,8 @@ const TOOL_SCOPES = Object.freeze({
   ambientic_remember: 'memory:write',
   ambientic_goals: 'goals:read',
   ambientic_task_update: 'tasks:write',
-  ambientic_capability: 'capabilities:invoke'
+  ambientic_capability: 'capabilities:invoke',
+  ambientic_orchestration: 'orchestration:manage'
 })
 
 function parseCommandLine (value) {
@@ -164,7 +165,7 @@ export class CapabilityGateway extends EventEmitter {
     this.rememberedApprovals = new Set()
   }
 
-  issueSession (bindingId, { scopes = ['context:read', 'memory:read', 'memory:write', 'goals:read', 'tasks:write', 'capabilities:invoke'], ttlMs = 24 * 60 * 60 * 1000 } = {}) {
+  issueSession (bindingId, { scopes = ['context:read', 'memory:read', 'memory:write', 'goals:read', 'tasks:write', 'capabilities:invoke', 'orchestration:manage'], ttlMs = 24 * 60 * 60 * 1000 } = {}) {
     const token = randomBytes(32).toString('base64url')
     this.store.createGatewaySession({ tokenHash: hashToken(token), bindingId, scopes, expiresAt: this.now() + ttlMs })
     return { token, socketPath: this.socketPath, bindingId, expiresAt: this.now() + ttlMs }
@@ -213,6 +214,14 @@ export class CapabilityGateway extends EventEmitter {
   }
 
   async invokeNative (tool, args, binding) {
+    if (tool === 'ambientic_orchestration') {
+      if (binding.provider !== 'codex') throw new Error('Only a Codex coordinator can orchestrate specialists.')
+      if (!this.orchestration || !binding.project?.rootPath) throw new Error('Orchestration requires an available queue and a bound project directory.')
+      if (!['list', 'get'].includes(args.action)) {
+        await this.authorize({ binding, tool, permission: 'destructive', arguments: args, title: `Orchestration: ${args.action}` })
+      }
+      return this.orchestration.invoke(binding.project.rootPath, args)
+    }
     if (tool === 'ambientic_context_get') return binding
     if (tool === 'ambientic_recall') return this.contextEngine.recall(args, binding)
     if (tool === 'ambientic_remember') {
@@ -257,7 +266,9 @@ export class CapabilityGateway extends EventEmitter {
     const { session, binding } = this.authenticate(token)
     tool = cleanText(tool, 160)
     this.authorizeScope(session, tool)
-    const suppliedKey = cleanText(idempotencyKey || args.idempotencyKey, 160)
+    // The queue owns durable request/revision deduplication and returns current
+    // state. A cached audit summary must never replace a live job response.
+    const suppliedKey = tool === 'ambientic_orchestration' ? '' : cleanText(idempotencyKey || args.idempotencyKey, 160)
     // A provider-selected key is only idempotent inside one binding and tool.
     // Namespacing prevents one session from observing another session's result.
     const key = suppliedKey ? digest(`${binding.id}:${tool}:${suppliedKey}`) : ''
@@ -279,9 +290,9 @@ export class CapabilityGateway extends EventEmitter {
         providerSessionId: binding.providerSessionId,
         bindingId: binding.id,
         tool,
-        permission: tool === 'ambientic_task_update' || tool === 'ambientic_remember' ? 'write' : 'read',
+        permission: tool === 'ambientic_task_update' || tool === 'ambientic_remember' || (tool === 'ambientic_orchestration' && !['list', 'get'].includes(args.action)) ? 'write' : 'read',
         argumentsDigest: digest(args),
-        approval: tool === 'ambientic_task_update' ? (error ? 'rejected_or_failed' : 'approved') : 'automatic',
+        approval: tool === 'ambientic_task_update' || (tool === 'ambientic_orchestration' && !['list', 'get'].includes(args.action)) ? (error ? 'rejected_or_failed' : 'approved') : 'automatic',
         resultSummary: error ? `Error: ${error.message}` : cleanText(JSON.stringify(result), 1000),
         durationMs: this.now() - started,
         idempotencyKey: key
@@ -398,8 +409,8 @@ export class CapabilityGateway extends EventEmitter {
 
   async handleRequest (request) {
     if (request.method === 'tools/list') {
-      const { session } = this.authenticate(request.token)
-      return { tools: AMBIENTIC_TOOL_SCHEMAS.filter((tool) => session.scopes.includes(TOOL_SCOPES[tool.name])) }
+      const { session, binding } = this.authenticate(request.token)
+      return { tools: AMBIENTIC_TOOL_SCHEMAS.filter((tool) => session.scopes.includes(TOOL_SCOPES[tool.name]) && (tool.name !== 'ambientic_orchestration' || (binding.provider === 'codex' && this.orchestration && binding.project?.rootPath))) }
     }
     if (request.method === 'tools/call') return this.invoke({ token: request.token, tool: request.params?.name, arguments: request.params?.arguments || {}, idempotencyKey: request.params?.arguments?.idempotencyKey })
     if (request.method === 'ping') return { ok: true }

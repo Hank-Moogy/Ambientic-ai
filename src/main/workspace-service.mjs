@@ -1,3 +1,4 @@
+import { conversationText, visibleUserText } from '../shared/conversation-messages.mjs'
 import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -8,10 +9,11 @@ import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
 import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, handoverProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
-import { humanThreadTitle, namesThread } from './summarizer.js'
+import { assistantPartMessage, describeToolCall, parseClaudeTranscript } from './claude-transcript.mjs'
 import { decideToolPermission } from './permission-policy.mjs'
+import { fallbackTitle, isUserPromptRow, promptText, threadTitle } from './thread-title.mjs'
+import { humanThreadTitle, namesThread } from './summarizer.js'
 import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
-import { awaitsUserReply } from './turn-signals.mjs'
 import { claudePermissionMode, codexApprovalSettings, hermesAutoApproval, normalizeApprovalProfile } from './approval-profile.mjs'
 import { isClaudeLimitRejection } from './usage.js'
 
@@ -89,27 +91,8 @@ function message (role, text, extra = {}) {
 
 // Claude's PermissionRequest hook reports only the tool name and its raw input,
 // so an approval card titled "Bash" or "Edit" never says what is actually being
-// asked for. Build a one-line, human-readable request title — the thing the user
-// reads to decide yes or no — from the tool's own input fields. Values are
-// truncated (never parsed or executed) so a long command or file list cannot
-// blow out the card.
-const APPROVAL_TITLE_LIMIT = 120
-
-function shortPath (value) {
-  const text = String(value || '').trim()
-  if (!text) return ''
-  const home = homedir()
-  const tidy = text.startsWith(home) ? `~${text.slice(home.length)}` : text
-  // Keep the final two segments: enough to identify the file without the noise
-  // of a deep absolute path.
-  const parts = tidy.split('/').filter(Boolean)
-  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : tidy
-}
-
-function clip (value, limit = APPROVAL_TITLE_LIMIT) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim()
-  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
-}
+// asked for. Approval cards and collapsed activity rows describe the same
+// action, so both read it from the same describer.
 
 function decisionName (value) {
   if (typeof value === 'string') return value
@@ -177,50 +160,7 @@ function codexApprovalResult (approval, allow, scope) {
 }
 
 export function describeApprovalRequest (toolName, toolInput = {}) {
-  const name = String(toolName || '').trim()
-  const input = toolInput && typeof toolInput === 'object' ? toolInput : {}
-  const files = Array.isArray(input.edits) ? input.edits.length : 0
-  switch (name) {
-    case 'Bash':
-    case 'BashOutput':
-      // Claude supplies its own short `description` for Bash; prefer it and keep
-      // the command itself for the detail line beneath the title.
-      return clip(input.description ? `Run: ${input.description}` : `Run: ${input.command || 'a shell command'}`)
-    case 'Edit':
-      return clip(`Edit ${shortPath(input.file_path)}${files > 1 ? ` (${files} changes)` : ''}` )
-    case 'MultiEdit':
-      return clip(`Edit ${shortPath(input.file_path)}${files ? ` (${files} changes)` : ''}`)
-    case 'Write':
-      return clip(`Write ${shortPath(input.file_path)}`)
-    case 'NotebookEdit':
-      return clip(`Edit notebook ${shortPath(input.notebook_path || input.file_path)}`)
-    case 'Read':
-      return clip(`Read ${shortPath(input.file_path)}`)
-    case 'Glob':
-      return clip(`Find files matching ${input.pattern || ''}`)
-    case 'Grep':
-      return clip(`Search for ${input.pattern || ''}${input.path ? ` in ${shortPath(input.path)}` : ''}`)
-    case 'WebFetch': {
-      let host = ''
-      try { host = new URL(String(input.url)).hostname } catch { host = String(input.url || '') }
-      return clip(`Fetch ${host}`)
-    }
-    case 'WebSearch':
-      return clip(`Web search: ${input.query || ''}`)
-    case 'Task':
-      return clip(`Run ${input.subagent_type || 'an'} agent: ${input.description || ''}`)
-    case 'KillShell':
-      return clip('Stop a running shell')
-    default:
-      break
-  }
-  // MCP tools arrive as mcp__<server>__<tool>; surface both halves plainly.
-  const mcp = name.match(/^mcp__([^_]+(?:_[^_]+)*)__(.+)$/)
-  if (mcp) return clip(`${mcp[1]}: ${mcp[2].replace(/_/g, ' ')}`)
-  // Unknown tool: fall back to the name plus the most identifying input value.
-  const hint = input.command || input.file_path || input.path || input.url || input.query || input.pattern
-  if (name && hint) return clip(`${name}: ${typeof hint === 'string' ? hint : ''}`)
-  return clip(name || 'Claude Code tool')
+  return describeToolCall(toolName, toolInput)
 }
 
 export function reconcileProviderMessage (messages, incoming) {
@@ -343,7 +283,10 @@ function codexInputs (text, attachments) {
 
 function codexItem (item) {
   if (!item) return null
-  if (item.type === 'userMessage') return message('user', stripAmbienticContext(textContent(item.content)), { id: item.id })
+  if (item.type === 'userMessage') {
+    const text = visibleUserText(stripAmbienticContext(conversationText(item.content)))
+    return text ? message('user', text, { id: item.id }) : null
+  }
   if (item.type === 'agentMessage') return message('assistant', item.text, { id: item.id })
   if (item.type === 'reasoning') return message('activity', textContent(item.summary || item.content), { id: item.id, kind: 'reasoning', title: 'Reasoning' })
   if (item.type === 'commandExecution') return message('activity', item.aggregatedOutput || item.command || '', { id: item.id, kind: 'command', title: item.command || 'Command', status: item.status })
@@ -363,25 +306,13 @@ function codexActiveTurnId (thread) {
   return [...(thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id || ''
 }
 
-// Codex has no distinct protocol signal for "the agent is asking the user
-// something and stopped to wait for a reply" — a clarifying question ends the
-// turn exactly like a completed task does. When the turn's last item is an
-// agent message ending in a question, this is that case, and the thread
-// should surface as needing you rather than going quietly idle.
+// Only explicit provider input flags indicate a blocked turn. Punctuation in
+// ordinary assistant prose is not an approval or actionable input request.
 function codexAwaitsReply (thread) {
-  const last = thread?.turns?.at(-1)?.items?.at(-1)
-  if (last?.type !== 'agentMessage') return false
-  return awaitsUserReply(last.text)
+  return Boolean(thread?.status?.activeFlags?.includes('waitingOnUserInput'))
 }
 
-// The same question, read from a snapshot instead of a provider thread. Claude
-// and Hermes report their transcript into the snapshot rather than through a
-// readable thread object, and without this they end a turn on a question and
-// show up as plain idle — the same pause Codex surfaces as needing you.
-function snapshotAwaitsReply (snapshot) {
-  const last = [...(snapshot?.messages || [])].reverse().find((entry) => entry?.role === 'assistant' || entry?.role === 'user')
-  return last?.role === 'assistant' && awaitsUserReply(last.text)
-}
+function snapshotAwaitsReply () { return false }
 
 function codexEventTurnId (event) {
   return event?.params?.turn?.id || event?.params?.turnId || ''
@@ -391,27 +322,9 @@ function codexStatusIsRunning (status) {
   return (status?.type || status) === 'active'
 }
 
-function claudeMessages (path) {
+export function claudeMessages (path) {
   if (!path || !existsSync(path)) return []
-  const output = []
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    if (!line.trim()) continue
-    let row
-    try { row = JSON.parse(line) } catch { continue }
-    if (row.type === 'user') {
-      const text = stripAmbienticContext(textContent(row.message?.content))
-      if (text && !text.startsWith('<task-notification>')) output.push(message('user', text, { id: row.uuid }))
-    } else if (row.type === 'assistant') {
-      for (const part of row.message?.content || []) {
-        if (part.type === 'text' && part.text) output.push(message('assistant', part.text, { id: `${row.uuid}:text` }))
-        if (part.type === 'tool_use') {
-          const files = [part.input?.file_path, part.input?.path].filter(Boolean)
-          output.push(message('activity', JSON.stringify(part.input || {}, null, 2), { id: part.id, kind: 'tool', title: part.name || 'Tool', files }))
-        }
-      }
-    }
-  }
-  return output.slice(-300)
+  return parseClaudeTranscript(readFileSync(path, 'utf8'))
 }
 
 // The auto-compaction seed is one long synthetic user message. Hide it from the
@@ -451,10 +364,8 @@ function readFileSlice (path, position, length) {
 }
 
 function meaningfulClaudeUserText (row) {
-  if (row?.type !== 'user') return ''
-  const value = stripAmbienticContext(textContent(row.message?.content)).replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-  if (!value || value.startsWith('<') || /^\/?(?:clear|compact|help)$/i.test(value)) return ''
-  return value
+  if (!isUserPromptRow(row)) return ''
+  return threadTitle(promptText(row.message?.content))
 }
 
 function parseJsonLines (text) {
@@ -487,7 +398,9 @@ function claudeHistorySessions () {
         const id = sessionId || entry.name.slice(0, -6)
         if (!id) continue
         const rawTask = firstPrompt || lastPrompt || ''
-        const task = humanThreadTitle(rawTask, 'Claude Code task')
+        const task = rawTask
+          ? (rawTask.length < 12 && cwd ? `${rawTask} — ${basename(cwd)}` : rawTask)
+          : fallbackTitle(PROVIDER_LABELS.claude, basename(cwd))
         sessions.push({
           id, agent: 'claude', project: basename(cwd) || 'Claude Code', cwd,
           task,
@@ -738,7 +651,10 @@ export class WorkspaceService extends EventEmitter {
           `])
           histories.push(...rows.map((row) => ({
             id: row.id, agent: 'hermes', project: basename(row.cwd || '') || 'Hermes', cwd: row.cwd || '',
-            task: humanThreadTitle(row.provider_title, '') || humanThreadTitle(row.first_prompt, 'Hermes task'), summary: `${row.messageCount || 0} messages`,
+            // The fallback column is the first user message, which carries the
+            // same injected-context machinery as every other provider.
+            task: threadTitle(row.provider_title) || threadTitle(row.first_prompt) || fallbackTitle(PROVIDER_LABELS.hermes, basename(row.cwd || '')),
+            summary: `${row.messageCount || 0} messages`,
             updatedAt: Number(row.updatedAt) || 0, state: 'history', history: true
           })))
         }
@@ -769,8 +685,17 @@ export class WorkspaceService extends EventEmitter {
     return sessions
   }
 
+  // The generated "Claude · project" label is not a name — it is the stand-in
+  // used until a real one exists, and the one title a provider may replace.
+  placeholderTitle (session) {
+    if (!session) return ''
+    return fallbackTitle(PROVIDER_LABELS[session.agent] || session.agent, session.project)
+  }
+
   baseSnapshot (session) {
-    const title = this.aliasFor(session) || session.task || session.project || `${PROVIDER_LABELS[session.agent] || 'Agent'} session`
+    const title = this.aliasFor(session) ||
+      threadTitle(session.task) ||
+      this.placeholderTitle(session)
     return {
       id: session.id,
       provider: session.agent,
@@ -797,6 +722,7 @@ export class WorkspaceService extends EventEmitter {
     // State has one owner. Callers set `running`/`error`/`messages`; the state
     // is always derived here so live snapshots and list()/read() cannot diverge.
     snapshot.state = this.effectiveState(this.sessionFor(snapshot.id), snapshot)
+    snapshot.running = snapshot.state === 'running'
     this.snapshots.set(snapshot.id, snapshot)
     this.emit('change', snapshot)
     return snapshot
@@ -821,6 +747,7 @@ export class WorkspaceService extends EventEmitter {
     const id = session?.id ?? snapshot?.id
     if (snapshot?.error) return 'attention'
     if (this.hasPendingApproval(id)) return 'attention'
+    if (session?.externalSource === 'codex-desktop' && !this.activeTurns.has(id)) return session.state || 'idle'
     if (snapshot?.awaitingReply) return 'attention'
     if (session?.state === 'attention' || session?.state === 'waiting') return session.state
     // A provider-native turn/read result is authoritative. Discovery and hooks
@@ -848,6 +775,22 @@ export class WorkspaceService extends EventEmitter {
     })
   }
 
+  // Every provider reports its own idea of a thread's name on read and at the
+  // end of a turn. A rename is the user's decision, so it outranks all of them;
+  // otherwise the reported value is cleaned before it can reach the UI, and a
+  // value with nothing human left in it leaves the current name alone.
+  //
+  // A name this thread already carries also outranks whatever the provider
+  // reports now. Codex rewrites its own thread name as a conversation grows, so
+  // preferring the latest reported value renamed a thread every time it was
+  // read. Only the placeholder still gives way to a provider title.
+  resolveTitle (id, providerTitle, current) {
+    const alias = this.aliasFor(this.sessionFor(id))
+    if (alias) return alias
+    if (current && current !== this.placeholderTitle(this.sessionFor(id))) return current
+    return threadTitle(providerTitle) || current
+  }
+
   async rename (id, value) {
     const session = this.sessionFor(id)
     if (!session) throw new Error('This thread is no longer available.')
@@ -871,30 +814,28 @@ export class WorkspaceService extends EventEmitter {
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
     const snapshot = { ...this.baseSnapshot(session), ...(this.snapshots.get(id) || {}) }
-    snapshot.title = this.aliasFor(session) || session.task || snapshot.title
+    snapshot.title = this.resolveTitle(id, session.task, snapshot.title)
     snapshot.cwd = session.cwd || snapshot.cwd
     try {
       if (session.agent === 'codex') {
         const rpc = await this.codexClient()
         const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
         snapshot.messages = codexThreadMessages(result.thread)
-        // The provider owns the transcript, not Ambientic's display name. Its
-        // mutable name/preview may seed an otherwise unnamed thread, but never
-        // overwrite an Ambientic name or a user alias.
-        snapshot.title = this.aliasFor(session) || session.task || humanThreadTitle(result.thread?.name || result.thread?.preview, snapshot.title)
-        snapshot.running = codexStatusIsRunning(result.thread?.status)
+        snapshot.title = this.resolveTitle(id, result.thread?.name || result.thread?.preview, snapshot.title)
+        const external = session.externalSource === 'codex-desktop' && !this.activeTurns.has(id)
+        snapshot.running = external ? session.state === 'running' : codexStatusIsRunning(result.thread?.status)
         snapshot.awaitingReply = !snapshot.running && codexAwaitsReply(result.thread)
-        snapshot.turnStateKnown = true
+        snapshot.turnStateKnown = !external
         const activeTurnId = codexActiveTurnId(result.thread)
-        if (snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
+        if (!external && snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
         else if (!snapshot.running) this.activeTurns.delete(id)
         // Reading dormant history must not promote it onto the live hardware
         // surface. A genuinely active provider turn is promoted immediately;
         // existing live sessions are also corrected back to idle — unless
         // Codex ended its last turn by asking the user a question, which
         // still needs a reply to move forward.
-        if (snapshot.running) this.ingestLifecycle(id, 'tool')
-        else if (!session.history && !session.tty) {
+        if (!external && snapshot.running) this.ingestLifecycle(id, 'tool')
+        else if (!external && !session.history && !session.tty) {
           this.ingestLifecycle(id, snapshot.awaitingReply ? 'notification' : 'stop_idle')
         }
       } else if (session.agent === 'claude') {
@@ -1075,7 +1016,7 @@ export class WorkspaceService extends EventEmitter {
     const providerSessionId = explicitSessionId || event.session_id || ''
     const sessionId = this.uiSessionId(provider, providerSessionId)
     const session = this.sessionFor(sessionId)
-    if (!session) return Promise.resolve(null)
+    if (!session || !this.isManagedThread(session)) return Promise.resolve(null)
     const id = `${provider}:${randomUUID()}`
     const suggestions = Array.isArray(event.permission_suggestions) ? event.permission_suggestions : []
     const toolInput = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {}
@@ -1206,7 +1147,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   isManagedThread (session) {
-    return Boolean(session) && !session.tty && !session.history
+    return Boolean(session) && this.activeTurns.has(session.id) && !session.tty && session.externalSource !== 'codex-desktop'
   }
 
   // One entry point for every provider's "may I?" question. Returns null when
@@ -1402,6 +1343,24 @@ export class WorkspaceService extends EventEmitter {
     snapshot.updatedAt = Date.now()
     this.ingestLifecycle(id, 'prompt')
     this.emitSnapshot(snapshot)
+    try {
+      await this.startProviderTurn(session, { text, pending, promptOptions, context, hasConversation })
+    } catch (error) {
+      // The turn never started, so nothing downstream will ever clear the
+      // `running: true` set above — finish() is only reached by a turn that
+      // began, and reconcileStaleRunning only looks at terminal-backed
+      // sessions. Without this the thread stays "Running" until the 4h reap.
+      this.fail(id, error)
+      throw error
+    }
+    return this.emitSnapshot(snapshot)
+  }
+
+  // Hand the prompt to the provider and register its turn. Throwing here means
+  // the turn did not start; send() is responsible for unwinding the snapshot.
+  async startProviderTurn (session, { text, pending, promptOptions, context, hasConversation }) {
+    const id = session.id
+    const cwd = session.cwd || homedir()
     if (session.agent === 'codex') {
       const rpc = await this.codexClient()
       const threadId = this.codexThreadId(session)
@@ -1454,7 +1413,6 @@ export class WorkspaceService extends EventEmitter {
     } else if (session.agent === 'claude') {
       this.runClaude(session, assembleProviderPrompt(text, promptOptions), { mode: promptOptions.mode, model: promptOptions.model, effort: promptOptions.effort, context })
     } else throw new Error(`Managed prompts are not supported for ${session.agent}.`)
-    return this.emitSnapshot(snapshot)
   }
 
   async create ({ provider, cwd, prompt, model = '', effort = '', mode = 'build', contextBinding = {}, skipAmbienticContext = false, gatewayScopes = null }) {
@@ -1537,13 +1495,22 @@ export class WorkspaceService extends EventEmitter {
     this.activeTurns.set(session.id, child)
     let buffer = ''
     child.stdout.on('data', (chunk) => {
+      if (this.activeTurns.get(session.id) !== child) return
       buffer += chunk.toString()
       const lines = buffer.split('\n'); buffer = lines.pop() || ''
       for (const line of lines) this.claudeEvent(session.id, line)
     })
     let stderr = ''
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-8000) })
+    child.on('error', (error) => {
+      if (this.activeTurns.get(session.id) !== child) return
+      this.claudeAttempts.delete(session.id)
+      this.fail(session.id, error)
+    })
     child.on('exit', (code) => {
+      // An interrupted child may exit after a new turn has started in the
+      // same session. Its output/completion must not finish that newer turn.
+      if (this.activeTurns.get(session.id) !== child) return
       const attempt = this.claudeAttempts.get(session.id) || {}
       const errorText = attempt.resultError || (code !== 0 ? (stderr.trim() || `Claude exited with code ${code}`) : '')
       if (!errorText) { this.claudeAttempts.delete(session.id); return this.finish(session.id) }
@@ -1576,9 +1543,23 @@ export class WorkspaceService extends EventEmitter {
     const snapshot = this.snapshots.get(id)
     if (!snapshot) return
     if (event.type === 'assistant') {
+      // Same mapping the transcript parser uses, so a live turn and the same
+      // turn re-read from disk render identically instead of reshuffling.
       for (const part of event.message?.content || []) {
-        if (part.type === 'text') snapshot.messages.push(message('assistant', part.text))
-        if (part.type === 'tool_use') snapshot.messages.push(message('activity', JSON.stringify(part.input || {}, null, 2), { kind: 'tool', title: part.name, files: [part.input?.file_path, part.input?.path].filter(Boolean) }))
+        const item = assistantPartMessage(part, { uuid: event.message?.id || '' })
+        if (item) snapshot.messages.push(item)
+      }
+      snapshot.updatedAt = Date.now()
+      this.emitSnapshot({ ...snapshot })
+    } else if (event.type === 'user') {
+      // Tool results stream back as `user` rows; fold each onto the activity row
+      // for the call it answers rather than posting it as the user's message.
+      for (const part of event.message?.content || []) {
+        if (part?.type !== 'tool_result') continue
+        const target = snapshot.messages.findLast((entry) => entry.id === part.tool_use_id)
+        if (!target) continue
+        target.status = part.is_error ? 'failed' : 'done'
+        target.text = String(typeof part.content === 'string' ? part.content : (part.content || []).map((piece) => piece?.text || '').filter(Boolean).join('\n')).slice(0, 4000)
       }
       snapshot.updatedAt = Date.now()
       this.emitSnapshot({ ...snapshot })
@@ -1680,7 +1661,9 @@ export class WorkspaceService extends EventEmitter {
       if (turnId) this.activeTurns.set(id, turnId)
       this.ingestLifecycle(id, 'tool')
       const snapshot = this.snapshots.get(id)
-      if (snapshot) this.emitSnapshot({ ...snapshot, running: true })
+      // A new turn answers whatever question ended the last one. Leaving the
+      // flag set left a running thread reading "Needs input".
+      if (snapshot) this.emitSnapshot({ ...snapshot, running: true, awaitingReply: false })
       return
     }
     if (event.method === 'turn/completed') {
@@ -1689,9 +1672,16 @@ export class WorkspaceService extends EventEmitter {
       return void this.finish(id, turnId)
     }
     if (event.method === 'thread/status/changed') {
-      const snapshot = this.snapshots.get(id)
       const running = codexStatusIsRunning(event.params?.status)
-      if (snapshot) this.emitSnapshot({ ...snapshot, running })
+      // A turn can go inactive here without ever emitting turn/completed.
+      // Clearing the snapshot flag alone left the turn registered in
+      // activeTurns, so the thread stayed "running" with nothing running.
+      if (!running) {
+        if (this.activeTurns.has(id)) void this.finish(id)
+        return
+      }
+      const snapshot = this.snapshots.get(id)
+      if (snapshot) this.emitSnapshot({ ...snapshot, running: true })
       return
     }
     const item = event.params?.item
@@ -1731,8 +1721,8 @@ export class WorkspaceService extends EventEmitter {
     const rows = await execJson('/usr/bin/sqlite3', ['-json', db, `select id,role,content,tool_name,tool_calls,timestamp from messages where session_id='${escaped}' and active=1 order by timestamp asc limit 300`])
     return rows.map((row) => row.tool_name
       ? message('activity', row.content || row.tool_calls || '', { id: `hermes:${row.id}`, kind: 'tool', title: row.tool_name })
-      : message(row.role === 'assistant' ? 'assistant' : 'user', row.role === 'assistant' ? (row.content || '') : stripAmbienticContext(row.content || ''), { id: `hermes:${row.id}` }))
-      .filter((entry) => entry.role === 'activity' || entry.text.trim())
+      : ['assistant', 'user'].includes(row.role) ? message(row.role, row.role === 'assistant' ? (row.content || '') : visibleUserText(stripAmbienticContext(row.content || '')), { id: `hermes:${row.id}` }) : null)
+      .filter((entry) => entry && (entry.role === 'activity' || entry.text.trim()))
   }
 
   interrupt (id) {
@@ -1771,7 +1761,7 @@ export class WorkspaceService extends EventEmitter {
           const rpc = await this.codexClient()
           const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
           snapshot.messages = codexThreadMessages(result.thread)
-          snapshot.title = this.aliasFor(session) || session.task || humanThreadTitle(result.thread?.name || result.thread?.preview, snapshot.title)
+          snapshot.title = this.resolveTitle(id, result.thread?.name || result.thread?.preview, snapshot.title)
           awaitingReply = codexAwaitsReply(result.thread)
           snapshot.awaitingReply = awaitingReply
         } catch (error) {
@@ -1793,12 +1783,16 @@ export class WorkspaceService extends EventEmitter {
         })
         this.contextEngine?.finishGoalReconciliation?.(session?.agent, session ? this.providerSessionId(session) : id)
       }
-      this.ingestLifecycle(id, this.hasPendingApproval(id) || awaitingReply ? 'notification' : 'stop_idle')
+      // A finished turn is your move. `notification` when the agent is blocked
+      // on an approval or ended by asking a question, `stop` otherwise — which
+      // is what marks the pad unseen so it pulses until you have looked at it.
+      // Going straight to `stop_idle` here is why a thread that finished while
+      // you were elsewhere sat there grey and indistinguishable from one you
+      // had already read.
+      this.ingestLifecycle(id, this.hasPendingApproval(id) || awaitingReply ? 'notification' : 'stop')
       this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true })
     }
-    // A finished turn is only "needs you" when the agent is actually blocked on
-    // a pending approval, or Codex ended the turn by asking a clarifying
-    // question; otherwise it is simply idle/done, not red.
+    this.emit('turn-completed', { sessionId: id })
     return true
   }
 
@@ -1807,6 +1801,7 @@ export class WorkspaceService extends EventEmitter {
     this.ingestLifecycle(id, 'notification')
     const snapshot = this.snapshots.get(id)
     if (snapshot) this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true, error: error.message })
+    this.emit('turn-completed', { sessionId: id, error: error.message })
   }
 
   stop () {

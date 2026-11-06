@@ -1,3 +1,5 @@
+import { padDestination, padOpenTarget } from '../shared/pad-navigation.mjs'
+import { recentThreadGrid, connectedPadProviders, providerColumnLayout, validColumnWidths } from '../shared/recent-thread-grid.mjs'
 import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +23,7 @@ import { connectorState, openAgentSetup, openAgentTerminal, pendingConnectorStat
 import { createVoiceInput } from './voice-input.mjs'
 import { WorkspaceService } from './workspace-service.mjs'
 import { HandoverService } from './handover-service.mjs'
+import { OrchestrationService } from './orchestration-service.mjs'
 import { ClaudeAuthService } from './claude-auth-service.mjs'
 import { normalizeExternalUrl } from './external-url.mjs'
 import { ensureEnhancedPath } from './env-path.mjs'
@@ -110,7 +113,9 @@ let voiceInput = null
 let connectors = []
 let pendingCodexLogin = ''
 const providerAuthState = new Map()
+let recentHardwareThreads = []
 let workspace = null
+let orchestration = null
 let handovers = null
 let consumptionLedger = null
 let claudeAuth = null
@@ -457,7 +462,11 @@ function pushState () {
 
 async function pushWorkspaceThreads (force = false) {
   if (!workspace) return
-  try { sendToWindows('workspace-threads', await workspace.list({ force })) } catch (error) { console.error('[ambientic] workspace index failed:', error.message) }
+  try {
+    recentHardwareThreads = await workspace.list({ force })
+    sendToWindows('workspace-threads', recentHardwareThreads)
+    midiController?.render()
+  } catch (error) { console.error('[ambientic] workspace index failed:', error.message) }
 }
 
 function scheduleWorkspaceThreads () {
@@ -498,8 +507,18 @@ function pushCompanions () {
   sendToWindows('companions', companions.getState())
 }
 
+function providerPadLayout () {
+  const providers = connectedPadProviders(connectors)
+  const widths = loadPrefs().providerPadSplits?.[providers.join(',')]
+  return { providerLayout: providerColumnLayout(providers, widths), automaticSplit: !validColumnWidths(providers, widths) }
+}
+
+function midiSnapshot () {
+  return { ...(midiController?.getStatus() || { connected: false, model: 'Akai APC controller' }), ...providerPadLayout(), padOpenTarget: padOpenTarget(loadPrefs().padOpenTarget) }
+}
+
 function pushMidi () {
-  sendToWindows('midi', midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
+  sendToWindows('midi', midiSnapshot())
 }
 
 function pushHardware () {
@@ -524,6 +543,8 @@ async function refreshConnectors () {
     connectorRefresh = null
   }
   pushConnectors()
+  pushMidi()
+  midiController?.render()
   return connectors
 }
 
@@ -604,6 +625,11 @@ function snapTopRight () {
 function showWorkspace (sessionId = '') {
   if (!workspaceWin || workspaceWin.isDestroyed()) createWorkspaceWindow()
   workspaceWin.show()
+  // Raising the window is not enough when another app owns the foreground:
+  // macOS keeps Ambientic behind whatever is active unless the app itself is
+  // activated, which is why the workspace could open "invisibly" behind a
+  // terminal or browser.
+  if (process.platform === 'darwin') app.focus({ steal: true })
   workspaceWin.focus()
   if (sessionId) {
     pendingWorkspaceSessionId = sessionId
@@ -634,8 +660,20 @@ async function selectWorkspaceSession (id) {
   lastFocusedSessionId = id
   midiController?.select(liveSession ? id : null)
   showWorkspace(id)
-  const preview = liveSession ? await presentWorkspacePreview(id) : { ok: false, reason: 'history-session' }
-  return { ok: true, sessionId: id, preview }
+  return { ok: true, sessionId: id }
+}
+
+async function openPadThread (id) {
+  const session = workspace?.sessionFor(id)
+  const destination = padDestination(session, loadPrefs().padOpenTarget, workspace?.hasPendingApproval(id))
+  if (destination === 'unavailable') return { ok: false, reason: 'not-found' }
+  if (destination === 'native') {
+    try {
+      const result = await queueFocus(id)
+      if (result.ok) return { ...result, destination }
+    } catch (error) { console.error(`[pads] Native destination unavailable: ${error.message}`) }
+  }
+  return { ...(await selectWorkspaceSession(id)), destination: 'ambientic' }
 }
 
 function runInstaller () {
@@ -706,7 +744,11 @@ function createTray () {
 // ── IPC ───────────────────────────────────────────────────────────────────
 ipcMain.handle('get-state', () => store.hardwareList())
 ipcMain.handle('get-build-info', () => buildInfo)
-ipcMain.handle('get-workspace-threads', () => workspace.list())
+ipcMain.handle('get-workspace-threads', async () => {
+  recentHardwareThreads = await workspace.list()
+  midiController?.render()
+  return recentHardwareThreads
+})
 ipcMain.handle('get-goals', () => goals?.list() || { version: 1, goals: [], events: [], updatedAt: null })
 ipcMain.handle('create-goal', (_event, input) => goals.createGoal(input || {}))
 ipcMain.handle('update-goal', (_event, goalId, patch) => goals.updateGoal(goalId, patch || {}))
@@ -931,7 +973,27 @@ ipcMain.handle('connect-provider', async (_event, agentId, options = {}) => {
 })
 ipcMain.handle('claude-auth-input', (_event, input) => claudeAuth?.input(input) || false)
 ipcMain.handle('claude-auth-cancel', () => claudeAuth?.cancel() || false)
-ipcMain.handle('get-midi', () => midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
+ipcMain.handle('get-midi', midiSnapshot)
+ipcMain.handle('midi-set-pad-target', (_event, target) => {
+  if (!['ambientic', 'native'].includes(target)) throw new Error('Unknown pad destination')
+  savePrefs({ ...loadPrefs(), padOpenTarget: target })
+  pushMidi()
+  return midiSnapshot()
+})
+ipcMain.handle('open-pad-thread', (_event, id) => openPadThread(id))
+ipcMain.handle('midi-set-provider-columns', (_event, widths) => {
+  const providers = connectedPadProviders(connectors)
+  if (widths !== null && !validColumnWidths(providers, widths)) throw new Error('Provider connections changed. Please adjust the current layout again.')
+  const prefs = loadPrefs()
+  const splits = { ...prefs.providerPadSplits }
+  const key = providers.join(',')
+  if (widths === null) delete splits[key]
+  else splits[key] = Object.fromEntries(providers.map((id) => [id, widths[id]]))
+  savePrefs({ ...prefs, providerPadSplits: splits })
+  midiController?.render()
+  pushMidi()
+  return midiSnapshot()
+})
 ipcMain.handle('midi-set-profile', (_event, profileId) => midiController?.setProfile(profileId) || false)
 ipcMain.handle('midi-vibe', () => midiController?.triggerVibe() || false)
 ipcMain.handle('midi-learn', (_event, actionId) => midiController?.learn(actionId) || false)
@@ -1094,7 +1156,7 @@ function setPreviewDisplay (displayId) {
 }
 
 async function focusById (id) {
-  const s = store.list().find((x) => x.id === id)
+  const s = workspace?.sessionFor(id) || store.list().find((x) => x.id === id)
   if (!s) return { ok: false, reason: 'not-found' }
   store.acknowledge(id)
 
@@ -1103,6 +1165,16 @@ async function focusById (id) {
     lastFocusedSessionId = id
     midiController?.select(id)
     return { ok: true, via: 'provider-deep-link' }
+  }
+
+  // A thread Ambientic runs itself has no terminal window to raise, so the
+  // AppleScript below has nothing to target and the pad appeared dead. Its home
+  // is the Ambientic workspace — open it there and bring this app forward.
+  if (!s.tty && !s.term_pid) {
+    lastFocusedSessionId = id
+    midiController?.select(id)
+    showWorkspace(id)
+    return { ok: true, via: 'workspace' }
   }
 
   // AX window control requires Accessibility permission for THIS app (in dev:
@@ -1115,12 +1187,6 @@ async function focusById (id) {
     return { ok: false, permission: true }
   }
 
-  // The first tap arranges this pad's preview. A repeat tap on the selected
-  // pad only refocuses its terminal, so a correct browser route cannot be
-  // replaced or reloaded by another context-ranking pass.
-  const companion = lastFocusedSessionId === id
-    ? { ok: true, skipped: 'already-focused', results: [] }
-    : await companions.present(s, previewDisplay())
   const res = await focusSession(s, controllerDisplay())
   if (!res.ok && res.reason === 'terminal-not-found') {
     store.remove(id)
@@ -1130,7 +1196,7 @@ async function focusById (id) {
   if (!res.ok && res.permission) { accessibilityGranted(true); openAccessibilitySettings() }
   if (res.ok) lastFocusedSessionId = id
   if (res.ok) midiController?.select(id)
-  return { ...res, companion }
+  return res
 }
 
 // Prevent rapid clicks (or an external focus request) from launching competing
@@ -1288,13 +1354,13 @@ async function executeHardwareAssignment ({ assignment }) {
   if (actionId === 'session.capture-selected') return handleMidiAction('capture-selected')
   if (actionId === 'thread.open-next-attention') {
     const session = relativeSession(1, (candidate) => ['waiting', 'attention'].includes(candidate.state))
-    return session ? selectWorkspaceSession(session.id) : false
+    return session ? openPadThread(session.id) : false
   }
   if (actionId === 'thread.open-latest-provider') {
     const session = (await workspace.list()).find((candidate) => candidate.agent === assignment.targetId)
-    return session ? selectWorkspaceSession(session.id) : false
+    return session ? openPadThread(session.id) : false
   }
-  if (actionId === 'thread.open') return assignment.targetId ? selectWorkspaceSession(assignment.targetId) : false
+  if (actionId === 'thread.open') return assignment.targetId ? openPadThread(assignment.targetId) : false
   if (actionId === 'thread.send-prompt') {
     const session = selectedHardwareSession(assignment.targetId)
     if (!session || !assignment.prompt) return false
@@ -1541,6 +1607,12 @@ app.whenReady().then(() => {
     gatewayExecutable: process.execPath,
     gatewayShimPath: app.isPackaged ? join(process.resourcesPath, 'ambientic-mcp-shim.mjs') : join(app.getAppPath(), 'resources', 'ambientic-mcp-shim.mjs')
   })
+  try {
+    orchestration = new OrchestrationService({ file: join(app.getPath('userData'), 'orchestration.db'), workspace })
+    if (capabilityGateway) capabilityGateway.orchestration = orchestration
+  } catch (error) {
+    console.error(`[ambientic] orchestration unavailable; queue preserved: ${error.message}`)
+  }
   if (contextEngine) {
     memoryBootstrap = createMemoryBootstrapService({ workspace, contextEngine, contextStore, connectors: () => connectors })
     memoryBootstrap.on('change', (state) => sendToWindows('memory-bootstrap', state))
@@ -1581,7 +1653,8 @@ app.whenReady().then(() => {
     pushVoice()
   })
   midiController = createMidiController(store, {
-    onPadPress: selectWorkspaceSession,
+    onPadPress: openPadThread,
+    getSessions: (padCount) => recentThreadGrid(recentHardwareThreads, padCount, providerPadLayout().providerLayout),
     onAction: handleMidiAction,
     onControl: (control) => hardwareProfiles?.handleInput(control) || false,
     getFeedback: () => hardwareProfiles?.feedback() || null,
@@ -1648,4 +1721,4 @@ app.on('second-instance', () => {
 })
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); capabilityGateway?.stop(); contextStore?.close(); claudeAuth?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); orchestration?.close(); workspace?.stop(); capabilityGateway?.stop(); contextStore?.close(); claudeAuth?.stop(); companions.stop(); usage.stop() })
