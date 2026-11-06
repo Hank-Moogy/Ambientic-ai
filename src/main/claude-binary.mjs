@@ -56,10 +56,17 @@ export async function claudeDesktopCandidates (home = homedir()) {
   const root = join(home, 'Library', 'Application Support', 'Claude', 'claude-code')
   try {
     const entries = await readdir(root, { withFileTypes: true })
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => join(root, entry.name, 'claude.app', 'Contents', 'MacOS', 'claude'))
-      .filter((path) => existsSync(path))
+    const candidates = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+      const versionRoot = join(root, entry.name)
+      const direct = join(versionRoot, 'claude.app', 'Contents', 'MacOS', 'claude')
+      // Recent Desktop releases add a build hash beneath the version directory.
+      // Support both layouts without traversing unrelated Desktop data.
+      let builds = []
+      try { builds = await readdir(versionRoot, { withFileTypes: true }) } catch {}
+      return [direct, ...builds.filter((build) => build.isDirectory() && build.name !== 'claude.app')
+        .map((build) => join(versionRoot, build.name, 'claude.app', 'Contents', 'MacOS', 'claude'))]
+    }))
+    return candidates.flat().filter((path) => existsSync(path))
   } catch {
     return []
   }

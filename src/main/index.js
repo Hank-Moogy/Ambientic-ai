@@ -1,5 +1,7 @@
+import { padDestination, padOpenTarget } from '../shared/pad-navigation.mjs'
+import { recentThreadGrid, connectedPadProviders, providerColumnLayout, validColumnWidths } from '../shared/recent-thread-grid.mjs'
 import { app, BrowserWindow, Tray, Menu, clipboard, dialog, ipcMain, nativeImage, powerMonitor, powerSaveBlocker, screen, shell, systemPreferences } from 'electron'
-import { join, dirname, resolve, sep, extname, basename } from 'node:path'
+import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
@@ -17,25 +19,24 @@ import { createCompanionService } from './companions.js'
 import { loadPrefs, savePrefs } from './prefs.js'
 import { loadTaskCache, saveTaskCache } from './task-cache.js'
 import { createMidiController } from './midi-controller.js'
-import { connectorState, openAgentSetup, openAgentTerminal } from './connectors.js'
+import { connectorState, openAgentSetup, openAgentTerminal, pendingConnectorState } from './connectors.js'
 import { createVoiceInput } from './voice-input.mjs'
 import { WorkspaceService } from './workspace-service.mjs'
 import { HandoverService } from './handover-service.mjs'
+import { OrchestrationService } from './orchestration-service.mjs'
 import { ClaudeAuthService } from './claude-auth-service.mjs'
 import { normalizeExternalUrl } from './external-url.mjs'
 import { ensureEnhancedPath } from './env-path.mjs'
 import { initFileLogging, logFilePath } from './logging.mjs'
 import { AmbientModeService, DEFAULT_AMBIENT_CHECK_IN_MINUTES } from './ambient-mode.mjs'
 import { readBuildInfo } from './build-info.mjs'
-import { createCareerOsRepository, createGoalsRepository, createWorkflowsRepository } from './repositories.mjs'
+import { createGoalsRepository } from './repositories.mjs'
 import { createContextStore } from './context-store.mjs'
 import { createContextEngine } from './context-engine.mjs'
 import { createCapabilityGateway } from './capability-gateway.mjs'
-import { discoverCareerJobs } from './career-job-sources.mjs'
 import { createMemoryBootstrapService } from './memory-bootstrap-service.mjs'
 import { createHardwareProfileService } from './hardware-profile-service.mjs'
 import { projectLaunchAccess } from './project-scope.mjs'
-import { CAREER_OS_PACK } from '../shared/career-os-pack.mjs'
 
 // Apply disposable state before logging and before Electron derives the
 // single-instance lock. This lets a clean-profile developer smoke coexist with
@@ -87,7 +88,6 @@ const DEFAULT_WIDTH = 232
 const MIN_WIDTH = 232
 const MIN_HEIGHT = 220
 const MARGIN = 16
-const CAREER_OS_GATEWAY_SCOPES = ['context:read', 'memory:read', 'memory:write', 'goals:read', 'tasks:write', 'capabilities:invoke', 'career:read', 'career:discover', 'career:write']
 const ZOOM_STEPS = [0.9, 1, 1.15, 1.3, 1.5, 1.75]
 const store = new SessionStore()
 // Hosted inference for Ambientic's own small workloads. Keys live in the
@@ -113,14 +113,14 @@ let voiceInput = null
 let connectors = []
 let pendingCodexLogin = ''
 const providerAuthState = new Map()
+let recentHardwareThreads = []
 let workspace = null
+let orchestration = null
 let handovers = null
 let consumptionLedger = null
 let claudeAuth = null
 let ambientMode = null
 let goals = null
-let workflows = null
-let career = null
 let hardwareProfiles = null
 let contextStore = null
 let contextEngine = null
@@ -454,7 +454,7 @@ function createWorkspaceWindow () {
 }
 
 function pushState () {
-  const list = store.list()
+  const list = store.hardwareList()
   sendToWindows('state', list)
   void pushWorkspaceThreads()
   updateTray()
@@ -462,7 +462,11 @@ function pushState () {
 
 async function pushWorkspaceThreads (force = false) {
   if (!workspace) return
-  try { sendToWindows('workspace-threads', await workspace.list({ force })) } catch (error) { console.error('[ambientic] workspace index failed:', error.message) }
+  try {
+    recentHardwareThreads = await workspace.list({ force })
+    sendToWindows('workspace-threads', recentHardwareThreads)
+    midiController?.render()
+  } catch (error) { console.error('[ambientic] workspace index failed:', error.message) }
 }
 
 function scheduleWorkspaceThreads () {
@@ -503,8 +507,18 @@ function pushCompanions () {
   sendToWindows('companions', companions.getState())
 }
 
+function providerPadLayout () {
+  const providers = connectedPadProviders(connectors)
+  const widths = loadPrefs().providerPadSplits?.[providers.join(',')]
+  return { providerLayout: providerColumnLayout(providers, widths), automaticSplit: !validColumnWidths(providers, widths) }
+}
+
+function midiSnapshot () {
+  return { ...(midiController?.getStatus() || { connected: false, model: 'Akai APC controller' }), ...providerPadLayout(), padOpenTarget: padOpenTarget(loadPrefs().padOpenTarget) }
+}
+
 function pushMidi () {
-  sendToWindows('midi', midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
+  sendToWindows('midi', midiSnapshot())
 }
 
 function pushHardware () {
@@ -515,9 +529,22 @@ function pushConnectors () {
   sendToWindows('connectors', connectors)
 }
 
+// Probing the providers spawns a login shell and several CLIs. Startup, the
+// Overview mount, and any manual refresh used to each start their own sweep and
+// then contend for the same processes, so a single in-flight run is shared.
+let connectorRefresh = null
+
 async function refreshConnectors () {
-  connectors = await connectorState()
+  if (connectorRefresh) return connectorRefresh
+  connectorRefresh = connectorState()
+  try {
+    connectors = await connectorRefresh
+  } finally {
+    connectorRefresh = null
+  }
   pushConnectors()
+  pushMidi()
+  midiController?.render()
   return connectors
 }
 
@@ -633,8 +660,20 @@ async function selectWorkspaceSession (id) {
   lastFocusedSessionId = id
   midiController?.select(liveSession ? id : null)
   showWorkspace(id)
-  const preview = liveSession ? await presentWorkspacePreview(id) : { ok: false, reason: 'history-session' }
-  return { ok: true, sessionId: id, preview }
+  return { ok: true, sessionId: id }
+}
+
+async function openPadThread (id) {
+  const session = workspace?.sessionFor(id)
+  const destination = padDestination(session, loadPrefs().padOpenTarget, workspace?.hasPendingApproval(id))
+  if (destination === 'unavailable') return { ok: false, reason: 'not-found' }
+  if (destination === 'native') {
+    try {
+      const result = await queueFocus(id)
+      if (result.ok) return { ...result, destination }
+    } catch (error) { console.error(`[pads] Native destination unavailable: ${error.message}`) }
+  }
+  return { ...(await selectWorkspaceSession(id)), destination: 'ambientic' }
 }
 
 function runInstaller () {
@@ -703,71 +742,18 @@ function createTray () {
 }
 
 // ── IPC ───────────────────────────────────────────────────────────────────
-ipcMain.handle('get-state', () => store.list())
+ipcMain.handle('get-state', () => store.hardwareList())
 ipcMain.handle('get-build-info', () => buildInfo)
-ipcMain.handle('get-workspace-threads', () => workspace.list())
+ipcMain.handle('get-workspace-threads', async () => {
+  recentHardwareThreads = await workspace.list()
+  midiController?.render()
+  return recentHardwareThreads
+})
 ipcMain.handle('get-goals', () => goals?.list() || { version: 1, goals: [], events: [], updatedAt: null })
 ipcMain.handle('create-goal', (_event, input) => goals.createGoal(input || {}))
 ipcMain.handle('update-goal', (_event, goalId, patch) => goals.updateGoal(goalId, patch || {}))
 ipcMain.handle('create-goal-task', (_event, goalId, input) => goals.createTask(goalId, input || {}))
 ipcMain.handle('update-goal-task', (_event, taskId, patch) => goals.updateTask(taskId, patch || {}))
-ipcMain.handle('get-workflows', () => workflows?.list() || { version: 2, workflows: [], runs: [], packs: [], updatedAt: null })
-ipcMain.handle('choose-career-profile-file', async (_event, kind = 'resume') => {
-  const linkedin = kind === 'linkedin'
-  const result = await dialog.showOpenDialog(workspaceWin || win, {
-    title: linkedin ? 'Choose your LinkedIn profile PDF' : 'Choose your CV',
-    buttonLabel: linkedin ? 'Use LinkedIn PDF' : 'Use this CV',
-    properties: ['openFile'],
-    filters: linkedin
-      ? [{ name: 'LinkedIn PDF', extensions: ['pdf'] }]
-      : [{ name: 'CV documents', extensions: ['pdf', 'doc', 'docx', 'rtf', 'txt', 'md'] }]
-  })
-  if (result.canceled || !result.filePaths[0]) return null
-  const path = await realpath(result.filePaths[0])
-  const details = await stat(path)
-  const allowed = linkedin ? new Set(['.pdf']) : new Set(['.pdf', '.doc', '.docx', '.rtf', '.txt', '.md'])
-  if (!details.isFile() || !allowed.has(extname(path).toLocaleLowerCase())) throw new Error('Choose a supported career document.')
-  if (details.size > 20 * 1024 * 1024) throw new Error('Career documents must be smaller than 20 MB.')
-  return { path, name: basename(path), size: details.size }
-})
-ipcMain.handle('install-career-os', async (_event, rawSetup) => {
-  const setup = { ...(rawSetup || {}) }
-  for (const [field, linkedin] of [['resumePath', false], ['linkedinProfilePath', true]]) {
-    if (!setup[field]) continue
-    const path = await realpath(String(setup[field]))
-    const details = await stat(path)
-    const allowed = linkedin ? new Set(['.pdf']) : new Set(['.pdf', '.doc', '.docx', '.rtf', '.txt', '.md'])
-    if (!details.isFile() || !allowed.has(extname(path).toLocaleLowerCase()) || details.size > 20 * 1024 * 1024) throw new Error(`The selected ${linkedin ? 'LinkedIn profile' : 'CV'} is unavailable or unsupported.`)
-    setup[field] = path
-  }
-  if (!String(setup.resumePath || '').trim() && !String(setup.careerProfile || '').trim()) throw new Error('Upload your CV or enter your career manually.')
-  const installed = workflows.installPack(CAREER_OS_PACK, setup)
-  career.configure(setup)
-  const profileWorkflow = workflows.list().workflows.find((workflow) => workflow.packId === CAREER_OS_PACK.id && workflow.packRole === 'profile')
-  const profileRun = profileWorkflow ? workflows.startRun(profileWorkflow.id) : null
-  return { ...installed, profileRunId: profileRun?.id || '' }
-})
-ipcMain.handle('get-career-os', () => career?.list() || { version: 1, configured: false, opportunities: [], pipeline: {}, dailyQueue: { minutes: 45, plannedMinutes: 0, remainingMinutes: 45, items: [] }, market: {}, feedbackSummary: {}, updatedAt: null })
-ipcMain.handle('career-update-profile', (_event, profile) => career.updateProfile(profile || {}, { actor: 'human' }))
-ipcMain.handle('career-review-profile', () => career.reviewProfile({ actor: 'human' }))
-ipcMain.handle('career-update-preferences', (_event, preferences) => career.updatePreferences(preferences || {}, { actor: 'human' }))
-ipcMain.handle('career-update-opportunity', (_event, opportunityId, patch) => career.updateOpportunity(String(opportunityId || ''), patch || {}, { actor: 'human' }))
-ipcMain.handle('career-pass-opportunity', (_event, opportunityId, reason, note) => career.passOpportunity(String(opportunityId || ''), reason, note, { actor: 'human' }))
-ipcMain.handle('create-workflow', (_event, input) => workflows.create(input || {}))
-ipcMain.handle('update-workflow', (_event, workflowId, input) => workflows.update(workflowId, input || {}))
-ipcMain.handle('duplicate-workflow', (_event, workflowId) => workflows.duplicate(workflowId))
-ipcMain.handle('delete-workflow', (_event, workflowId) => workflows.remove(workflowId))
-ipcMain.handle('set-workflow-enabled', (_event, workflowId, enabled) => workflows.setEnabled(workflowId, enabled))
-ipcMain.handle('run-workflow', (_event, workflowId) => workflows.startRun(workflowId))
-ipcMain.handle('approve-workflow-run', (_event, runId, allow) => {
-  const before = workflows.list()
-  const run = before.runs.find((candidate) => candidate.id === runId)
-  const workflow = run && before.workflows.find((candidate) => candidate.id === run.workflowId)
-  if (allow && run?.status === 'awaiting_approval' && workflow?.packId === CAREER_OS_PACK.id && workflow.packRole === 'profile') career.reviewProfile({ actor: 'human' })
-  const approved = workflows.approve(runId, allow)
-  return approved
-})
-ipcMain.handle('cancel-workflow-run', (_event, runId) => workflows.cancel(runId))
 ipcMain.handle('get-hardware-profiles', () => hardwareProfiles?.snapshot() || { version: 1, templates: [], activeTemplateId: '', activeViewId: '', mode: 'play', actions: [] })
 ipcMain.handle('hardware-create-template', (_event, input = {}) => hardwareProfiles.create(input))
 ipcMain.handle('hardware-update-template', (_event, templateId, patch = {}) => hardwareProfiles.update(String(templateId || ''), patch))
@@ -892,7 +878,13 @@ ipcMain.handle('set-ambient-mode-check-in', (_event, minutes) => {
   return state
 })
 ipcMain.handle('refresh-usage', () => usage.refresh(true))
-ipcMain.handle('get-connectors', () => connectors.length ? connectors : refreshConnectors())
+// Never block the first paint on the provider sweep: hand back the checking
+// state right away and let the `connectors` push replace it when it lands.
+ipcMain.handle('get-connectors', () => {
+  if (connectors.length) return connectors
+  void refreshConnectors()
+  return pendingConnectorState()
+})
 ipcMain.handle('refresh-connectors', () => refreshConnectors())
 ipcMain.handle('get-provider-auth', () => Object.fromEntries(providerAuthState))
 ipcMain.handle('dismiss-provider-auth', (_event, provider) => providerAuthState.delete(String(provider || '')))
@@ -981,7 +973,27 @@ ipcMain.handle('connect-provider', async (_event, agentId, options = {}) => {
 })
 ipcMain.handle('claude-auth-input', (_event, input) => claudeAuth?.input(input) || false)
 ipcMain.handle('claude-auth-cancel', () => claudeAuth?.cancel() || false)
-ipcMain.handle('get-midi', () => midiController?.getStatus() || { connected: false, model: 'Akai APC controller' })
+ipcMain.handle('get-midi', midiSnapshot)
+ipcMain.handle('midi-set-pad-target', (_event, target) => {
+  if (!['ambientic', 'native'].includes(target)) throw new Error('Unknown pad destination')
+  savePrefs({ ...loadPrefs(), padOpenTarget: target })
+  pushMidi()
+  return midiSnapshot()
+})
+ipcMain.handle('open-pad-thread', (_event, id) => openPadThread(id))
+ipcMain.handle('midi-set-provider-columns', (_event, widths) => {
+  const providers = connectedPadProviders(connectors)
+  if (widths !== null && !validColumnWidths(providers, widths)) throw new Error('Provider connections changed. Please adjust the current layout again.')
+  const prefs = loadPrefs()
+  const splits = { ...prefs.providerPadSplits }
+  const key = providers.join(',')
+  if (widths === null) delete splits[key]
+  else splits[key] = Object.fromEntries(providers.map((id) => [id, widths[id]]))
+  savePrefs({ ...prefs, providerPadSplits: splits })
+  midiController?.render()
+  pushMidi()
+  return midiSnapshot()
+})
 ipcMain.handle('midi-set-profile', (_event, profileId) => midiController?.setProfile(profileId) || false)
 ipcMain.handle('midi-vibe', () => midiController?.triggerVibe() || false)
 ipcMain.handle('midi-learn', (_event, actionId) => midiController?.learn(actionId) || false)
@@ -1020,6 +1032,18 @@ ipcMain.handle('send-thread-prompt', (_event, id, text, options = {}) => workspa
 ipcMain.handle('interrupt-thread', (_event, id) => workspace.interrupt(id))
 ipcMain.handle('create-managed-thread', (_event, options) => workspace.create(options || {}))
 ipcMain.handle('resolve-approval', (_event, id, allow, remember) => workspace.resolveApproval(id, allow, remember))
+ipcMain.handle('list-permission-grants', () => workspace.listGrants())
+ipcMain.handle('get-approval-profile', () => workspace.getApprovalProfile())
+ipcMain.handle('set-approval-profile', (_event, value) => {
+  const profile = workspace.setApprovalProfile(value)
+  sendToWindows('approval-profile', profile)
+  return profile
+})
+ipcMain.handle('revoke-permission-grant', (_event, grantId) => {
+  const revoked = workspace.revokeGrant(String(grantId || ''))
+  if (revoked) sendToWindows('permission-grants', workspace.listGrants())
+  return revoked
+})
 ipcMain.handle('copy-text', (_event, text) => {
   clipboard.writeText(String(text || '').slice(0, 2 * 1024 * 1024))
   return true
@@ -1132,7 +1156,7 @@ function setPreviewDisplay (displayId) {
 }
 
 async function focusById (id) {
-  const s = store.list().find((x) => x.id === id)
+  const s = workspace?.sessionFor(id) || store.list().find((x) => x.id === id)
   if (!s) return { ok: false, reason: 'not-found' }
   store.acknowledge(id)
 
@@ -1163,12 +1187,6 @@ async function focusById (id) {
     return { ok: false, permission: true }
   }
 
-  // The first tap arranges this pad's preview. A repeat tap on the selected
-  // pad only refocuses its terminal, so a correct browser route cannot be
-  // replaced or reloaded by another context-ranking pass.
-  const companion = lastFocusedSessionId === id
-    ? { ok: true, skipped: 'already-focused', results: [] }
-    : await companions.present(s, previewDisplay())
   const res = await focusSession(s, controllerDisplay())
   if (!res.ok && res.reason === 'terminal-not-found') {
     store.remove(id)
@@ -1178,7 +1196,7 @@ async function focusById (id) {
   if (!res.ok && res.permission) { accessibilityGranted(true); openAccessibilitySettings() }
   if (res.ok) lastFocusedSessionId = id
   if (res.ok) midiController?.select(id)
-  return { ...res, companion }
+  return res
 }
 
 // Prevent rapid clicks (or an external focus request) from launching competing
@@ -1336,13 +1354,13 @@ async function executeHardwareAssignment ({ assignment }) {
   if (actionId === 'session.capture-selected') return handleMidiAction('capture-selected')
   if (actionId === 'thread.open-next-attention') {
     const session = relativeSession(1, (candidate) => ['waiting', 'attention'].includes(candidate.state))
-    return session ? selectWorkspaceSession(session.id) : false
+    return session ? openPadThread(session.id) : false
   }
   if (actionId === 'thread.open-latest-provider') {
     const session = (await workspace.list()).find((candidate) => candidate.agent === assignment.targetId)
-    return session ? selectWorkspaceSession(session.id) : false
+    return session ? openPadThread(session.id) : false
   }
-  if (actionId === 'thread.open') return assignment.targetId ? selectWorkspaceSession(assignment.targetId) : false
+  if (actionId === 'thread.open') return assignment.targetId ? openPadThread(assignment.targetId) : false
   if (actionId === 'thread.send-prompt') {
     const session = selectedHardwareSession(assignment.targetId)
     if (!session || !assignment.prompt) return false
@@ -1373,8 +1391,6 @@ async function executeHardwareAssignment ({ assignment }) {
     return selectWorkspaceSession(sessionId)
   }
   if (actionId === 'goal.open') { showWorkspace(); sendToWindows('hardware-navigate', { view: 'goals', targetId: assignment.targetId }); return true }
-  if (actionId === 'workflow.open') { showWorkspace(); sendToWindows('hardware-navigate', { view: 'workflows', targetId: assignment.targetId }); return true }
-  if (actionId === 'workflow.run') return workflows?.startRun(assignment.targetId, { source: 'hardware' }) || false
   return false
 }
 
@@ -1406,6 +1422,19 @@ async function invokeHardwareAssignment (invocation) {
 }
 
 ipcMain.handle('focus', (_e, id) => queueFocus(id))
+ipcMain.handle('set-thread-standby', (_e, id, enabled) => store.setStandby(id, enabled))
+ipcMain.handle('show-thread-menu', (_e, id) => {
+  const session = store.list().find((candidate) => candidate.id === id)
+  if (!session) return false
+  const enabled = Boolean(session.standby)
+  const canEnable = !session.discovered && !session.history && session.state === STATE.IDLE
+  Menu.buildFromTemplate([{
+    label: enabled ? 'Remove stand by' : 'Put on stand by',
+    enabled: enabled || canEnable,
+    click: () => store.setStandby(id, !enabled)
+  }]).popup({ window: workspaceWin || win })
+  return true
+})
 ipcMain.handle('select-session', (_event, id) => {
   const session = store.list().find((candidate) => candidate.id === id)
   if (!session) {
@@ -1413,6 +1442,7 @@ ipcMain.handle('select-session', (_event, id) => {
     midiController?.select(null)
     return false
   }
+  store.acknowledge(id)
   lastFocusedSessionId = id
   midiController?.select(id)
   return true
@@ -1504,6 +1534,7 @@ store.on('change', () => pushState())
 store.on('change', () => pushCompanions())
 store.on('change', () => midiController?.render())
 store.on('task-cache', (records) => saveTaskCache(records))
+store.on('standby-cache', (keys) => savePrefs({ ...loadPrefs(), threadStandbyKeys: keys }))
 usage.on('change', (state) => {
   pushUsage()
   consumptionLedger?.observe(state)
@@ -1533,6 +1564,8 @@ app.whenReady().then(() => {
   if (prefs.ambientModeEnabled) ambientMode.enable()
   powerMonitor.on('resume', () => ambientMode?.reassert())
   store.hydrateTasks(loadTaskCache())
+  store.hydrateAliases(prefs.threadAliases)
+  store.hydrateStandby(prefs.threadStandbyKeys)
   if (app.dock) {
     const logoPath = app.isPackaged
       ? join(process.resourcesPath, 'ambientic-logo.png')
@@ -1543,23 +1576,17 @@ app.whenReady().then(() => {
   const loginItem = ensureLaunchAtLoginPreference()
   goals = createGoalsRepository({ file: join(app.getPath('userData'), 'goals.json') })
   goals.on('change', (snapshot) => sendToWindows('goals', snapshot))
-  career = createCareerOsRepository({ file: join(app.getPath('userData'), 'career-os.json') })
-  career.on('change', (snapshot) => sendToWindows('career-os', snapshot))
   try {
     contextStore = createContextStore({ file: join(app.getPath('userData'), 'ambientic-context.db') })
     contextEngine = createContextEngine({
       store: contextStore,
       goals,
-      career,
       consent: () => Boolean(loadPrefs().onboarding?.memoryConsent)
     })
     capabilityGateway = createCapabilityGateway({
       store: contextStore,
       contextEngine,
       goals,
-      career,
-      jobDiscovery: discoverCareerJobs,
-      workflows: () => workflows?.list(),
       socketPath: join(app.getPath('userData'), 'ambientic-gateway.sock'),
       requestApproval: (request) => workspace?.requestGatewayApproval(request) || false
     })
@@ -1571,29 +1598,25 @@ app.whenReady().then(() => {
   workspace = new WorkspaceService(store, () => connectors, {
     aliases: prefs.threadAliases,
     onAliasesChange: (threadAliases) => savePrefs({ ...loadPrefs(), threadAliases }),
+    grants: prefs.permissionGrants,
+    onGrantsChange: (permissionGrants) => savePrefs({ ...loadPrefs(), permissionGrants }),
+    approvalProfile: prefs.approvalProfile || 'auto',
+    onApprovalProfileChange: (approvalProfile) => savePrefs({ ...loadPrefs(), approvalProfile }),
     contextEngine,
     capabilityGateway,
     gatewayExecutable: process.execPath,
     gatewayShimPath: app.isPackaged ? join(process.resourcesPath, 'ambientic-mcp-shim.mjs') : join(app.getAppPath(), 'resources', 'ambientic-mcp-shim.mjs')
   })
+  try {
+    orchestration = new OrchestrationService({ file: join(app.getPath('userData'), 'orchestration.db'), workspace })
+    if (capabilityGateway) capabilityGateway.orchestration = orchestration
+  } catch (error) {
+    console.error(`[ambientic] orchestration unavailable; queue preserved: ${error.message}`)
+  }
   if (contextEngine) {
     memoryBootstrap = createMemoryBootstrapService({ workspace, contextEngine, contextStore, connectors: () => connectors })
     memoryBootstrap.on('change', (state) => sendToWindows('memory-bootstrap', state))
   }
-  workflows = createWorkflowsRepository({
-    file: join(app.getPath('userData'), 'workflows.json'),
-    connectors: () => connectors,
-    canStartWorkflow: (workflow) => workflow.packId !== CAREER_OS_PACK.id || workflow.packRole === 'profile' || career.list().profile.status === 'reviewed'
-      ? true
-      : { allowed: false, message: 'Review and approve your Career Profile before running other Career OS workflows.' },
-    executeAgentStep: async ({ provider, prompt, workflow }) => ({
-      sessionId: await workspace.create({ provider, prompt, gatewayScopes: workflow.packId === CAREER_OS_PACK.id ? CAREER_OS_GATEWAY_SCOPES : null })
-    })
-  })
-  workflows.on('change', (snapshot) => sendToWindows('workflows', snapshot))
-  const existingCareerSetup = workflows.packSetup(CAREER_OS_PACK.id)
-  if (existingCareerSetup) workflows.installPack(CAREER_OS_PACK, existingCareerSetup)
-  if (!career.list().configured && existingCareerSetup) career.configure(existingCareerSetup)
   hardwareProfiles = createHardwareProfileService({
     file: join(app.getPath('userData'), 'hardware-profiles.json'),
     invoke: invokeHardwareAssignment
@@ -1605,8 +1628,13 @@ app.whenReady().then(() => {
   handovers.on('change', (records) => sendToWindows('handovers', records))
   workspace.on('change', (snapshot) => {
     sendToWindows('thread', snapshot)
-    workflows?.handleThread(snapshot)
     scheduleWorkspaceThreads()
+  })
+  workspace.on('provider-limit', ({ provider, error, observedAt }) => {
+    if (provider === 'claude') usage.observeClaudeLimit(error, observedAt)
+  })
+  workspace.on('provider-usage', ({ provider, event, observedAt }) => {
+    if (provider === 'claude') usage.observeClaudeWindows(event, observedAt)
   })
   workspace.on('provider-auth', async (payload) => {
     if (payload.loginId && payload.loginId === pendingCodexLogin && ['connected', 'failed'].includes(payload.status)) pendingCodexLogin = ''
@@ -1625,7 +1653,8 @@ app.whenReady().then(() => {
     pushVoice()
   })
   midiController = createMidiController(store, {
-    onPadPress: selectWorkspaceSession,
+    onPadPress: openPadThread,
+    getSessions: (padCount) => recentThreadGrid(recentHardwareThreads, padCount, providerPadLayout().providerLayout),
     onAction: handleMidiAction,
     onControl: (control) => hardwareProfiles?.handleInput(control) || false,
     getFeedback: () => hardwareProfiles?.feedback() || null,
@@ -1650,7 +1679,7 @@ app.whenReady().then(() => {
   })
   midiController.start()
   pushVoice()
-  void refreshConnectors().then(() => workflows?.startScheduler())
+  void refreshConnectors()
   startServer(store, {
     // An isolated profile is a parallel developer smoke, not the provider-hook
     // endpoint. Give it an ephemeral loopback port so the installed app keeps
@@ -1692,4 +1721,4 @@ app.on('second-instance', () => {
 })
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); capabilityGateway?.stop(); contextStore?.close(); workflows?.stopScheduler(); claudeAuth?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); orchestration?.close(); workspace?.stop(); capabilityGateway?.stop(); contextStore?.close(); claudeAuth?.stop(); companions.stop(); usage.stop() })

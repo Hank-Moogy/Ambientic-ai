@@ -62,21 +62,21 @@ test('Codex receives one frozen capsule and the Ambientic MCP server on start', 
   }
 })
 
-test('provider sessions receive additional gateway scopes only when the caller supplies them', async () => {
+test('provider sessions receive a caller-supplied restricted gateway scope set', async () => {
   const value = setup('codex')
   try {
     const { mkdirSync } = await import('node:fs'); mkdirSync(value.project)
     let startParams
     value.service.codexClient = async () => ({ request: async (method, params) => {
-      if (method === 'thread/start') { startParams = params; return { thread: { id: 'career-workflow-thread' } } }
+      if (method === 'thread/start') { startParams = params; return { thread: { id: 'restricted-agent-thread' } } }
       return {}
     } })
     value.service.send = async () => null
-    await value.service.create({ provider: 'codex', cwd: value.project, prompt: 'Run Career OS.', gatewayScopes: ['context:read', 'career:read', 'career:write'] })
+    await value.service.create({ provider: 'codex', cwd: value.project, prompt: 'Run the restricted task.', gatewayScopes: ['context:read', 'goals:read'] })
     const token = startParams.config.mcp_servers.ambientic.env.AMBIENTIC_GATEWAY_TOKEN
     const listed = await value.gateway.handleRequest({ token, method: 'tools/list' })
-    assert.ok(listed.tools.some((tool) => tool.name === 'ambientic_career_read'))
-    assert.ok(listed.tools.some((tool) => tool.name === 'ambientic_career_update'))
+    assert.ok(listed.tools.some((tool) => tool.name === 'ambientic_context_get'))
+    assert.ok(listed.tools.some((tool) => tool.name === 'ambientic_goals'))
     assert.equal(listed.tools.some((tool) => tool.name === 'ambientic_remember'), false)
   } finally {
     value.store.close(); rmSync(value.root, { recursive: true, force: true })

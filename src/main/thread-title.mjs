@@ -71,6 +71,8 @@ function looksLikeMachineOutput (value) {
 export function stripPromptMachinery (value) {
   let text = String(value || '')
   text = text.replace(CONTEXT_BLOCK, ' ')
+  // Provider indexes can truncate a capsule before its closing tag.
+  text = text.replace(/<(?:ambientic|agentbase)-context\b[\s\S]*$/gi, ' ')
   // Nested wrappers need more than one pass; bound it so a pathological input
   // cannot spin here.
   for (let pass = 0; pass < 4; pass++) {

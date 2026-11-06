@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { access, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { canInspectProjectRoot } from './project-scope.mjs'
+import { canGrantToolRoot, canInspectProjectRoot, handoverProjectRoot } from './project-scope.mjs'
 
 const execFileAsync = promisify(execFile)
 export const HANDOVER_THRESHOLD = 85
@@ -24,7 +24,7 @@ async function readable (path) {
 }
 
 async function gitContext (cwd) {
-  if (!canInspectProjectRoot(cwd)) return { branch: '', recent: '', status: '', diff: '' }
+  if (!canGrantToolRoot(cwd)) return { branch: '', recent: '', status: '', diff: '' }
   const run = async (args) => clean((await execFileAsync('git', args, { cwd, timeout: 5000, maxBuffer: 512 * 1024 })).stdout, 2400)
   try {
     return {
@@ -138,23 +138,27 @@ export class HandoverService extends EventEmitter {
 
   async generate (sessionId, reason = 'manual') {
     const session = this.workspace.sessionFor(sessionId)
-    if (!session?.cwd || !canInspectProjectRoot(session.cwd)) {
-      throw new Error('Choose a specific project folder before preparing a handover. Ambientic will not inspect or write into your entire home folder.')
+    const handover = this.workspace.handoverContextFor?.(session) || {
+      root: handoverProjectRoot({ cwd: session?.cwd })
     }
+    if (!session || !handover.root) {
+      throw new Error(handover.reason || 'Link this thread to a specific Ambientic project before preparing a handover.')
+    }
+    const source = { ...session, cwd: handover.root, project: handover.projectName || session.project }
     const snapshot = await this.workspace.read(sessionId)
-    const readmePath = join(session.cwd, 'README.md')
+    const readmePath = join(source.cwd, 'README.md')
     const readme = await readFile(readmePath, 'utf8').catch(() => '')
-    const git = await gitContext(session.cwd)
+    const git = await gitContext(source.cwd)
     const risk = providerRisk(this.usage.getState(), session.agent)
     const generatedAt = Date.now()
-    const body = renderHandover({ session, snapshot, readme, git, risk, generatedAt })
-    const path = join(session.cwd, 'HANDOVER.md')
+    const body = renderHandover({ session: source, snapshot, readme, git, risk, generatedAt })
+    const path = join(source.cwd, 'HANDOVER.md')
     const temporary = `${path}.ambientic-${process.pid}.tmp`
     await writeFile(temporary, body, { mode: 0o600 })
     await rename(temporary, path)
     const record = {
-      id: session.id, sessionId: session.id, project: session.project || basename(session.cwd),
-      cwd: session.cwd, title: snapshot.title, sourceProvider: session.agent, path, generatedAt,
+      id: session.id, sessionId: session.id, project: source.project || basename(source.cwd),
+      cwd: source.cwd, title: snapshot.title, sourceProvider: session.agent, path, generatedAt,
       reason, usedPercent: risk.usedPercent
     }
     this.records.set(path, record)
@@ -164,11 +168,14 @@ export class HandoverService extends EventEmitter {
 
   async continueWith (sessionId, targetProvider) {
     const source = this.workspace.sessionFor(sessionId)
-    const record = this.records.get(join(source?.cwd || '', 'HANDOVER.md')) || await this.generate(sessionId, 'provider switch')
+    if (!source) throw new Error('This thread is no longer available.')
     if (source?.agent === targetProvider) throw new Error('Choose a different provider for the handover.')
+    // A manual switch always captures the latest transcript and working-tree
+    // state; an automatically prepared brief may predate the user's last turn.
+    const record = await this.generate(sessionId, 'provider switch')
     const prompt = `Take over this project from ${source?.agent || 'another provider'}. Read ${record.path}, inspect the working tree, and continue the Current objective / First action. Treat the handover and repository as the source of truth; do not ask for the prior chat or repeat the handover back to me.`
     const contextBinding = this.workspace.contextBindingFor?.(source) || {}
-    const targetSessionId = await this.workspace.create({ provider: targetProvider, cwd: source.cwd, prompt, contextBinding })
+    const targetSessionId = await this.workspace.create({ provider: targetProvider, cwd: record.cwd, prompt, contextBinding })
     return { ...record, targetProvider, targetSessionId }
   }
 

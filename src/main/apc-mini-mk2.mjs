@@ -42,8 +42,9 @@ function miniLedForSession (session) {
   if (!session) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.OFF }
   // Same meaning as the APC40 grid: orange is a question waiting for the person.
   if (session.awaitingApproval) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.ORANGE }
+  if (session.standby) return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.ORANGE }
   if (session.state === 'running') return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.GREEN }
-  if (session.state === 'attention' || session.state === 'waiting') {
+  if (session.state === 'attention' || (session.state === 'waiting' && session.unseen)) {
     return { channel: session.unseen ? APC_MINI_MK2.ANIMATION.BLINK_QUARTER : APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.RED }
   }
   return { channel: APC_MINI_MK2.ANIMATION.SOLID, color: APC_MINI_MK2.COLOR.BLUE }
@@ -68,6 +69,6 @@ export function miniRecordLedMessages (recording) {
 export function miniSelectedSessionForRecordColumn (sessions, selectedSessionId, column) {
   if (!Number.isInteger(column) || column < 0 || column > 7) return null
   const grid = miniGridSessions(sessions)
-  const index = grid.findIndex((session) => session.id === selectedSessionId)
+  const index = grid.findIndex((session) => session?.id === selectedSessionId)
   return index >= 0 && index % 8 === column ? grid[index] : null
 }

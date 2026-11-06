@@ -3,6 +3,34 @@ import assert from 'node:assert/strict'
 import { codexDesktopState, parseCodexDesktopRows } from '../src/main/codex-desktop.mjs'
 
 const event = (timestamp, type) => JSON.stringify({ timestamp, type: 'event_msg', payload: { type } })
+const said = (timestamp, type, message) => JSON.stringify({ timestamp, type: 'event_msg', payload: { type, message } })
+
+// The reported bug: Codex ends a turn by asking, the native app shows the
+// question, and Ambientic showed the thread as plain idle once the completion
+// stopped being recent.
+test('ordinary assistant questions do not manufacture pending input requests', () => {
+  const now = Date.parse('2026-07-22T13:20:00Z')
+  const asked = [
+    event('2026-07-22T12:00:00Z', 'task_started'),
+    said('2026-07-22T12:00:30Z', 'agent_message', 'Should I deploy to production, or stage it first?'),
+    event('2026-07-22T12:01:00Z', 'task_complete')
+  ].join('\n')
+  assert.equal(codexDesktopState(asked, now), 'idle')
+
+  // Answered: the question is spent and the thread goes quiet like any other.
+  assert.equal(codexDesktopState([
+    asked,
+    said('2026-07-22T12:02:00Z', 'user_message', 'Stage it.'),
+    event('2026-07-22T12:02:30Z', 'task_complete')
+  ].join('\n'), now), 'idle')
+
+  // A statement is not a question.
+  assert.equal(codexDesktopState([
+    event('2026-07-22T12:00:00Z', 'task_started'),
+    said('2026-07-22T12:00:30Z', 'agent_message', 'Deployed to production.'),
+    event('2026-07-22T12:01:00Z', 'task_complete')
+  ].join('\n'), now), 'idle')
+})
 
 test('maps Codex desktop rollout lifecycle to Ambientic states', () => {
   const now = Date.parse('2026-07-22T13:20:00Z')
@@ -48,4 +76,13 @@ test('creates stable Codex desktop session records and deep links', () => {
   assert.equal(session.project, 'Ambientic')
   assert.equal(session.task, 'Build Ambientic')
   assert.equal(session.deepLink, 'codex://threads/thread-123')
+})
+
+test('uses the human request when Codex indexes an Ambientic context envelope', () => {
+  const [session] = parseCodexDesktopRows(JSON.stringify([{
+    id: 'thread-context', cwd: '/Users/test/Ambientic',
+    title: '<ambientic-context mode="build"> Project context: truncated',
+    preview: '<ambientic-context mode="build">\nProject context: hidden\n</ambientic-context>\nFix duplicate thread names'
+  }]))
+  assert.equal(session.task, 'Fix duplicate thread names')
 })

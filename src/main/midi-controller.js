@@ -94,6 +94,7 @@ export function createMidiController (store, {
   onAction,
   onControl,
   getFeedback,
+  getSessions,
   onRecordStart,
   onRecordStop,
   onRecordUnavailable,
@@ -171,6 +172,13 @@ export function createMidiController (store, {
     notify()
   }
 
+  function hardwareSessions () {
+    if (getSessions) return getSessions(activeProfile?.padCount || 40)
+    return typeof store.hardwareList === 'function'
+      ? store.hardwareList(activeProfile?.padCount)
+      : store.list()
+  }
+
   function learnMessage (control) {
     if (!learningAction || !control) return false
     for (const [key, action] of Object.entries(mappings)) {
@@ -199,7 +207,7 @@ export function createMidiController (store, {
       const customFeedback = getFeedback?.()
       const gridMessages = customFeedback && !activeProfile.inputOnly
         ? customGridLedMessages(activeProfile, customFeedback)
-        : activeProfile.gridLedMessages(store.list())
+        : activeProfile.gridLedMessages(hardwareSessions())
       for (const message of gridMessages) output.sendMessage(message)
       for (const message of activeProfile.recordLedMessages(recording)) output.sendMessage(message)
     } catch (error) {
@@ -209,7 +217,6 @@ export function createMidiController (store, {
   }
 
   function connect () {
-    if (status.connected && activeProfile) return
     let candidateInput = null
     let candidateOutput = null
     try {
@@ -243,24 +250,27 @@ export function createMidiController (store, {
         match = { profile: genericProfile(inputName), inputIndex, outputIndex }
       }
       if (!match) {
-        candidateInput.closePort()
-        candidateOutput.closePort()
+        close()
         setStatus({ connected: false, device: '', error: '' })
         return
       }
 
+      const nextDevice = candidateInput.getPortName(match.inputIndex)
+      if (status.connected && activeProfile?.id === match.profile.id && status.device === nextDevice) return
+      close()
       activeProfile = match.profile
       mappings = normalizeMappings(mappingsByProfile[activeProfile.id])
       const device = candidateInput.getPortName(match.inputIndex)
       candidateInput.ignoreTypes(false, false, false)
       if (!inputListenerAttached) candidateInput.on('message', (_deltaTime, message) => {
+        if (!activeProfile) return
         const incomingControl = midiEventForMessage(message)
         if (incomingControl && onControl?.(incomingControl)) return
         const recordArm = activeProfile.recordForMessage(message)
         if (recordArm) {
           if (recordArm.pressed) {
             if (recording) return
-            const session = activeProfile.selectedSessionForRecordColumn(store.list(), selectedSessionId, recordArm.column)
+            const session = activeProfile.selectedSessionForRecordColumn(hardwareSessions(), selectedSessionId, recordArm.column)
             if (!session) {
               console.log(`[midi] Record Arm column ${recordArm.column + 1} ignored — select an agent in that column first`)
               Promise.resolve(onRecordUnavailable?.({ column: recordArm.column, selectedSessionId })).catch(() => {})
@@ -294,7 +304,7 @@ export function createMidiController (store, {
         }
         const pad = activeProfile.padForMessage(message)
         if (pad === null) return
-        const session = activeProfile.gridSessions(store.list())[pad]
+        const session = activeProfile.gridSessions(hardwareSessions())[pad]
         if (!session) {
           console.log(`[midi] pad ${pad + 1} pressed (unassigned)`)
         } else if (onPadPress) {
@@ -325,8 +335,8 @@ export function createMidiController (store, {
     // This corrects LED drift if the APC firmware or another MIDI client
     // clears a pad after Ambientic's initial state render.
     timer = setInterval(() => {
-      if (!status.connected || !activeProfile) connect()
-      else render()
+      connect()
+      render()
     }, RECONNECT_MS)
     if (timer.unref) timer.unref()
   }
@@ -404,6 +414,7 @@ export function createMidiController (store, {
       connect()
       return true
     },
+    refreshDevices: connect,
     render,
     setVoiceActive: (active) => {
       if (!active && recording) recording = null

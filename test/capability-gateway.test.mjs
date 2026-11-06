@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -8,6 +9,7 @@ import { createInterface } from 'node:readline'
 import { ContextStore } from '../src/main/context-store.mjs'
 import { ContextEngine } from '../src/main/context-engine.mjs'
 import { CapabilityGateway, callGatewaySocket } from '../src/main/capability-gateway.mjs'
+import { OrchestrationService } from '../src/main/orchestration-service.mjs'
 
 function fixture ({ start = true, requestApproval } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'ambientic-gateway-'))
@@ -22,30 +24,49 @@ function fixture ({ start = true, requestApproval } = {}) {
   const contextEngine = new ContextEngine({ store, goals })
   const prepared = contextEngine.prepareSession({ provider: 'codex', providerSessionId: 'thread-1', cwd: '/tmp/project', goalId: 'goal-1', taskId: 'task-1' })
   const approvals = []
-  const careerUpdates = []
-  const discoveryCalls = []
-  const career = {
-    list: () => ({ profile: { status: 'needs_review', headline: 'AI Product Leader' }, opportunities: [{ id: 'opportunity-1', company: 'Acme', roleTitle: 'Head of Product' }], dailyQueue: { items: [{ opportunityId: 'opportunity-1' }] } }),
-    updateProfile: (input) => { careerUpdates.push({ action: 'profile', input }); return { status: 'needs_review', ...input } },
-    upsertOpportunity: (input) => { careerUpdates.push({ action: 'upsert', input }); return { id: 'opportunity-1', ...input } },
-    updateOpportunity: (id, patch) => { careerUpdates.push({ action: 'status', id, patch }); return { id, ...patch } },
-    passOpportunity: (id, reason) => { careerUpdates.push({ action: 'pass', id, reason }); return { id, status: 'Archived' } },
-    addInterview: (id, input) => { careerUpdates.push({ action: 'interview', id, input }); return { id: 'interview-1', opportunityId: id } },
-    recordMarketScan: (input) => { careerUpdates.push({ action: 'market_scan', input }); return input }
-  }
   const gateway = new CapabilityGateway({
     store,
     contextEngine,
     goals,
-    career,
-    jobDiscovery: async (input) => { discoveryCalls.push(input); return { source: { id: input.source }, jobs: [{ company: 'Remote Co', roleTitle: 'Product Lead' }] } },
     socketPath: join(directory, 'gateway.sock'),
     requestApproval: requestApproval || (async (request) => { approvals.push(request); return true })
   })
   if (start) gateway.start()
   const session = gateway.issueSession(prepared.binding.id)
-  return { directory, store, contextEngine, gateway, session, approvals, careerUpdates, discoveryCalls }
+  return { directory, store, contextEngine, gateway, session, approvals }
 }
+
+test('orchestration uses the bound project, requires approval, and excludes Claude workers', async () => {
+  const value = fixture({ start: false })
+  try {
+    const calls = []
+    const project = value.store.upsertProject({ rootPath: value.directory, name: 'Orchestration fixture' })
+    const original = value.gateway.authenticate(value.session.token).binding
+    value.contextEngine.rebind(original.id, { projectId: project.id })
+    value.gateway.orchestration = { invoke: async (root, args) => { calls.push({ root, args }); return { status: 'queued' } } }
+    const binding = await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_context_get' })
+    const tools = await value.gateway.handleRequest({ token: value.session.token, method: 'tools/list' })
+    assert.ok(tools.tools.some((tool) => tool.name === 'ambientic_orchestration'))
+    await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_orchestration', arguments: { action: 'list' } })
+    assert.equal(value.approvals.length, 0)
+    await value.gateway.invoke({ token: value.session.token, tool: 'ambientic_orchestration', arguments: { action: 'enqueue', requestId: 'test' } })
+    assert.equal(value.approvals.length, 1)
+    assert.equal(calls[0].root, binding.project.rootPath)
+    assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_orchestration' && event.permission === 'write'))
+    const limited = value.gateway.issueSession(binding.id, { scopes: ['context:read'] })
+    await assert.rejects(value.gateway.invoke({ token: limited.token, tool: 'ambientic_orchestration', arguments: { action: 'run' } }), /not authorized/)
+    const worker = value.contextEngine.prepareSession({ provider: 'claude', providerSessionId: 'worker', cwd: '/tmp/project' })
+    const workerToken = value.gateway.issueSession(worker.binding.id)
+    await assert.rejects(value.gateway.invoke({ token: workerToken.token, tool: 'ambientic_orchestration', arguments: { action: 'run' } }), /Only a Codex/)
+    const workerTools = await value.gateway.handleRequest({ token: workerToken.token, method: 'tools/list' })
+    assert.equal(workerTools.tools.some((tool) => tool.name === 'ambientic_orchestration'), false)
+    value.gateway.requestApproval = async () => false
+    await assert.rejects(value.gateway.invoke({ token: value.session.token, tool: 'ambientic_orchestration', arguments: { action: 'run' } }), /rejected/)
+    assert.equal(calls.length, 2)
+  } finally {
+    value.gateway.stop(); value.store.close(); rmSync(value.directory, { recursive: true, force: true })
+  }
+})
 
 test('gateway tokens scope native tools and mutations are audited', async () => {
   const value = fixture({ start: false })
@@ -105,29 +126,14 @@ test('gateway enforces capability scopes and remembers only session-scoped appro
   }
 })
 
-test('Career OS tools are hidden from ordinary sessions and available to scoped pack sessions', async () => {
+test('connection dependencies report active capability sessions only', () => {
   const value = fixture({ start: false })
   try {
-    const ordinary = await value.gateway.handleRequest({ token: value.session.token, method: 'tools/list' })
-    assert.equal(ordinary.tools.some((tool) => tool.name.startsWith('ambientic_career_')), false)
-    assert.equal(ordinary.tools.some((tool) => tool.name === 'ambientic_jobs_discover'), false)
-    const careerSession = value.gateway.issueSession(value.session.bindingId, { scopes: ['career:read', 'career:discover', 'career:write'] })
-    const listed = await value.gateway.handleRequest({ token: careerSession.token, method: 'tools/list' })
-    assert.deepEqual(listed.tools.map((tool) => tool.name), ['ambientic_career_read', 'ambientic_jobs_discover', 'ambientic_career_update'])
-    const queue = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_read', arguments: { action: 'daily_queue' } })
-    assert.equal(queue.items[0].opportunityId, 'opportunity-1')
-    const profile = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_read', arguments: { action: 'profile' } })
-    assert.equal(profile.headline, 'AI Product Leader')
-    const built = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_update', arguments: { action: 'profile', profile: { headline: 'Product Executive' } } })
-    assert.equal(built.headline, 'Product Executive')
-    const created = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_career_update', arguments: { action: 'upsert', opportunity: { company: 'Acme', roleTitle: 'Head of Product' } } })
-    assert.equal(created.id, 'opportunity-1')
-    assert.equal(value.careerUpdates.length, 2)
-    const discovered = await value.gateway.invoke({ token: careerSession.token, tool: 'ambientic_jobs_discover', arguments: { action: 'discover', source: 'himalayas', query: 'product' } })
-    assert.equal(discovered.jobs[0].company, 'Remote Co')
-    assert.equal(value.discoveryCalls.length, 1)
-    assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_career_update' && event.permission === 'write'))
-    assert.ok(value.store.listAudit().some((event) => event.tool === 'ambientic_jobs_discover' && event.permission === 'read'))
+    value.store.upsertConnection({ id: 'tool-1', name: 'Local tool', transport: 'stdio' })
+    value.store.replaceCapabilities('tool-1', [{ name: 'documents.read', permission: 'read' }])
+    const [connection] = value.gateway.listConnections()
+    assert.equal(connection.capabilityCount, 1)
+    assert.deepEqual(connection.dependents, { sessions: 1 })
   } finally {
     value.gateway.stop()
     value.store.close()
@@ -179,8 +185,15 @@ socketTest('gateway Unix socket carries scoped native tool calls', async () => {
 
 socketTest('stdio MCP shim exposes the gateway tools without credentials in the protocol', async () => {
   const value = fixture()
+  const queue = new OrchestrationService({ file: join(value.directory, 'queue.db'), workspace: new EventEmitter() })
+  const project = value.store.upsertProject({ rootPath: value.directory, name: 'Fixture' })
+  value.contextEngine.rebind(value.gateway.authenticate(value.session.token).binding.id, { projectId: project.id })
+  value.gateway.orchestration = queue
+  const requestPath = join(value.directory, 'request.md')
+  writeFileSync(requestPath, '# Fixture\n- Request ID: transport-fixture\nNo production data.')
+  let child
   try {
-    const child = spawn(process.execPath, ['resources/ambientic-mcp-shim.mjs'], {
+    child = spawn(process.execPath, ['resources/ambientic-mcp-shim.mjs'], {
       cwd: process.cwd(),
       env: { ...process.env, AMBIENTIC_GATEWAY_SOCKET: value.session.socketPath, AMBIENTIC_GATEWAY_TOKEN: value.session.token },
       stdio: ['pipe', 'pipe', 'pipe']
@@ -200,8 +213,21 @@ socketTest('stdio MCP shim exposes the gateway tools without credentials in the 
     })
     assert.equal(responses.find((item) => item.id === 1).result.serverInfo.name, 'ambientic')
     assert.ok(responses.find((item) => item.id === 2).result.tools.length >= 6)
-    child.kill('SIGTERM')
+    assert.ok(responses.find((item) => item.id === 2).result.tools.some((tool) => tool.name === 'ambientic_orchestration'))
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'ambientic_orchestration', arguments: { action: 'enqueue', specialist: 'experiment-analyst', requestId: 'transport-fixture', revision: '1', requestPath } } })}\n`)
+    await new Promise((resolve, reject) => {
+      const poll = setInterval(() => {
+        if (responses.some((item) => item.id === 3)) { clearInterval(poll); clearTimeout(timeout); resolve() }
+      }, 10)
+      const timeout = setTimeout(() => { clearInterval(poll); reject(new Error('orchestration transport timed out')) }, 5000)
+    })
+    const response = responses.find((item) => item.id === 3).result
+    assert.equal(response.isError, false)
+    assert.equal(JSON.parse(response.content[0].text).status, 'queued')
+    assert.equal(queue.list(value.directory).jobs.length, 1)
   } finally {
+    child?.kill('SIGTERM')
+    queue.close()
     value.gateway.stop()
     value.store.close()
     rmSync(value.directory, { recursive: true, force: true })

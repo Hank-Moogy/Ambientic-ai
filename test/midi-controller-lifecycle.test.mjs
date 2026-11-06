@@ -90,3 +90,39 @@ test('custom APC templates replace stale session LEDs with assignment feedback',
   assert.ok(messages.some((message) => message.length === 3 && message[1] === 0 && message[2] === 0))
   controller.stop()
 })
+
+
+test('automatic mode switches from a keyboard to a hot-plugged APC and recovers on unplug', () => {
+  let ports = ['Keyboard']
+  let listener
+  const opened = []
+  class Input {
+    getPortCount () { return ports.length }
+    getPortName (i) { return ports[i] }
+    ignoreTypes () {}
+    on (_event, callback) { listener = callback }
+    openPort (i) { opened.push(ports[i]) }
+    closePort () {}
+  }
+  class Output extends Input { on () {} sendMessage () {} openPort () {} }
+  const selected = []
+  const controller = createMidiController({ list: () => [] }, {
+    midiModule: { Input, Output },
+    getSessions: () => [{ id: 'recent-history', history: true }, null],
+    onPadPress: (id) => selected.push(id)
+  })
+  try {
+    controller.start()
+    assert.equal(controller.getStatus().device, 'Keyboard')
+    ports.push('APC40 mkII')
+    controller.refreshDevices()
+    assert.equal(controller.getStatus().activeProfile, 'apc40-mkii')
+    listener(0, [0x90, 32, 127])
+    assert.deepEqual(selected, ['recent-history'])
+    controller.refreshDevices()
+    assert.deepEqual(opened, ['Keyboard', 'APC40 mkII'])
+    ports = ['Keyboard']
+    controller.refreshDevices()
+    assert.equal(controller.getStatus().activeProfile, 'generic-midi')
+  } finally { controller.stop() }
+})

@@ -1,17 +1,20 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
+  existsSync,
   mkdirSync,
+  renameSync,
+  rmSync,
   readFileSync,
   readdirSync,
   rmdirSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
-import { createConnection } from 'node:net'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { signAsync } from '@electron/osx-sign'
+import { installedAppPids as findInstalledAppPids } from './installed-app-pids.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const root = resolve(scriptDirectory, '..')
@@ -19,6 +22,7 @@ const manifestPath = join(root, 'resources', 'build-info.json')
 const lockPath = join(tmpdir(), 'ambientic-local-release.lock')
 const lockOwnerPath = join(lockPath, 'owner.json')
 const installedApp = '/Applications/Ambientic.app'
+const installedAppExecutable = join(installedApp, 'Contents', 'MacOS', 'Ambientic')
 
 function run (command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -93,27 +97,19 @@ function findPackagedApp (directory, depth = 0) {
   return ''
 }
 
-function waitForPort (port, attempts = 30) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    let remaining = attempts
-    const attempt = () => {
-      const socket = createConnection({ host: '127.0.0.1', port })
-      socket.setTimeout(500)
-      socket.once('connect', () => {
-        socket.destroy()
-        resolvePromise()
-      })
-      const retry = () => {
-        socket.destroy()
-        remaining -= 1
-        if (remaining <= 0) rejectPromise(new Error(`Ambientic did not become healthy on port ${port}.`))
-        else setTimeout(attempt, 500)
+async function waitForHealth (port, attempts = 30) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) })
+      const health = await response.json()
+      if (response.ok && health.ok === true && installedAppPids().length) {
+        console.log(`  /health: ${JSON.stringify(health)}`)
+        return
       }
-      socket.once('error', retry)
-      socket.once('timeout', retry)
-    }
-    attempt()
-  })
+    } catch {}
+    await sleep(500)
+  }
+  throw new Error(`Installed Ambientic did not return a healthy JSON response on port ${port}.`)
 }
 
 function sleep (milliseconds) {
@@ -121,14 +117,25 @@ function sleep (milliseconds) {
 }
 
 function installedAppPids () {
-  try {
-    return output('pgrep', ['-f', '^/Applications/Ambientic\\.app/Contents/MacOS/Ambientic$'])
-      .split(/\s+/)
-      .map(Number)
-      .filter((pid) => Number.isInteger(pid) && pid > 0)
-  } catch {
-    return []
+  return findInstalledAppPids(installedAppExecutable)
+}
+
+function parentPid (pid) {
+  try { return Number(output('ps', ['-o', 'ppid=', '-p', String(pid)])) || 0 } catch { return 0 }
+}
+
+// Ambientic is used to build Ambientic, so a release can be launched by an agent
+// running inside the very app the install is about to quit. Quitting it kills
+// the builder mid-copy, which is how a half-replaced bundle gets left behind.
+function launchedByInstalledApp () {
+  const appPids = new Set(installedAppPids())
+  if (!appPids.size) return false
+  let pid = process.pid
+  for (let hop = 0; hop < 40 && pid > 1; hop += 1) {
+    if (appPids.has(pid)) return true
+    pid = parentPid(pid)
   }
+  return false
 }
 
 async function waitForInstalledAppExit (attempts = 30) {
@@ -140,6 +147,13 @@ async function waitForInstalledAppExit (attempts = 30) {
 }
 
 async function stopInstalledApp () {
+  if (launchedByInstalledApp() && process.env.AMBIENTIC_ALLOW_SELF_RELEASE !== '1') {
+    throw new Error(
+      'This release was started from inside the running Ambientic app, and installing has to quit it — ' +
+      'which would kill this build partway through and leave a broken bundle. ' +
+      'Run it from a terminal instead, or set AMBIENTIC_ALLOW_SELF_RELEASE=1 if you have detached it.'
+    )
+  }
   try { execFileSync('osascript', ['-e', 'tell application "Ambientic" to quit']) } catch {}
   if (await waitForInstalledAppExit()) return
 
@@ -201,16 +215,20 @@ async function main () {
 
     const packagedApp = findPackagedApp(join(root, 'release'))
     if (!packagedApp) throw new Error('Packaging completed, but release/Ambientic.app was not found.')
+    const distribution = process.env.AMBIENTIC_DISTRIBUTION === '1'
+    if (distribution && !signingIdentity.startsWith('Developer ID Application:')) {
+      throw new Error('Distribution requires a Developer ID Application identity.')
+    }
     await signAsync({
       app: packagedApp,
       identity: signingIdentity,
-      type: 'development',
+      type: distribution ? 'distribution' : 'development',
       ignore: 'Versions/Current',
       // Secure timestamps and hardened runtime are distribution concerns. A
       // local Apple Development build keeps its stable team identity without
       // either, avoiding network-dependent timestamp failures on resources.
-      timestamp: 'none',
-      hardenedRuntime: false
+      timestamp: distribution ? undefined : 'none',
+      hardenedRuntime: distribution
     })
     run('codesign', ['--verify', '--deep', '--strict', packagedApp])
     const signature = outputWithStderr('codesign', ['-dv', '--verbose=4', packagedApp])
@@ -221,15 +239,34 @@ async function main () {
     const packagedInfo = JSON.parse(readFileSync(packagedManifest, 'utf8'))
     if (packagedInfo.commit !== commit) throw new Error('Packaged build metadata does not match the release commit.')
 
+    const staged = `${installedApp}.staged-${process.pid}`
+    const superseded = `${installedApp}.superseded-${process.pid}`
+    rmSync(staged, { recursive: true, force: true })
+    rmSync(superseded, { recursive: true, force: true })
+    run('ditto', [packagedApp, staged], { cwd: '/' })
+
     await stopInstalledApp()
-    run('ditto', [packagedApp, installedApp], { cwd: '/' })
+    try {
+      if (existsSync(installedApp)) renameSync(installedApp, superseded)
+      renameSync(staged, installedApp)
+    } catch (error) {
+      // Put the working app back rather than leaving nothing installed.
+      if (!existsSync(installedApp) && existsSync(superseded)) renameSync(superseded, installedApp)
+      throw error
+    }
+    rmSync(superseded, { recursive: true, force: true })
 
     const installedManifest = join(installedApp, 'Contents', 'Resources', 'build-info.json')
     const installedInfo = JSON.parse(readFileSync(installedManifest, 'utf8'))
     if (installedInfo.commit !== commit) throw new Error('Installed build metadata does not match the release commit.')
 
+    // The packaged app was verified before the copy; verify what actually landed
+    // in /Applications too. A bundle whose seal is broken still launches from a
+    // terminal but is not something to call healthy.
+    run('codesign', ['--verify', '--deep', '--strict', installedApp])
+
     run('open', [installedApp], { cwd: '/' })
-    await waitForPort(47600)
+    await waitForHealth(47600)
     console.log(`\n✓ Installed and healthy: ${basename(installedApp)} ${buildInfo.version} (${commit.slice(0, 8)})`)
     console.log(`  Built ${buildInfo.builtAt}`)
   } finally {

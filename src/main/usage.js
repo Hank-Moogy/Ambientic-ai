@@ -123,7 +123,7 @@ async function resolveCommand (name) {
   return resolved
 }
 
-export function resetTextToEpoch (text) {
+export function resetTextToEpoch (text, now = new Date()) {
   if (!text) return null
   const clean = text.replace(/\s*\([^)]*\)\s*$/, '').replace(/\sat\s/i, ' ').trim()
   // A time-only reset like "7:09pm" (Claude's 5-hour window) means the next
@@ -137,7 +137,6 @@ export function resetTextToEpoch (text) {
   const dated = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(clean)
   const timeOnly = !dated && clean.match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i)
   if (timeOnly) {
-    const now = new Date()
     let hour = Number(timeOnly[1]) % 12
     if (/pm/i.test(timeOnly[3])) hour += 12
     const reset = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, Number(timeOnly[2] || 0), 0, 0)
@@ -146,11 +145,126 @@ export function resetTextToEpoch (text) {
   }
   const compactTime = clean.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2})(?::(\d{2}))?(am|pm)$/i)
   const normalized = compactTime
-    ? `${compactTime[1]} ${compactTime[2]} ${new Date().getFullYear()} ${compactTime[3]}:${compactTime[4] || '00'} ${compactTime[5].toUpperCase()}`
+    ? `${compactTime[1]} ${compactTime[2]} ${now.getFullYear()} ${compactTime[3]}:${compactTime[4] || '00'} ${compactTime[5].toUpperCase()}`
     : clean
-  const withYear = /\b\d{4}\b/.test(normalized) ? normalized : `${normalized} ${new Date().getFullYear()}`
+  const withYear = /\b\d{4}\b/.test(normalized) ? normalized : `${normalized} ${now.getFullYear()}`
   const value = Date.parse(withYear)
   return Number.isFinite(value) ? Math.floor(value / 1000) : null
+}
+
+// Claude's managed-turn error is more authoritative than its interactive
+// `/usage` panel while a limit is active: current builds can omit the session
+// row from that panel at exactly 100%, even though the rejected turn carries
+// the refusal. Normalize that provider signal into the same window shape used
+// by the Overview.
+//
+// Only one of Claude Code's refusals names the limit and its reset time. The
+// rest describe the *consequence* of an exhausted window on an account whose
+// extra usage cannot cover the overflow -- "You're out of usage credits" and
+// "Your organization has disabled Claude subscription access for Claude Code"
+// are both what a used-up 5-hour window looks like when `overageStatus` is
+// rejected. Reading only the first wording left the Overview reporting a
+// comfortable 27% while every turn in the thread was being refused, and handed
+// the user a message about an administrator that had nothing to do with it.
+const CLAUDE_LIMIT_WITH_RESET = /(?:you(?:'|’)ve\s+)?hit your\s+(.{0,40}?limit)\s*[·\-]?\s*resets?\s+(.+)$/i
+// Refusals that prove a window is exhausted but name neither window nor reset.
+// They expire on the window's own duration; see `observationExpiry`.
+const CLAUDE_LIMIT_WITHOUT_RESET = [
+  /out of usage credits/i,
+  /usage limit reached/i,
+  /organization has disabled claude subscription access/i,
+  /manage usage credits at/i
+]
+
+// Whether a provider error is Claude refusing the turn on entitlement grounds.
+// Shared with the workspace so the thread and the Overview never disagree about
+// what just happened.
+export function isClaudeLimitRejection (value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text) return false
+  return CLAUDE_LIMIT_WITH_RESET.test(text) || CLAUDE_LIMIT_WITHOUT_RESET.some((pattern) => pattern.test(text))
+}
+
+export function parseClaudeLimitError (value, observedAt = Date.now()) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  const match = text.match(CLAUDE_LIMIT_WITH_RESET)
+  if (!match) {
+    // No window named. The 5-hour window is the one that runs out first and is
+    // the one the /usage panel drops at 100%, so attribute it there rather than
+    // claiming a weekly exhaustion we cannot evidence.
+    if (!CLAUDE_LIMIT_WITHOUT_RESET.some((pattern) => pattern.test(text))) return null
+    return {
+      id: 'five-hour',
+      label: 'Current session',
+      period: 'short',
+      durationMins: 300,
+      usedPercent: 100,
+      resetAt: null,
+      resetText: null
+    }
+  }
+  const kind = match[1].toLowerCase()
+  const resetText = match[2].trim()
+  const weekly = /week/.test(kind)
+  const session = /session|5\s*-?\s*hour|rate/.test(kind)
+  if (!weekly && !session) return null
+  return {
+    id: weekly ? 'seven-day' : 'five-hour',
+    label: weekly ? 'All models' : 'Current session',
+    period: weekly ? 'week' : 'short',
+    durationMins: weekly ? 7 * 24 * 60 : 300,
+    usedPercent: 100,
+    resetAt: resetTextToEpoch(resetText, new Date(observedAt)),
+    resetText
+  }
+}
+
+// The window shapes Claude reports for its unified subscription limits.
+const CLAUDE_UNIFIED_WINDOWS = {
+  five_hour: { id: 'five-hour', period: 'short', durationMins: 300 },
+  seven_day: { id: 'seven-day', period: 'week', durationMins: 7 * 24 * 60 }
+}
+
+// Every managed turn already tells us the account's real limits. Claude's
+// `--output-format stream-json` stream carries a `rate_limit_event` built from
+// the API's own anthropic-ratelimit-unified-* response headers, so it is exact,
+// costs no extra process launch or quota, and arrives on each turn rather than
+// once per scrape interval. It is also the only source that reliably carries
+// BOTH windows: the interactive `/usage` panel omits the 5-hour row at 100%,
+// which is what left the Overview showing a weekly-only figure. Treat this as
+// the primary source and the panel scrape as the fallback.
+export function parseClaudeRateLimitEvent (event, observedAt = Date.now()) {
+  const payload = typeof event === 'string' ? JSON.parse(event) : event
+  if (!payload || payload.type !== 'rate_limit_event') return null
+  const info = payload.rate_limit_info
+  const unified = info?.unifiedWindows
+  if (!unified || typeof unified !== 'object') return null
+  const windows = []
+  for (const [key, shape] of Object.entries(CLAUDE_UNIFIED_WINDOWS)) {
+    const value = unified[key]
+    if (!value || typeof value !== 'object') continue
+    // The header reports a 0..1 fraction; the Overview gauges read a percentage.
+    const usedPercent = clampPercent(Number(value.utilization) * 100)
+    if (usedPercent === null) continue
+    const resetAt = Number(value.resetsAt)
+    windows.push({
+      id: shape.id,
+      label: 'All models',
+      period: shape.period,
+      durationMins: shape.durationMins,
+      usedPercent,
+      resetAt: Number.isFinite(resetAt) ? resetAt : null,
+      resetText: null
+    })
+  }
+  if (!windows.length) return null
+  return {
+    plan: 'subscription',
+    source: 'claude-turn-stream',
+    status: String(info.status || ''),
+    observedAt,
+    windows
+  }
 }
 
 export function parseClaudeUsage (stdout) {
@@ -244,13 +358,11 @@ async function readClaudeUsageCache () {
   return parseClaudeStatusLineUsage(await readFile(claudeUsageCachePath(), 'utf8'))
 }
 
-// Persist a freshly scraped observation in the same document the status-line
-// bridge writes. Current Claude builds no longer supply rate_limits to the
-// status line, so without this the cache is never written and every passive
-// refresh falls back to "waiting for an observation" — the long-standing reason
-// Claude usage did not display. Written atomically; failures are non-fatal.
-async function writeClaudeUsageCache (plan, windows) {
-  const file = claudeUsageCachePath()
+// Persist a freshly observed reading so passive refreshes — and the next app
+// launch — keep showing real numbers without launching Claude's /usage panel.
+// The destination is injectable so tests never write over the real observation
+// in the user's home directory. Written atomically; failures are non-fatal.
+async function writeClaudeUsageCache (plan, windows, file = claudeUsageCachePath()) {
   const document = {
     version: 1,
     provider: 'claude',
@@ -643,12 +755,29 @@ async function collectKimi () {
   return parseKimiUsage(await response.json())
 }
 
+// When a limit observation stops being evidence. Claude reports the reset time
+// on most rejections, but not all of them: "resets in 42 minutes" and other
+// relative phrasings leave `resetAt` null. Treating a null reset as "never
+// expires" pinned the provider at 100% for the life of the process, so the
+// Overview and the in-thread handover banner kept announcing a limit the
+// account was no longer under. A window cannot outlive its own duration, so
+// fall back to that bound measured from when the rejection was observed.
+function observationExpiry (item) {
+  const resetAt = Number(item?.window?.resetAt)
+  if (Number.isFinite(resetAt) && resetAt > 0) return resetAt * 1000
+  const durationMins = Number(item?.window?.durationMins)
+  const observedAt = Number(item?.observedAt) || 0
+  return observedAt + (Number.isFinite(durationMins) && durationMins > 0 ? durationMins : 300) * 60_000
+}
+
 export class UsageService extends EventEmitter {
-  constructor ({ collectors } = {}) {
+  constructor ({ collectors, cachePath } = {}) {
     super()
     this.state = initialState()
     this.timer = null
     this.inFlight = null
+    this.limitObservations = new Map()
+    this.cachePath = cachePath || claudeUsageCachePath()
     this.collectors = collectors || { claude: collectClaude, codex: collectCodex, kimi: collectKimi }
   }
 
@@ -680,11 +809,72 @@ export class UsageService extends EventEmitter {
   }
 
   applyProvider (name, provider) {
+    const now = Date.now()
+    for (const [key, item] of this.limitObservations) {
+      if (observationExpiry(item) <= now) this.limitObservations.delete(key)
+    }
+    const observed = [...this.limitObservations.values()].filter((item) => item.provider === name)
+    if (observed.length) {
+      const windows = [...(provider.windows || [])]
+      for (const item of observed) {
+        const index = windows.findIndex((window) => window.id === item.window.id)
+        if (index >= 0) windows[index] = item.window
+        else windows.push(item.window)
+      }
+      provider = { ...provider, windows }
+    }
     this.state = {
       ...this.state,
       providers: { ...this.state.providers, [name]: provider }
     }
     this.emitState()
+  }
+
+  observeClaudeLimit (value, observedAt = Date.now()) {
+    const window = parseClaudeLimitError(value, observedAt)
+    if (!window) return false
+    this.limitObservations.set(`claude:${window.id}`, { provider: 'claude', observedAt, window })
+    const previous = this.state.providers.claude || blankProvider()
+    this.state = { ...this.state, updatedAt: observedAt }
+    this.applyProvider('claude', {
+      ...previous,
+      status: 'ok',
+      error: null,
+      source: 'claude-turn-limit',
+      quotaStatus: 'CLAUDE_RATE_LIMITED',
+      // Not every refusal names a reset time; say what is known rather than
+      // rendering "resets null" at the user.
+      quotaError: `Claude ${window.period === 'week' ? 'weekly' : 'session'} limit reached${window.resetText ? ` · resets ${window.resetText}` : ''}`
+    })
+    return true
+  }
+
+  // Record the exact windows a managed turn just reported. These readings are
+  // live rather than sticky: a later turn's numbers replace an earlier turn's,
+  // and a successful reading clears a previous rejection, because the account is
+  // demonstrably no longer limited once a turn goes through.
+  observeClaudeWindows (event, observedAt = Date.now()) {
+    let reading = null
+    try { reading = parseClaudeRateLimitEvent(event, observedAt) } catch { return false }
+    if (!reading) return false
+    for (const window of reading.windows) {
+      this.limitObservations.set(`claude:${window.id}`, { provider: 'claude', observedAt, window })
+    }
+    const previous = this.state.providers.claude || blankProvider()
+    const allowed = reading.status !== 'rejected'
+    this.state = { ...this.state, updatedAt: observedAt }
+    this.applyProvider('claude', {
+      ...previous,
+      status: 'ok',
+      error: null,
+      plan: previous.plan || reading.plan,
+      source: reading.source,
+      ...(allowed ? { quotaStatus: null, quotaError: null } : {})
+    })
+    // Persist so a restart, and every passive refresh, keeps showing these
+    // numbers without launching Claude's /usage panel at all.
+    writeClaudeUsageCache(reading.plan, reading.windows, this.cachePath).catch(() => {})
+    return true
   }
 
   async doRefresh (force = false) {

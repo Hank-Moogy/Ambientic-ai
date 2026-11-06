@@ -2,7 +2,6 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import Workspace from './Workspace.jsx'
-import { WorkflowBuilder } from './WorkflowBuilder.jsx'
 import { ContextPreview } from './ContextPreview.jsx'
 import { HardwareWorkspace } from './HardwareWorkspace.jsx'
 import './styles.css'
@@ -29,7 +28,7 @@ class RendererRecoveryBoundary extends React.Component {
           <span>◇</span>
           <small>Workspace recovery</small>
           <h1>Ambientic hit a rendering problem.</h1>
-          <p>Your local agents and workflow draft are still stored. Reload the interface to return to a clean Overview instead of staying on a black screen.</p>
+          <p>Your local agents and private data are still stored. Reload the interface to return to a clean Overview instead of staying on a black screen.</p>
           <button type="button" onClick={() => window.location.reload()}>Reload workspace</button>
           <details><summary>Technical detail</summary><code>{this.state.error?.message || 'Unknown renderer error'}</code></details>
         </div>
@@ -39,7 +38,6 @@ class RendererRecoveryBoundary extends React.Component {
 }
 
 const surface = new URLSearchParams(window.location.search).get('surface')
-const developmentWorkflowPreview = import.meta.env.DEV && surface === 'workflow-preview'
 const developmentContextPreview = import.meta.env.DEV && surface === 'context-preview'
 const developmentHardwarePreview = import.meta.env.DEV && surface === 'hardware-preview'
 const hardwarePreviewSnapshot = {
@@ -52,7 +50,7 @@ const hardwarePreviewSnapshot = {
   actions: [
     { id: 'hardware.view.open', label: 'Open view', category: 'navigation', target: 'view', permission: 'none', feedback: 'violet' },
     { id: 'thread.open', label: 'Open thread', category: 'threads', target: 'thread', permission: 'none', feedback: 'target-state' },
-    { id: 'workflow.run', label: 'Run workflow', category: 'workflows', target: 'workflow', permission: 'confirm', feedback: 'green' },
+    { id: 'goal.open', label: 'Open goal', category: 'goals', target: 'goal', permission: 'none', feedback: 'green' },
     { id: 'provider.start-thread', label: 'Start provider task', category: 'providers', target: 'provider', permission: 'confirm', feedback: 'cyan', inputs: ['prompt'] },
     { id: 'ambientic.overview', label: 'Open Overview', category: 'ambientic', target: 'none', permission: 'none', feedback: 'blue' }
   ],
@@ -61,7 +59,7 @@ const hardwarePreviewSnapshot = {
     id: 'preview-deck', name: 'Studio command deck', description: 'Build, review, and guide your agent field from one calm instrument.', rows: 4, columns: 6, rootViewId: 'home', bindings: { 'note:0:36': 'pad-1-1', 'key:Meta+KeyR': 'pad-1-3' },
     views: [{ id: 'home', name: 'Command', assignments: {
       'pad-1-1': { actionId: 'thread.open', label: 'Current build', targetLabel: 'Ambientic hardware mapping', feedback: 'blue' },
-      'pad-1-2': { actionId: 'workflow.run', label: 'Ship check', targetLabel: 'Build → test → review', feedback: 'green' },
+      'pad-1-2': { actionId: 'goal.open', label: 'Ship check', targetId: 'goal-preview', targetLabel: 'Ship Ambientic', feedback: 'green' },
       'pad-1-3': { actionId: 'provider.start-thread', label: 'New Codex task', targetLabel: 'Codex', feedback: 'cyan' },
       'pad-2-1': { actionId: 'hardware.view.open', label: 'Review deck', targetLabel: 'Review', feedback: 'violet' },
       'pad-3-5': { actionId: 'ambientic.overview', label: 'Overview', feedback: 'blue' }
@@ -75,9 +73,7 @@ createRoot(document.getElementById('root')).render(
       : developmentContextPreview
           ? <ContextPreview />
       : developmentHardwarePreview
-          ? <HardwareWorkspace snapshot={hardwarePreviewSnapshot} midi={{ connected: true, model: 'Akai APC40 MKII', device: 'APC40 mkII', gridLabel: '5×8', activeProfile: 'apc40-mkii', padCount: 40 }} sessions={[]} goalsSnapshot={{ goals: [] }} workflowSnapshot={{ workflows: [] }} connectors={[{ id: 'codex', label: 'Codex' }, { id: 'claude', label: 'Claude Code' }]} onOpenThread={() => {}} />
-      : developmentWorkflowPreview
-          ? <main className="workflow-preview-shell"><WorkflowBuilder /></main>
+          ? <HardwareWorkspace snapshot={hardwarePreviewSnapshot} midi={{ connected: true, model: 'Akai APC40 MKII', device: 'APC40 mkII', gridLabel: '5×8', activeProfile: 'apc40-mkii', padCount: 40 }} sessions={[]} goalsSnapshot={{ goals: [{ id: 'goal-preview', title: 'Ship Ambientic' }] }} connectors={[{ id: 'codex', label: 'Codex' }, { id: 'claude', label: 'Claude Code' }]} onOpenThread={() => {}} />
           : <Workspace />}
   </RendererRecoveryBoundary>
 )

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canGrantToolRoot, discoveryToolRoots, canInspectProjectRoot, isBroadProjectRoot, projectLaunchAccess, protectedHomeChild } from '../src/main/project-scope.mjs'
+import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canGrantToolRoot, discoveryToolRoots, canInspectProjectRoot, handoverProjectRoot, isBroadProjectRoot, projectLaunchAccess, protectedHomeChild } from '../src/main/project-scope.mjs'
 
 const home = '/Users/person'
 
@@ -48,6 +48,12 @@ test('grants tool roots for attachments that sit outside the project', () => {
   ], home)
   // The in-project attachment is already reachable and must not widen the grant.
   assert.deepEqual(roots, ['/Users/person/projects/memoli', '/Users/person/notes'])
+})
+
+test('handoff prefers a canonical project binding and accepts an explicitly selected protected project', () => {
+  assert.equal(handoverProjectRoot({ cwd: '/Users/person', boundRoot: '/Users/person/projects/ambientic' }, home), '/Users/person/projects/ambientic')
+  assert.equal(handoverProjectRoot({ cwd: '/Users/person/Documents/coding/ambientic' }, home), '/Users/person/Documents/coding/ambientic')
+  assert.equal(handoverProjectRoot({ cwd: '/Users/person', boundRoot: '/Users/person/Documents' }, home), '')
 })
 
 test('never widens a turn to the home folder or a whole protected collection', () => {

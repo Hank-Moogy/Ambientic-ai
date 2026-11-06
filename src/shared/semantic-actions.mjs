@@ -14,8 +14,6 @@ export const SEMANTIC_ACTIONS = [
   { id: 'thread.deny-pending', label: 'Deny pending request', category: 'turns', target: 'thread', permission: 'confirm', feedback: 'red' },
   { id: 'provider.start-thread', label: 'Start provider task', category: 'providers', target: 'provider', permission: 'confirm', feedback: 'cyan', inputs: ['prompt'] },
   { id: 'goal.open', label: 'Open goal', category: 'goals', target: 'goal', permission: 'none', feedback: 'cyan' },
-  { id: 'workflow.open', label: 'Open workflow', category: 'workflows', target: 'workflow', permission: 'none', feedback: 'cyan' },
-  { id: 'workflow.run', label: 'Run workflow', category: 'workflows', target: 'workflow', permission: 'confirm', feedback: 'green' },
   { id: 'skill.start-thread', label: 'Start task with skill', category: 'skills', target: 'skill', permission: 'confirm', feedback: 'cyan', inputs: ['provider', 'prompt'] },
   { id: 'ambientic.overview', label: 'Open Overview', category: 'ambientic', target: 'none', permission: 'none', feedback: 'blue' },
   { id: 'ambientic.hardware', label: 'Open Hardware', category: 'ambientic', target: 'none', permission: 'none', feedback: 'violet' },

@@ -9,23 +9,6 @@ contextBridge.exposeInMainWorld('controller', {
   updateGoal: (goalId, patch) => ipcRenderer.invoke('update-goal', goalId, patch),
   createGoalTask: (goalId, input) => ipcRenderer.invoke('create-goal-task', goalId, input),
   updateGoalTask: (taskId, patch) => ipcRenderer.invoke('update-goal-task', taskId, patch),
-  getWorkflows: () => ipcRenderer.invoke('get-workflows'),
-  chooseCareerProfileFile: (kind) => ipcRenderer.invoke('choose-career-profile-file', kind),
-  installCareerOs: (setup) => ipcRenderer.invoke('install-career-os', setup),
-  getCareerOs: () => ipcRenderer.invoke('get-career-os'),
-  careerUpdateProfile: (profile) => ipcRenderer.invoke('career-update-profile', profile),
-  careerReviewProfile: () => ipcRenderer.invoke('career-review-profile'),
-  careerUpdatePreferences: (preferences) => ipcRenderer.invoke('career-update-preferences', preferences),
-  careerUpdateOpportunity: (opportunityId, patch) => ipcRenderer.invoke('career-update-opportunity', opportunityId, patch),
-  careerPassOpportunity: (opportunityId, reason, note = '') => ipcRenderer.invoke('career-pass-opportunity', opportunityId, reason, note),
-  createWorkflow: (input) => ipcRenderer.invoke('create-workflow', input),
-  updateWorkflow: (workflowId, input) => ipcRenderer.invoke('update-workflow', workflowId, input),
-  duplicateWorkflow: (workflowId) => ipcRenderer.invoke('duplicate-workflow', workflowId),
-  deleteWorkflow: (workflowId) => ipcRenderer.invoke('delete-workflow', workflowId),
-  setWorkflowEnabled: (workflowId, enabled) => ipcRenderer.invoke('set-workflow-enabled', workflowId, enabled),
-  runWorkflow: (workflowId) => ipcRenderer.invoke('run-workflow', workflowId),
-  approveWorkflowRun: (runId, allow) => ipcRenderer.invoke('approve-workflow-run', runId, allow),
-  cancelWorkflowRun: (runId) => ipcRenderer.invoke('cancel-workflow-run', runId),
   getHardwareProfiles: () => ipcRenderer.invoke('get-hardware-profiles'),
   hardwareCreateTemplate: (input) => ipcRenderer.invoke('hardware-create-template', input),
   hardwareUpdateTemplate: (templateId, patch) => ipcRenderer.invoke('hardware-update-template', templateId, patch),
@@ -81,7 +64,12 @@ contextBridge.exposeInMainWorld('controller', {
   sendThreadPrompt: (id, text, options = {}) => ipcRenderer.invoke('send-thread-prompt', id, text, options),
   interruptThread: (id) => ipcRenderer.invoke('interrupt-thread', id),
   createManagedThread: (options) => ipcRenderer.invoke('create-managed-thread', options),
-  resolveApproval: (id, allow, remember = false) => ipcRenderer.invoke('resolve-approval', id, allow, remember),
+  // `remember` is 'once' | 'session' | 'always' — the button the user pressed.
+  resolveApproval: (id, allow, remember = 'once') => ipcRenderer.invoke('resolve-approval', id, allow, remember),
+  listPermissionGrants: () => ipcRenderer.invoke('list-permission-grants'),
+  getApprovalProfile: () => ipcRenderer.invoke('get-approval-profile'),
+  setApprovalProfile: (profile) => ipcRenderer.invoke('set-approval-profile', profile),
+  revokePermissionGrant: (grantId) => ipcRenderer.invoke('revoke-permission-grant', grantId),
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   showController: () => ipcRenderer.invoke('show-controller'),
@@ -89,6 +77,9 @@ contextBridge.exposeInMainWorld('controller', {
   showWorkspace: (id) => ipcRenderer.invoke('show-workspace', id),
   openArtifact: (id, path) => ipcRenderer.invoke('open-artifact', id, path),
   presentPreview: (id) => ipcRenderer.invoke('present-preview', id),
+  openPadThread: (id) => ipcRenderer.invoke('open-pad-thread', id),
+  midiSetPadTarget: (target) => ipcRenderer.invoke('midi-set-pad-target', target),
+  midiSetProviderColumns: (widths) => ipcRenderer.invoke('midi-set-provider-columns', widths),
   getMidi: () => ipcRenderer.invoke('get-midi'),
   getVoice: () => ipcRenderer.invoke('get-voice'),
   toggleVoice: () => ipcRenderer.invoke('toggle-voice'),
@@ -100,6 +91,8 @@ contextBridge.exposeInMainWorld('controller', {
   midiResetMappings: () => ipcRenderer.invoke('midi-reset-mappings'),
   refreshUsage: () => ipcRenderer.invoke('refresh-usage'),
   focus: (id) => ipcRenderer.invoke('focus', id),
+  setThreadStandby: (id, enabled) => ipcRenderer.invoke('set-thread-standby', id, enabled),
+  showThreadMenu: (id) => ipcRenderer.invoke('show-thread-menu', id),
   selectSession: (id) => ipcRenderer.invoke('select-session', id),
   capturePreview: (id) => ipcRenderer.invoke('capture-preview', id),
   showDisplayMenu: () => ipcRenderer.invoke('show-display-menu'),
@@ -124,16 +117,6 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('goals', handler)
     return () => ipcRenderer.removeListener('goals', handler)
-  },
-  onWorkflows: (cb) => {
-    const handler = (_e, payload) => cb(payload)
-    ipcRenderer.on('workflows', handler)
-    return () => ipcRenderer.removeListener('workflows', handler)
-  },
-  onCareerOs: (cb) => {
-    const handler = (_e, payload) => cb(payload)
-    ipcRenderer.on('career-os', handler)
-    return () => ipcRenderer.removeListener('career-os', handler)
   },
   onHardwareProfiles: (cb) => {
     const handler = (_e, payload) => cb(payload)
@@ -189,6 +172,16 @@ contextBridge.exposeInMainWorld('controller', {
     const handler = (_e, payload) => cb(payload)
     ipcRenderer.on('provider-auth', handler)
     return () => ipcRenderer.removeListener('provider-auth', handler)
+  },
+  onPermissionGrants: (cb) => {
+    const handler = (_e, payload) => cb(payload)
+    ipcRenderer.on('permission-grants', handler)
+    return () => ipcRenderer.removeListener('permission-grants', handler)
+  },
+  onApprovalProfile: (cb) => {
+    const handler = (_e, profile) => cb(profile)
+    ipcRenderer.on('approval-profile', handler)
+    return () => ipcRenderer.removeListener('approval-profile', handler)
   },
   onMemoryBootstrap: (cb) => {
     const handler = (_e, payload) => cb(payload)

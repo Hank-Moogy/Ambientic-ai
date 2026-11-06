@@ -143,7 +143,9 @@ export async function connectorState () {
   return Promise.all(AGENTS.map(async (agent) => {
     const path = await executablePath(agent)
     const configured = hookConfigured(agent)
-    const auth = await authStatus(agent, path)
+    // `login status` and `--version` are independent probes of the same binary;
+    // running them together halves the wall clock the Overview waits on.
+    const [auth, version] = await Promise.all([authStatus(agent, path), versionFor(path)])
     return {
       id: agent.id,
       label: agent.label,
@@ -154,8 +156,28 @@ export async function connectorState () {
       taskCapable: !agent.accountOnly,
       ...auth,
       path,
-      version: await versionFor(path)
+      version
     }
+  }))
+}
+
+// The shape the Overview can render before any provider CLI has been spawned.
+// Every surface that draws a connector already understands `checking`, so the
+// pads can appear immediately and settle when the real probe lands.
+export function pendingConnectorState () {
+  return AGENTS.map((agent) => ({
+    id: agent.id,
+    label: agent.label,
+    checking: true,
+    installed: false,
+    configured: false,
+    ready: false,
+    taskCapable: !agent.accountOnly,
+    authenticated: false,
+    authMessage: '',
+    accountLabel: '',
+    path: '',
+    version: ''
   }))
 }
 

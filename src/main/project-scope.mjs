@@ -62,6 +62,19 @@ export function canGrantToolRoot (path, home = homedir()) {
   return !(child && target === join(resolve(home), child))
 }
 
+// A handoff is an explicit user action, so a real project inside Documents or
+// another protected collection is eligible in the same way as a folder the
+// user attaches by hand. Prefer the canonical Ambientic project binding when
+// the provider session itself was launched from an overly broad directory.
+export function handoverProjectRoot ({ cwd = '', boundRoot = '' } = {}, home = homedir()) {
+  for (const candidate of [boundRoot, cwd]) {
+    const path = String(candidate || '').trim()
+    if (!isAbsolute(path) || !canGrantToolRoot(path, home)) continue
+    return resolve(path)
+  }
+  return ''
+}
+
 function reachableFrom (base, root) {
   return Boolean(base) && (root === base || root.startsWith(`${base}${sep}`))
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
+import { visibleUserText } from '../shared/conversation-messages.mjs'
 import { stripAmbienticContext } from './context-assembler.mjs'
 
 // Claude Code's JSONL transcript is a machine log, not a conversation. Roughly
@@ -161,9 +162,8 @@ function trimOutput (value) {
 // True when this `user` row is Claude talking to itself rather than the person.
 export function isSyntheticUserRow (row) {
   if (!row || row.type !== 'user') return false
-  if (row.isMeta || row.isSidechain || row.isCompactSummary) return true
+  if (row.isMeta || row.isSidechain || row.isCompactSummary || row.isVisibleInTranscriptOnly) return true
   const content = row.message?.content
-  if (Array.isArray(content) && content.some((part) => part?.type === 'tool_result')) return true
   return !conversationalText(content)
 }
 
@@ -172,7 +172,7 @@ export function isSyntheticUserRow (row) {
 export function conversationalText (content) {
   let text = stripAmbienticContext(textContent(content))
   for (const pattern of MACHINE_BLOCKS) text = text.replace(pattern, '')
-  return text.trim()
+  return visibleUserText(text)
 }
 
 function entry (role, text, extra = {}) {

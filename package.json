@@ -1,10 +1,11 @@
 {
   "name": "ambientic",
-  "version": "0.8.1",
-  "description": "Local-first APC40 MKII control surface for Claude Code, Codex, and Hermes agent sessions.",
+  "version": "0.8.2",
+  "description": "The hub for all your agents and all your sources of intelligence.",
   "author": "findmecreators",
   "main": "out/main/index.js",
   "scripts": {
+    "test:orchestration": "node scripts/ensure-sqlite-node.mjs && node --test test/orchestration.test.mjs test/capability-gateway.test.mjs",
     "test": "node scripts/ensure-sqlite-node.mjs && node --test test/*.mjs",
     "test:local-release": "node --test --test-skip-pattern='keeps Claude OAuth callback alive until live auth verification succeeds' test/*.mjs",
     "dev": "electron-vite dev",

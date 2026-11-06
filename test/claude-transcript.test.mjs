@@ -97,3 +97,13 @@ test('parses JSONL and ignores unparseable lines', () => {
   ].join('\n')
   assert.deepEqual(parseClaudeTranscript(contents).map((entry) => entry.text), ['hello', 'hi'])
 })
+
+test('mixed tool results retain real replies and structured question answers', () => {
+  const messages = claudeTranscriptMessages([
+    toolUse('mixed', 'Read', { file_path: '/tmp/example' }),
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'mixed', content: 'machine output' }, { type: 'text', text: 'My actual reply' }] } },
+    { type: 'user', message: { content: '<send_user_message_question_reply>[{"answer":"Keep both"}]</send_user_message_question_reply>' } }
+  ])
+  assert.deepEqual(messages.filter((entry) => entry.role === 'user').map((entry) => entry.text), ['My actual reply', 'Keep both'])
+  assert.equal(messages[0].text, 'machine output')
+})

@@ -1,3 +1,4 @@
+import { PAD_MOTION, PAD_TONE, padLightForSession } from '../shared/pad-light.mjs'
 // Akai APC40 mkII clip-grid protocol. The 5x8 RGB grid is exposed as notes
 // 0x00-0x27; the MIDI channel selects the LED animation and velocity selects
 // the colour. See APC40 Mk2 Communications Protocol v1.2.
@@ -72,6 +73,9 @@ export function ledForSession (session) {
   if (session.awaitingApproval) {
     return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.ORANGE }
   }
+  if (session.standby) {
+    return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.ORANGE }
+  }
 
   switch (session.state) {
     case 'running':
@@ -82,10 +86,9 @@ export function ledForSession (session) {
         color: APC40.COLOR.RED
       }
     case 'waiting':
-      return {
-        channel: session.unseen ? APC40.ANIMATION.BLINK_QUARTER : APC40.ANIMATION.SOLID,
-        color: APC40.COLOR.RED
-      }
+      return session.unseen
+        ? { channel: APC40.ANIMATION.BLINK_QUARTER, color: APC40.COLOR.RED }
+        : { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.BLUE }
     case 'idle':
     default:
       return { channel: APC40.ANIMATION.SOLID, color: APC40.COLOR.BLUE }
@@ -99,7 +102,7 @@ export function gridSessions (sessions = []) {
 export function selectedSessionForRecordColumn (sessions, selectedSessionId, column) {
   if (!Number.isInteger(column) || column < 0 || column > 7) return null
   const grid = gridSessions(sessions)
-  const index = grid.findIndex((session) => session.id === selectedSessionId)
+  const index = grid.findIndex((session) => session?.id === selectedSessionId)
   return index >= 0 && index % 8 === column ? grid[index] : null
 }
 

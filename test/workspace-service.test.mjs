@@ -1,9 +1,54 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { WorkspaceService, createPrivateTaskWorkspace, describeApprovalRequest } from '../src/main/workspace-service.mjs'
+import { WorkspaceService, claudeApprovalScopes, claudePermissionsForScope, codexApprovalScopes, createPrivateTaskWorkspace, describeApprovalRequest, claudeMessages } from '../src/main/workspace-service.mjs'
+
+test('late Claude output and exit cannot complete a newer turn in the same session', () => {
+  const children = []
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => {
+      const child = new EventEmitter()
+      child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+      children.push(child)
+      return child
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  const finished = []; const events = []
+  service.finish = (id) => finished.push(id)
+  service.claudeEvent = (...args) => events.push(args)
+  service.runClaude(session, 'First', {})
+  service.activeTurns.delete(session.id)
+  service.runClaude(session, 'Second', {})
+  children[0].stdout.emit('data', '{"type":"result"}\n')
+  children[0].emit('exit', 0)
+  assert.equal(events.length, 0)
+  assert.equal(finished.length, 0)
+  assert.equal(service.activeTurns.get(session.id), children[1])
+  children[1].emit('exit', 0)
+  assert.equal(finished.length, 1)
+})
+
+test('Claude spawn failures report completion errors instead of crashing the runtime', () => {
+  const child = new EventEmitter()
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], { spawnProcess: () => child })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.ingestLifecycle = () => {}
+  const completed = []
+  service.on('turn-completed', (event) => completed.push(event))
+  service.runClaude(session, 'Start', {})
+  child.emit('error', new Error('spawn ENOENT'))
+  assert.equal(service.activeTurns.size, 0)
+  assert.deepEqual(completed, [{ sessionId: 'thread-1', error: 'spawn ENOENT' }])
+})
 
 test('managed tasks reject unsafe or unavailable explicit project folders', async () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
@@ -72,6 +117,8 @@ test('creates a Codex task with its chosen model, effort, and explicit project c
 
     assert.equal(id, 'new-thread')
     assert.equal(requests[0].params.model, 'gpt-test')
+    assert.equal(requests[0].params.approvalPolicy, 'on-request')
+    assert.equal(requests[0].params.approvalsReviewer, 'user')
     assert.equal(sent[0], 'new-thread')
     assert.equal(sent[2].model, 'gpt-test')
     assert.equal(sent[2].effort, 'high')
@@ -85,7 +132,7 @@ test('starts the first Codex turn without reading an unmaterialized new thread',
   const directory = mkdtempSync(join(tmpdir(), 'ambientic-first-turn-'))
   try {
     const requests = []
-    const session = { id: 'new-thread', agent: 'codex', project: 'Private task', cwd: directory, task: 'Career profile' }
+    const session = { id: 'new-thread', agent: 'codex', project: 'Private task', cwd: directory, task: 'Product brief' }
     const service = new WorkspaceService({ list: () => [session], ingest: () => {}, updateTask: () => {} }, () => [])
     service.historyRefreshedAt = Date.now()
     service.codexStartedThreads.add(session.id)
@@ -99,7 +146,7 @@ test('starts the first Codex turn without reading an unmaterialized new thread',
       }
     })
 
-    const snapshot = await service.send(session.id, 'Build the Career Profile.')
+    const snapshot = await service.send(session.id, 'Build the product brief.')
 
     assert.equal(requests.some((entry) => entry.method === 'thread/read'), false)
     assert.equal(requests.some((entry) => entry.method === 'turn/start'), true)
@@ -159,7 +206,7 @@ test('reconciles a partial Hermes ACP stream with the completed database transcr
   assert.equal(ingested.at(-1).event, 'stop')
 })
 
-test('a Codex turn that ends by asking the user a question surfaces as needing you', async () => {
+test('a Codex turn that ends by asking the user a question does not create an approval', async () => {
   const session = { id: 'codex-question', agent: 'codex', cwd: '/tmp/project', state: 'running' }
   const ingested = []
   const service = new WorkspaceService({
@@ -189,8 +236,8 @@ test('a Codex turn that ends by asking the user a question surfaces as needing y
 
   await service.finish(session.id)
 
-  assert.equal(events.at(-1).state, 'attention')
-  assert.equal(ingested.at(-1).event, 'notification')
+  assert.equal(events.at(-1).state, 'idle')
+  assert.equal(ingested.at(-1).event, 'stop')
 })
 
 test('a Codex turn that finishes ordinary work hands the thread back to you', async () => {
@@ -271,16 +318,16 @@ test('effectiveState is the single source of truth with clear precedence', () =>
   // live terminal hooks remain authoritative even after a passive transcript read
   assert.equal(service.effectiveState({ id: 'live', state: 'running', tty: '/dev/ttys1' }, { id: 'live', running: false }), 'running')
   assert.equal(service.effectiveState({ id: 'live', state: 'waiting', tty: '/dev/ttys1' }, { id: 'live', running: true }), 'waiting')
-  // an explicit provider-native idle result corrects stale discovery state
+  // A separate app-server cannot override the native desktop lifecycle.
   assert.equal(service.effectiveState(
     { id: 'desktop', state: 'running', externalSource: 'codex-desktop' },
     { id: 'desktop', running: false, turnStateKnown: true }
-  ), 'idle')
+  ), 'running')
   // with no managed snapshot, the store's hook-driven lifecycle state is honored
   assert.equal(service.effectiveState({ id: 'x', state: 'waiting' }, null), 'waiting')
 })
 
-test('reading a Codex Desktop thread corrects stale external running state', async () => {
+test('reading a Codex Desktop thread does not replace native activity with local notLoaded', async () => {
   const session = {
     id: 'codex-desktop:thread-live',
     threadId: 'thread-live',
@@ -297,16 +344,16 @@ test('reading a Codex Desktop thread corrects stale external running state', asy
   service.historyRefreshedAt = Date.now()
   service.codexClient = async () => ({
     request: async () => ({
-      thread: { id: 'thread-live', status: { type: 'idle' }, turns: [] }
+      thread: { id: 'thread-live', status: { type: 'notLoaded' }, turns: [] }
     })
   })
 
   const snapshot = await service.read(session.id)
 
-  assert.equal(snapshot.running, false)
-  assert.equal(snapshot.turnStateKnown, true)
-  assert.equal(snapshot.state, 'idle')
-  assert.equal(ingested.at(-1).event, 'stop_idle')
+  assert.equal(snapshot.running, true)
+  assert.equal(snapshot.turnStateKnown, false)
+  assert.equal(snapshot.state, 'running')
+  assert.equal(ingested.length, 0)
 })
 
 test('resolving an approval clears the "attention" state instead of sticking', async () => {
@@ -324,8 +371,8 @@ test('resolving an approval clears the "attention" state instead of sticking', a
   assert.equal(events.at(-1).state, 'idle')
 })
 
-test('bridges Claude approval once or always through its official hook decision', async () => {
-  const session = { id: 'claude-terminal', agent: 'claude', cwd: '/tmp/project', state: 'attention', tty: '/dev/ttys1' }
+test('bridges approvals only for a Claude turn owned by Ambientic', async () => {
+  const session = { id: 'claude-managed', agent: 'claude', cwd: '/tmp/project', state: 'attention' }
   const ingested = []
   const service = new WorkspaceService({
     list: () => [session],
@@ -337,6 +384,7 @@ test('bridges Claude approval once or always through its official hook decision'
   }, () => [])
   service.snapshots.set(session.id, { ...service.baseSnapshot(session), messages: [] })
   const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }
+  service.activeTurns.set(session.id, {})
   const decisionPromise = service.requestExternalApproval('claude', {
     session_id: session.id,
     tool_name: 'Bash',
@@ -349,14 +397,64 @@ test('bridges Claude approval once or always through its official hook decision'
   assert.equal(service.snapshots.get(session.id).approvals[0].resolve, undefined)
   assert.equal(service.snapshots.get(session.id).state, 'attention')
 
-  await service.resolveApproval(approvalId, true, true)
+  await service.resolveApproval(approvalId, true, 'session')
   assert.deepEqual(await decisionPromise, {
     hookSpecificOutput: {
       hookEventName: 'PermissionRequest',
-      decision: { behavior: 'allow', updatedPermissions: [suggestion] }
+      decision: { behavior: 'allow', updatedPermissions: [{ ...suggestion, destination: 'session' }] }
     }
   })
   assert.equal(ingested.at(-1).event, 'tool')
+})
+
+test('provider approval scopes only advertise decisions the provider can honor', () => {
+  const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'localSettings' }
+  assert.deepEqual(claudeApprovalScopes([suggestion]), ['once', 'session', 'always'])
+  assert.deepEqual(claudePermissionsForScope([suggestion], 'session'), [{ ...suggestion, destination: 'session' }])
+  assert.deepEqual(claudePermissionsForScope([suggestion], 'always'), [suggestion])
+
+  assert.deepEqual(codexApprovalScopes({ params: {} }), ['once', 'session'])
+  assert.deepEqual(codexApprovalScopes({ params: { proposedExecpolicyAmendment: ['prefix_rule(pattern=["npm", "test"], decision="allow")'] } }), ['once', 'session', 'always'])
+  assert.deepEqual(codexApprovalScopes({ params: { proposedNetworkPolicyAmendments: [{ host: 'example.com', action: 'allow' }] } }), ['once', 'session', 'always'])
+  assert.deepEqual(codexApprovalScopes({ params: { availableDecisions: ['accept', 'decline'] } }), ['once'])
+})
+
+test('Codex persistent approval uses its proposed exec-policy amendment', async () => {
+  const session = { id: 'thread-policy', agent: 'codex', cwd: '/tmp/project', state: 'running' }
+  const responses = []
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, { ...service.baseSnapshot(session), messages: [] })
+  const amendment = ['prefix_rule(pattern=["npm", "test"], decision="allow")']
+  service.providerApproval('codex', { respond: (id, result) => responses.push({ id, result }) }, {
+    id: 41,
+    method: 'item/commandExecution/requestApproval',
+    params: { threadId: session.id, command: 'npm test', proposedExecpolicyAmendment: amendment }
+  })
+  const [approvalId, approval] = [...service.pendingApprovals.entries()][0]
+  assert.deepEqual(approval.scopes, ['once', 'session', 'always'])
+
+  await service.resolveApproval(approvalId, true, 'always')
+  assert.deepEqual(responses[0], {
+    id: 41,
+    result: { decision: { acceptWithExecpolicyAmendment: { execpolicy_amendment: amendment } } }
+  })
+})
+
+test('Codex permission-profile approvals grant only the requested profile for the chosen scope', async () => {
+  const session = { id: 'thread-permissions', agent: 'codex', cwd: '/tmp/project', state: 'running' }
+  const responses = []
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, { ...service.baseSnapshot(session), messages: [] })
+  const permissions = { fileSystem: { write: ['/tmp/shared'] }, network: null }
+  service.providerApproval('codex', { respond: (id, result) => responses.push({ id, result }) }, {
+    id: 42,
+    method: 'item/permissions/requestApproval',
+    params: { threadId: session.id, reason: 'Use the shared fixture', permissions }
+  })
+  const [approvalId] = [...service.pendingApprovals.keys()]
+
+  await service.resolveApproval(approvalId, true, 'session')
+  assert.deepEqual(responses[0], { id: 42, result: { permissions, scope: 'session' } })
 })
 
 test('ignores a stale Codex completion event for a different active turn', async () => {
@@ -395,6 +493,7 @@ test('steers the exact active Codex turn instead of starting a second turn', asy
 
   await service.send(session.id, 'Use the newer screenshot.')
 
+  assert.equal(session.task, 'Use the newer screenshot')
   assert.deepEqual(requests.map((entry) => entry.method), ['thread/resume', 'turn/steer'])
   assert.equal(requests[1].params.expectedTurnId, 'active-turn')
   assert.equal(requests[1].params.input[0].text, 'Use the newer screenshot.')
@@ -468,6 +567,8 @@ test('sends Codex folders as native mentions and uses its native plan preset', a
   assert.equal(start.collaborationMode.settings.reasoning_effort, 'high')
   assert.match(start.input[0].text, /Project context: you are working on tmp at \/tmp/)
   assert.ok(start.clientUserMessageId)
+  assert.equal(start.approvalPolicy, 'on-request')
+  assert.equal(start.approvalsReviewer, 'user')
 })
 
 test('orders the workspace by latest message activity across providers', async () => {
@@ -565,9 +666,21 @@ test('applies a persistent user alias to workspace lists and snapshots', async (
   })
   assert.deepEqual(await service.rename(session.id, '  Ambientic  '), { id: session.id, title: 'Ambientic' })
   assert.deepEqual(renamed, { id: session.id, title: 'Ambientic', source: 'user' })
-  assert.equal(saved[session.id], 'Ambientic')
+  assert.equal(saved['codex:thread-123'], 'Ambientic')
+  assert.equal(saved[session.id], undefined)
   assert.equal((await service.list()).find((item) => item.id === session.id).task, 'Ambientic')
   assert.equal(service.baseSnapshot(session).title, 'Ambientic')
+})
+
+test('a Codex provider read cannot overwrite a manual Ambientic name', async () => {
+  const session = { id: 'codex-desktop:thread-123', threadId: 'thread-123', agent: 'codex', task: 'Provider title', project: 'Codex', cwd: '/Users/test', state: 'idle', externalSource: 'codex-desktop' }
+  const service = new WorkspaceService({ list: () => [session], updateTask: () => {} }, () => [], {
+    aliases: { 'codex:thread-123': 'My Ambientic name' }
+  })
+  service.codexClient = async () => ({
+    request: async () => ({ thread: { id: 'thread-123', name: '<ambientic-context mode="build"> raw provider title', status: { type: 'idle' }, turns: [] } })
+  })
+  assert.equal((await service.read(session.id)).title, 'My Ambientic name')
 })
 
 // An approval card must say what is being requested, not just which tool wants
@@ -651,8 +764,101 @@ test('a failed turn reports why, even when Claude sends an empty result', () => 
   assert.match(detail, /denied Read/)
 })
 
+test('a Claude turn that ends by asking does not create an approval', async () => {
+  const session = { id: 'claude-question', agent: 'claude', cwd: '/tmp/project', state: 'running' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, {
+    id: session.id,
+    provider: 'claude',
+    messages: [{ id: 'm1', role: 'assistant', text: 'Which database should I point it at?' }],
+    artifacts: [],
+    approvals: [],
+    running: true,
+    state: 'running'
+  })
+
+  await service.finish(session.id)
+
+  assert.equal(service.snapshots.get(session.id).awaitingReply, false)
+  assert.equal(service.effectiveState(session, service.snapshots.get(session.id)), 'idle')
+})
+
+test('a Claude turn that simply reports work stays idle', async () => {
+  const session = { id: 'claude-done', agent: 'claude', cwd: '/tmp/project', state: 'running' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.snapshots.set(session.id, {
+    id: session.id,
+    provider: 'claude',
+    messages: [{ id: 'm1', role: 'assistant', text: 'Deployed and verified.' }],
+    artifacts: [],
+    approvals: [],
+    running: true,
+    state: 'running'
+  })
+
+  await service.finish(session.id)
+
+  assert.equal(service.snapshots.get(session.id).awaitingReply, false)
+  assert.equal(service.effectiveState(session, service.snapshots.get(session.id)), 'idle')
+})
+
+test('answering a question clears it, so the thread is not red while it works', () => {
+  const session = { id: 'answered', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  // awaitingReply outranks running, so a stale flag would keep the pad red for
+  // the whole turn the user just started by answering.
+  const snapshot = { id: session.id, provider: 'claude', messages: [], artifacts: [], approvals: [], awaitingReply: true, running: true, turnStateKnown: true }
+  assert.equal(service.effectiveState(session, snapshot), 'attention')
+  assert.equal(service.effectiveState(session, { ...snapshot, awaitingReply: false }), 'running')
+})
+
+test('a turn reports account usage even for a thread the UI is not showing', () => {
+  const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])
+  const seen = []
+  service.on('provider-usage', (payload) => seen.push(payload))
+
+  // No snapshot is registered for this id: usage is account-wide, so it must
+  // still be reported rather than dropped by the per-thread snapshot guard.
+  service.claudeEvent('thread-unopened', JSON.stringify({
+    type: 'rate_limit_event',
+    rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.12, resetsAt: 1788198000 } } }
+  }))
+
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].provider, 'claude')
+  assert.equal(seen[0].event.rate_limit_info.unifiedWindows.five_hour.utilization, 0.12)
+})
+
+test('a Claude limit rejection emits usage evidence before failing the turn', () => {
+  const handlers = {}
+  const failures = []
+  const session = { id: 'thread-limit', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => ({
+      stdout: { on () {} },
+      stderr: { on: (event, handler) => { handlers.stderr = handler } },
+      on: (event, handler) => { handlers[event] = handler }
+    })
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.fail = (id, error) => failures.push({ id, error: error.message })
+  let evidence = null
+  service.on('provider-limit', (payload) => { evidence = payload })
+
+  service.runClaude(session, 'Continue.', {})
+  handlers.stderr(Buffer.from("You've hit your session limit · resets 9:10pm (Europe/Paris)"))
+  handlers.exit(1)
+
+  assert.equal(evidence.provider, 'claude')
+  assert.equal(evidence.sessionId, 'thread-limit')
+  assert.match(evidence.error, /session limit/)
+  assert.equal(failures.length, 1)
+})
+
 function brokerService (session, projects = []) {
   const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  if (!session.history) service.activeTurns.set(session.id, {})
   service.recentProjects = () => projects
   service.emitSnapshot = (snapshot) => snapshot
   service.baseSnapshot = () => ({ id: session.id, messages: [] })
@@ -691,8 +897,8 @@ test('an out-of-scope tool asks, waits for the answer, and remembers the folder'
   await service.resolveApproval(asked.id, true, true)
   assert.equal((await waiting).decision, 'allow')
 
-  // Remembering grants the folder, so the next file beside it does not re-ask.
-  assert.deepEqual(service.rememberedRoots('sess-4'), ['/Users/person/notes'])
+  // A bare `true` is the older boolean caller and still means "this thread".
+  assert.deepEqual(service.listGrants().map((grant) => [grant.scope, grant.root]), [['session', '/Users/person/notes']])
   const second = await service.requestToolPermission({
     sessionId: 'sess-4', tool: 'Read', input: { file_path: '/Users/person/notes/other.md' }
   })
@@ -715,6 +921,7 @@ test('the hardware light follows pending approvals without each call site saying
   service.recentProjects = () => []
   service.emitSnapshot = (snapshot) => snapshot
   service.baseSnapshot = () => ({ id: session.id, messages: [] })
+  service.activeTurns.set(session.id, {})
 
   const asked = await service.requestToolPermission({
     sessionId: 'sess-6', tool: 'Read', input: { file_path: '/Users/person/elsewhere/x.md' }
@@ -753,4 +960,88 @@ test('a file the user attached is not then asked about', async () => {
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('Always allow survives into other threads; Allow for this thread does not', async () => {
+  const persisted = []
+  const session = { id: 'sess-8', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const other = { id: 'sess-9', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session, other], ingest: () => {} }, () => [], {
+    onGrantsChange: (list) => persisted.push(list.length)
+  })
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = (s) => ({ id: s.id, messages: [] })
+  service.activeTurns.set(session.id, {})
+  service.activeTurns.set(other.id, {})
+
+  const read = { tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' } }
+  const first = await service.requestToolPermission({ sessionId: 'sess-8', ...read })
+  await service.resolveApproval(first.id, true, 'session')
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-8', ...read })).decision, 'allow')
+  // A thread grant is that thread's alone.
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-9', ...read })).decision, 'ask')
+  assert.deepEqual(persisted, [], 'a thread grant must never be written to disk')
+
+  const second = await service.requestToolPermission({ sessionId: 'sess-9', ...read })
+  await service.resolveApproval(second.id, true, 'always')
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-9', ...read })).decision, 'allow')
+  assert.deepEqual(persisted, [1], 'an always grant is persisted once')
+})
+
+test('a shell command stops asking once allowed, which is what made it unbearable', async () => {
+  const session = { id: 'sess-10', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: 'sess-10', messages: [] })
+  service.activeTurns.set(session.id, {})
+
+  const bash = { tool: 'Bash', input: { command: 'npm test' } }
+  const asked = await service.requestToolPermission({ sessionId: 'sess-10', ...bash })
+  assert.equal(asked.decision, 'ask')
+  // The card has to offer a way to remember, or the answer cannot stick.
+  assert.equal(service.pendingApprovals.get(asked.id).canRemember, true)
+  await service.resolveApproval(asked.id, true, 'session')
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-10', ...bash })).decision, 'allow')
+})
+
+test('revoking a standing permission takes effect immediately', async () => {
+  const session = { id: 'sess-11', agent: 'claude', cwd: '/Users/person/projects/app' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  service.recentProjects = () => []
+  service.emitSnapshot = (snapshot) => snapshot
+  service.baseSnapshot = () => ({ id: 'sess-11', messages: [] })
+  service.activeTurns.set(session.id, {})
+
+  const read = { tool: 'Read', input: { file_path: '/Users/person/notes/spec.md' } }
+  const asked = await service.requestToolPermission({ sessionId: 'sess-11', ...read })
+  await service.resolveApproval(asked.id, true, 'always')
+  const [grant] = service.listGrants()
+  assert.equal(service.revokeGrant(grant.id), true)
+  assert.equal((await service.requestToolPermission({ sessionId: 'sess-11', ...read })).decision, 'ask')
+})
+
+test('passive native Claude sessions never create an Ambientic permission request', async () => {
+  const session = { id: 'native-claude', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [])
+  assert.equal(await service.requestExternalApproval('claude', { session_id: session.id, tool_name: 'Bash' }, session.id), null)
+  assert.equal(await service.requestToolPermission({ sessionId: session.id, tool: 'Bash', input: { command: 'pwd' } }), null)
+  assert.equal(service.pendingApprovals.size, 0)
+})
+
+test('Claude transcript excludes tool-result user rows and synthetic context', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ambientic-transcript-'))
+  const path = join(directory, 'chat.jsonl')
+  const rows = [
+    { type: 'user', uuid: 'human', message: { content: [{ type: 'text', text: 'Please fix it' }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: 'command output' }] } },
+    { type: 'user', isMeta: true, message: { content: 'injected rules' } },
+    { type: 'user', isCompactSummary: true, message: { content: 'summary' } },
+    { type: 'assistant', uuid: 'assistant', message: { content: [{ type: 'text', text: 'Fixed.' }] } }
+  ]
+  try {
+    writeFileSync(path, rows.map(row => JSON.stringify(row)).join('\n'))
+    assert.deepEqual(claudeMessages(path).map(row => [row.role, row.text]), [['user', 'Please fix it'], ['assistant', 'Fixed.']])
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

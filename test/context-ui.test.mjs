@@ -50,3 +50,19 @@ test('workspace exposes context, Settings memory, and shared tool surfaces witho
   assert.match(inference, /window\.controller\.openExternalUrl\(provider\.consoleUrl\)/)
   assert.doesNotMatch(inference, /target="_blank"/)
 })
+
+test('retired product surfaces stay absent from navigation, preload, and startup', () => {
+  const workspace = readFileSync(new URL('../src/renderer/Workspace.jsx', import.meta.url), 'utf8')
+  const preload = readFileSync(new URL('../src/preload/index.js', import.meta.url), 'utf8')
+  const main = readFileSync(new URL('../src/main/index.js', import.meta.url), 'utf8')
+  const studioLabel = ['Work', 'flows'].join('')
+  const legacyControllerMethod = ['getWork', 'flows'].join('')
+  const legacyStore = ['work', 'flows.json'].join('')
+  const verticalStore = ['career', '-os.json'].join('')
+
+  assert.equal(workspace.includes(`>${studioLabel}<`), false)
+  assert.equal(preload.includes(legacyControllerMethod), false)
+  assert.equal(main.includes(legacyStore), false)
+  assert.equal(main.includes(verticalStore), false)
+  assert.equal(main.includes('startScheduler'), false)
+})

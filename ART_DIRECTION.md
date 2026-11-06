@@ -18,7 +18,7 @@ The experience should suggest:
 
 1. **Calm by default.** Persistent motion is slow, low-contrast, and safe to ignore.
 2. **Responsive under the hand.** Direct actions answer immediately, then settle with soft easing.
-3. **Meaning survives the mood.** Green running, orange waiting on you, red needs-input, and blue idle remain unambiguous. Expressive sequences are temporary and always restore operational state.
+3. **Meaning survives the mood.** Green running, orange held-for-review, red unseen needs-input, and blue idle remain unambiguous. Orange is solid and explicit: it can mean either a pending approval or a user-authored Stand by reminder, with text distinguishing the reason. A completed-turn notification is red only until the user opens that thread; acknowledgment returns it to calm blue, while unresolved approvals and Stand by reminders stay orange. Expressive sequences are temporary and always restore operational state.
 4. **Depth without fog.** Translucency, bloom, and gradients create atmosphere, but text and controls retain strong contrast.
 5. **Rhythm over spectacle.** Animation should have phrasing, rests, and variation. Avoid uniform loading-spinner motion.
 6. **One instrument.** MIDI light, on-screen motion, preview transitions, and future sound should share timing and color language.
@@ -47,7 +47,11 @@ Ambientic’s primary mark is the supplied orbital-circle artwork: nested paths 
 - Hardware expressions: layered waves at different speeds, sparse deterministic glitches, cool color fields, and a clean return to task-state lighting.
 - Prefer spatial waves, opacity drift, blur, and subtle parallax.
 - Respect reduced-motion preferences and never obscure an approval or urgent task state for long.
-- **Orange is a question addressed to the person.** A thread holding a pending approval lights its pad orange on every connected grid, overriding the lifecycle colour underneath, because that thread cannot move until it is answered and nothing else about it matters yet. The pad is held solid rather than blinking: an agent waiting for consent is patient, not alarmed, and blinking is already spoken for by unseen attention. The colour matches the quiet amber that carries consent in the interface, so permission reads the same on screen and under the hand. It clears the moment the approval is answered, cancelled, or times out.
+- **Orange holds a thread for the person.** A pending approval lights its pad orange because the thread cannot move until it is answered. A user may also place an idle thread on Stand by, keeping the same solid orange warmth as a calm reminder to check it later. The interface always names which meaning applies; Stand by never masquerades as a permission request. Both are held rather than blinking, because blinking remains reserved for unseen attention. Approval orange clears when resolved, while Stand by clears on the next turn or when the user removes it.
+- **The screen grid is the hardware grid.** Overview shows the same pads the controller shows, in the same order, lit in the same language — one instrument seen twice rather than two views of the same data. Provider headers align exactly with their allocated physical columns; recent conversations refresh within those groups. Meaning resolves through a single shared source (`src/shared/pad-light.mjs`) so the desk and the glass cannot drift apart.
+- **A launch establishes the instrument.** The default layout divides all eight columns equally among connected, authenticated task providers, distributing remainder columns in provider order. Each allocation fills with recent real conversations up to its physical capacity, newest at the top. History is included; empty process placeholders are excluded. The shared recent-thread grid drives both screen and hardware. This intentionally favors recent-thread access over permanent thread positions.
+- **Waiting is drawn as the shape of the answer.** Anything Overview is still reading holds the exact footprint its value will take and sweeps a slow light across it, left to right, in the direction the grid is read. Delays are staggered per pad so the field arrives as one wave rather than a row of independent spinners, and nothing shifts position when the real value lands. A skeleton never disguises a value that is genuinely absent: an unlit pad means no thread, a swept pad means not read yet, and the two must not be confused. A provider still being probed pulses grey and says so in words; it never guesses at a state. Under reduced motion the sweep resolves to a flat resting tone.
+- **A lit pad is a light source, not a coloured tile.** Fluorescent colour fills the whole face and washes softly into the page with no hard-edged halo; an empty pad keeps its moulding and emits nothing, so light on the surface always means an available conversation. Every pad breathes on a slow cycle, offset per pad so the field drifts instead of pulsing in unison — unison would read as a progress indicator. Thread names stay large and bold over the light, because a grid you cannot read is decoration.
 
 ## First expression: Vibe
 
@@ -84,38 +88,6 @@ Goals are not presented as another administrative issue tracker. The landing sur
 - **Resting work recedes.** Paused, achieved, and archived goals remain accessible in a quieter library below the active field.
 - **Motion is optional.** Reduced-motion preferences remove card drift and sweeping highlights while preserving depth, hierarchy, and interaction feedback.
 
-## Workflows: currents of intent
-
-The Workflow Builder is an infinite spatial field where intent moves through clear, tactile objects. It should read as a calm current rather than a technical flowchart.
-
-- Nodes lead with human language; semantic action identifiers and permission detail appear in the inspector.
-- Connections feel continuous and directional without animated noise. A dry run may illuminate one node at a time, then return the field to rest.
-- Provider choice is a policy on agent nodes, not a visual fork of the entire workflow. “Best available agent” is the portable default.
-- Natural language is the fastest entrance, while direct manipulation keeps the generated result inspectable and correctable.
-- The workflow library is the calm shoreline before the canvas: reusable outcomes appear as tactile currents with a readable trigger, compact step trace, last-run truth, and controls that recede until needed. Run history forms a quieter adjacent stream rather than competing with creation.
-- The canvas should reward spatial fluency: two-finger movement pans, pinching zooms around the gesture, and keyboard undo/delete behave like familiar creative tools.
-- Space is progressive. The natural-language dock and global navigation can collapse into quiet, recoverable handles without hiding their purpose.
-- Inbox, calendar, web, and other consequential capabilities always expose their permission boundary before a real run.
-- Portable sharing is visible from the beginning, but the field stays private and local until the user explicitly exports it.
-
-### Workflow packs: outcomes before topology
-
-Installable workflow packs enter the Studio as complete outcomes, not as a wall of agent nodes. Career OS establishes the pattern: one prominent atmospheric object explains the routine, privacy boundary, and next human action; its internal workflows remain inspectable only after the user asks for them.
-
-Workflow Studio separates ownership from discovery. **Your workflows** comes first and keeps installed routines, run state, and results together; the **Workflow catalog** follows as a quieter shelf of outcomes that can be installed. An installed pack is one top-level card—not a spray of internal routines. Opening it leads with the latest run and outcome surface, then reveals its related workflows below for inspection or direct execution. A pack may remain visible in the catalog after installation, but its controls point back to that single owned group instead of creating a second operational home.
-
-- Setup advances through one calm question field at a time, with a thin progress current rather than a configuration sidebar.
-- Shared logic and private state are visually separated in plain language before installation. Copying a pack copies only the portable manifest.
-- An installed pack leads with operational truth—whether its first scheduled work has run and the action the user can take now—rather than counts of agents or prompts.
-- Pack identity may have its own restrained light motif, but it stays inside Ambientic's cool mist, strong-contrast, reduced-motion language and never becomes a separate mini-brand.
-- Consequential outcomes keep the same amber approval boundary as ordinary workflows; a polished pack cannot imply permission the user has not granted.
-
-Career OS opens below its installed workflows as a daily current, not a job-board grid. The first hierarchy is time available → actions worth taking → ranked market evidence. The daily queue stays deliberately small, while a separate Market results section retains every discovered role (or any explicit user-selected display limit) so ranking never becomes hidden filtering. Opportunity cards keep Candidate Fit and Career Fit visibly separate, present uncertainty as confidence text, expose the canonical or attributed job link as a first-class action, and reserve glow for current value rather than employer branding. Save, Pursue, and Pass remain quiet controls; passing unfolds lightweight reasons in place so learning does not become a form. Discovery setup groups sources by trust—canonical ATS, attributed remote feed, optional browser/alert—so adding reach still feels like choosing evidence quality rather than configuring a scraper.
-
-Career Profile setup treats identity as user-selected evidence, not invisible inference. CV and LinkedIn files appear as calm local document objects; reviewed Ambientic memories appear as individually selectable provenance cards. The resulting profile carries a visible Building → Needs review → Reviewed state, and its review action sits beside that state. No ranking glow or recommendation language should imply that an unreviewed portrait is already trusted.
-
-Profile review is a real evidence surface, not a generic workflow checkpoint. A focused editor shows the extracted headline, summary, experience, achievements, skills, projects, leadership, technologies, domains, uncertainties, narrative, and source labels before the user approves them. Save and Approve remain visually distinct, while any agent request that still needs a response links directly to its thread. Career Daily stays quiet and unavailable until this human trust boundary is complete.
-
 ## Memory: a quiet archive of continuity
 
 Memory should feel like a local field the user can inspect and prune, never like an invisible personality dossier. Memory lives inside Settings because it is a trust and control surface, not a daily navigation destination. It keeps the same deep, cool atmosphere while making origin and control unusually explicit.
@@ -138,10 +110,10 @@ Hardware is a dedicated instrument, not an advanced Settings form. Its local tem
 - **One logical surface.** Physical notes, pads, buttons, and keys bind to stable virtual positions. Changing view changes meaning without forcing the user to relearn the physical layout.
 - **Low-motion depth.** The deck moves as one restrained field over a subtle perspective grid. Individual pads answer immediately under the hand but do not bob independently or create constant arcade motion.
 - **Views feel spatial.** View tabs and violet navigation pads communicate location. Creating a linked view should feel like opening another room in the same instrument, with a visible path Back or Home.
-- **Light carries operational truth.** Green remains running, red remains input-required or failed, and blue remains idle. Violet identifies navigation, cyan a neutral executable action, and amber a confirmation boundary.
+- **Light carries operational truth.** Green remains running, orange means a real approval is pending, red means unseen input-required or failed, and blue remains idle. A newly completed turn may call for attention in red, but opening it consumes that notification and restores blue unless a real approval or reply is still pending. Violet identifies navigation, cyan a neutral executable action, and amber/orange the consent boundary.
 - **Input is always acknowledged.** A connected core stays softly lit; each valid MIDI arrival creates one short halo even when unmapped, so diagnosis begins with visible truth rather than configuration guesswork.
 - **Editing stays inspectable.** Play, Edit, Map MIDI, and Test are explicit modes. The selected pad, its semantic action, local target, trigger gesture, permission level, and physical binding remain readable together.
-- **Safety interrupts atmosphere.** Sending a saved prompt, starting work, running a workflow, or interrupting a turn enters an explicit confirmation surface when invoked from hardware. Decorative light never implies permission.
+- **Safety interrupts atmosphere.** Sending a saved prompt, starting work, approving access, or interrupting a turn enters an explicit confirmation surface when invoked from hardware. Decorative light never implies permission.
 - **Portability is calm and private.** Export is visible from the library, but physical bindings, exact local targets, and saved private prompts are removed before a template leaves the Mac.
 - **Native behavior remains sacred.** The APC40 MKII/APC mini live-session template is protected. Users fork it to explore; generic input support never weakens task-state RGB, voice controls, or Vibe restoration.
 
@@ -175,3 +147,23 @@ For every material UI or hardware-expression change, ask:
 - Is reduced motion, accessibility, and low-light use respected?
 
 Record meaningful additions or deliberate deviations in this document so the art direction evolves explicitly rather than by accident.
+
+## Default hardware simplicity — 2026-11-05
+
+Recent conversations is the default, with aligned provider headers on Home and Hardware and no mapping step on native APC controllers. Custom templates and editing modes are secondary, disclosed through Custom mappings. Automatic detection keeps polling and prefers an APC over a generic keyboard when one is connected. Empty pads remain dark; recent history is blue, while live state retains its operational colors.
+
+## Adjustable provider columns — 2026-11-05
+
+Only connected task providers receive space. Header identity uses a restrained provider accent while pad colors retain lifecycle meaning. Headers share the exact eight-column geometry of the physical grid, including narrow windows; never reflow the pad grid into four or six columns. Drag a divider to transfer whole columns between adjacent providers, with at least one column each. Preview on screen during the gesture; commit to the controller on release. Arrow keys offer the same adjustment and Equal split restores automatic allocation. Save overrides per connected-provider combination, so a connection change gets a balanced default without erasing a prior layout.
+
+## Conversation-first pad navigation — 2026-11-05
+
+A pad opens the conversation in the user's chosen surface: Native or Ambientic. Never automatically arrange a browser preview while selecting a thread. Prioritize active work within each provider's allocation. Keep user/assistant prose readable, with technical activity collapsed and machine context excluded from human message bubbles. Permission cards explicitly identify Ambientic ownership; native permissions stay with their native runtime.
+
+## Homepage destination choice — 2026-11-05
+
+Place the pad destination above the Overview hero as a generous two-option control: Show Native / Show Ambientic. A pale mint selected surface and dark text make the current choice unmistakable without borrowing agent status lights. Keep both options visible, include a short destination explanation, wrap gracefully on narrow windows, and support keyboard focus and reduced motion.
+
+## Integrated transcript continuity — 2026-11-06
+
+Preserve the signing Mac's conversational timeline: consecutive technical steps collapse in place between human and assistant prose, with tool results folded into their own calls. Native/Ambientic routing and provider column controls keep the PR's behavior. A completed turn's unseen notification remains acknowledgeable; punctuation alone never claims a pending approval. Mixed tool-result rows retain any actual human reply. This reconciles the existing visual language without introducing a separate transcript style.

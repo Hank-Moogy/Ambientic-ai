@@ -27,7 +27,7 @@ test('maps session state to APC40 colour and animation', () => {
   assert.deepEqual(ledForSession({ state: 'attention', unseen: true }), { channel: 14, color: APC40.COLOR.RED })
   assert.deepEqual(ledForSession({ state: 'attention', unseen: false }), { channel: 0, color: APC40.COLOR.RED })
   assert.deepEqual(ledForSession({ state: 'waiting', unseen: true }), { channel: 14, color: APC40.COLOR.RED })
-  assert.deepEqual(ledForSession({ state: 'waiting', unseen: false }), { channel: 0, color: APC40.COLOR.RED })
+  assert.deepEqual(ledForSession({ state: 'waiting', unseen: false }), { channel: 0, color: APC40.COLOR.BLUE })
   assert.deepEqual(ledForSession({ state: 'idle' }), { channel: 0, color: APC40.COLOR.BLUE })
   assert.deepEqual(ledForSession(null), { channel: 0, color: APC40.COLOR.OFF })
 })
@@ -67,7 +67,7 @@ test('keeps physical top-left pad 1 assigned and colored from session state', ()
   ])
   assert.deepEqual(messages[0], [0x90, 32, APC40.COLOR.GREEN])
   assert.deepEqual(messages[1], [0x90, 33, APC40.COLOR.BLUE])
-  assert.deepEqual(messages[2], [0x90, 34, APC40.COLOR.RED])
+  assert.deepEqual(messages[2], [0x90, 34, APC40.COLOR.BLUE])
   assert.deepEqual(messages[3], [0x90, 35, APC40.COLOR.OFF])
 })
 
@@ -86,4 +86,11 @@ test('a thread waiting on the user lights orange, whatever it was doing undernea
   }
   // Unseen attention still blinks red once the approval is answered.
   assert.equal(ledForSession({ state: 'attention', unseen: true }).color, APC40.COLOR.RED)
+})
+
+test('a thread on stand by holds a solid orange APC40 pad', () => {
+  assert.deepEqual(ledForSession({ state: 'idle', standby: true }), {
+    channel: APC40.ANIMATION.SOLID,
+    color: APC40.COLOR.ORANGE
+  })
 })

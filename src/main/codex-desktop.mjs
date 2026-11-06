@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { fallbackTitle, threadTitle } from './thread-title.mjs'
 
-const MAX_DESKTOP_THREADS = 8
+const MAX_DESKTOP_THREADS = 40
 const ACTIVE_LOOKBACK_DAYS = 7
 const ROLLOUT_TAIL_BYTES = 256 * 1024
 const RECENT_COMPLETION_MS = 15 * 60 * 1000
@@ -45,6 +45,7 @@ export function codexDesktopState (rolloutText, now = Date.now(), activityMs = 0
   let completedAt = 0
   let approvalAt = 0
   let rolloutActivityAt = 0
+  let approvalResolvedAt = 0
 
   for (const line of String(rolloutText || '').split('\n')) {
     if (!line.trim()) continue
@@ -56,10 +57,12 @@ export function codexDesktopState (rolloutText, now = Date.now(), activityMs = 0
       if (type === 'task_started') startedAt = Math.max(startedAt, timestamp)
       if (type === 'task_complete') completedAt = Math.max(completedAt, timestamp)
       if (/approval_request|request_approval/i.test(String(type || ''))) approvalAt = Math.max(approvalAt, timestamp)
+      if (/approval_resolved|approval_response|request_resolved/.test(String(type || '')) || type === 'function_call_output') approvalResolvedAt = Math.max(approvalResolvedAt, timestamp)
+      if (type === 'task_aborted' || type === 'turn_aborted') completedAt = Math.max(completedAt, timestamp)
     } catch {}
   }
 
-  if (approvalAt > completedAt && approvalAt >= startedAt) return 'attention'
+  if (approvalAt > Math.max(completedAt, approvalResolvedAt) && approvalAt >= startedAt && now - approvalAt < ACTIVE_TURN_ACTIVITY_MS) return 'attention'
   const activeActivityAt = Math.max(rolloutActivityAt, Number(activityMs) || 0)
   if (startedAt > completedAt) {
     return activeActivityAt && now - activeActivityAt <= ACTIVE_TURN_ACTIVITY_MS ? 'running' : 'idle'

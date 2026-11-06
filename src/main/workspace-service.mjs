@@ -1,3 +1,4 @@
+import { conversationText, visibleUserText } from '../shared/conversation-messages.mjs'
 import { EventEmitter } from 'node:events'
 import { spawn, execFile } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -6,11 +7,15 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path
 import { randomUUID } from 'node:crypto'
 import { JsonRpcProcess } from './json-rpc-process.mjs'
 import { providerSpawnEnv } from './env-path.mjs'
-import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, isBroadProjectRoot } from './project-scope.mjs'
+import { DISCOVERY_ROOT_LIMIT, additionalToolRoots, canInspectProjectRoot, discoveryToolRoots, handoverProjectRoot, isBroadProjectRoot } from './project-scope.mjs'
 import { assembleProviderPrompt, stripAmbienticContext } from './context-assembler.mjs'
 import { assistantPartMessage, describeToolCall, parseClaudeTranscript } from './claude-transcript.mjs'
 import { decideToolPermission } from './permission-policy.mjs'
 import { fallbackTitle, isUserPromptRow, promptText, threadTitle } from './thread-title.mjs'
+import { humanThreadTitle, namesThread } from './summarizer.js'
+import { applicableGrants, grantForRequest, persistableGrants } from './permission-grants.mjs'
+import { claudePermissionMode, codexApprovalSettings, hermesAutoApproval, normalizeApprovalProfile } from './approval-profile.mjs'
+import { isClaudeLimitRejection } from './usage.js'
 
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude Code', hermes: 'Hermes' }
 
@@ -88,6 +93,72 @@ function message (role, text, extra = {}) {
 // so an approval card titled "Bash" or "Edit" never says what is actually being
 // asked for. Approval cards and collapsed activity rows describe the same
 // action, so both read it from the same describer.
+
+function decisionName (value) {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return ''
+  return Object.keys(value)[0] || ''
+}
+
+export function codexApprovalScopes (request = {}) {
+  const params = request.params || {}
+  const available = Array.isArray(params.availableDecisions) ? params.availableDecisions.map(decisionName).filter(Boolean) : []
+  const supports = (name) => !available.length || available.includes(name)
+  const scopes = ['once']
+  if (supports('acceptForSession')) scopes.push('session')
+  if ((params.proposedExecpolicyAmendment && supports('acceptWithExecpolicyAmendment')) ||
+      (Array.isArray(params.proposedNetworkPolicyAmendments) && params.proposedNetworkPolicyAmendments.length === 1 && supports('applyNetworkPolicyAmendment'))) scopes.push('always')
+  return scopes
+}
+
+export function claudeApprovalScopes (suggestions = []) {
+  if (!Array.isArray(suggestions) || suggestions.length === 0) return ['once']
+  const scopes = ['once', 'session']
+  if (suggestions.some((item) => item?.destination && item.destination !== 'session')) scopes.push('always')
+  return scopes
+}
+
+export function claudePermissionsForScope (suggestions = [], scope = 'once') {
+  if (scope === 'once') return []
+  if (scope === 'session') return suggestions.map((item) => ({ ...item, destination: 'session' }))
+  return suggestions.filter((item) => item?.destination && item.destination !== 'session')
+}
+
+function codexDecisionForScope (approval, scope) {
+  if (scope === 'always' && approval.requestParams?.proposedExecpolicyAmendment) {
+    return {
+      acceptWithExecpolicyAmendment: {
+        execpolicy_amendment: approval.requestParams.proposedExecpolicyAmendment
+      }
+    }
+  }
+  if (scope === 'always' && approval.requestParams?.proposedNetworkPolicyAmendments?.length === 1) {
+    return {
+      applyNetworkPolicyAmendment: {
+        network_policy_amendment: approval.requestParams.proposedNetworkPolicyAmendments[0]
+      }
+    }
+  }
+  return scope === 'session' ? 'acceptForSession' : 'accept'
+}
+
+function codexApprovalResult (approval, allow, scope) {
+  if (approval.method === 'item/permissions/requestApproval') {
+    return {
+      permissions: allow ? (approval.requestParams?.permissions || {}) : {},
+      scope: allow && scope === 'session' ? 'session' : 'turn'
+    }
+  }
+  if (approval.method === 'applyPatchApproval' || approval.method === 'execCommandApproval') {
+    return {
+      decision: allow
+        ? (scope === 'session' ? 'approved_for_session' : 'approved')
+        : { denied: { rejection: 'The user denied this request in Ambientic.' } }
+    }
+  }
+  return { decision: allow ? codexDecisionForScope(approval, scope) : 'decline' }
+}
+
 export function describeApprovalRequest (toolName, toolInput = {}) {
   return describeToolCall(toolName, toolInput)
 }
@@ -212,7 +283,10 @@ function codexInputs (text, attachments) {
 
 function codexItem (item) {
   if (!item) return null
-  if (item.type === 'userMessage') return message('user', stripAmbienticContext(textContent(item.content)), { id: item.id })
+  if (item.type === 'userMessage') {
+    const text = visibleUserText(stripAmbienticContext(conversationText(item.content)))
+    return text ? message('user', text, { id: item.id }) : null
+  }
   if (item.type === 'agentMessage') return message('assistant', item.text, { id: item.id })
   if (item.type === 'reasoning') return message('activity', textContent(item.summary || item.content), { id: item.id, kind: 'reasoning', title: 'Reasoning' })
   if (item.type === 'commandExecution') return message('activity', item.aggregatedOutput || item.command || '', { id: item.id, kind: 'command', title: item.command || 'Command', status: item.status })
@@ -232,17 +306,13 @@ function codexActiveTurnId (thread) {
   return [...(thread?.turns || [])].reverse().find((turn) => turn.status === 'inProgress')?.id || ''
 }
 
-// Codex has no distinct protocol signal for "the agent is asking the user
-// something and stopped to wait for a reply" — a clarifying question ends the
-// turn exactly like a completed task does. When the turn's last item is an
-// agent message ending in a question, this is that case, and the thread
-// should surface as needing you rather than going quietly idle.
+// Only explicit provider input flags indicate a blocked turn. Punctuation in
+// ordinary assistant prose is not an approval or actionable input request.
 function codexAwaitsReply (thread) {
-  const last = thread?.turns?.at(-1)?.items?.at(-1)
-  if (last?.type !== 'agentMessage') return false
-  const text = String(last.text || '').replace(/[\s*_"'`)\]]+$/, '')
-  return /\?$/.test(text)
+  return Boolean(thread?.status?.activeFlags?.includes('waitingOnUserInput'))
 }
+
+function snapshotAwaitsReply () { return false }
 
 function codexEventTurnId (event) {
   return event?.params?.turn?.id || event?.params?.turnId || ''
@@ -252,7 +322,7 @@ function codexStatusIsRunning (status) {
   return (status?.type || status) === 'active'
 }
 
-function claudeMessages (path) {
+export function claudeMessages (path) {
   if (!path || !existsSync(path)) return []
   return parseClaudeTranscript(readFileSync(path, 'utf8'))
 }
@@ -353,6 +423,10 @@ function execJson (file, args) {
 export class WorkspaceService extends EventEmitter {
   constructor (store, getConnectors, {
     aliases = {},
+    grants = [],
+    onGrantsChange = null,
+    approvalProfile = 'ask',
+    onApprovalProfileChange = null,
     onAliasesChange,
     taskWorkspaceRoot = join(homedir(), '.ambientic', 'workspaces'),
     contextEngine = null,
@@ -391,7 +465,13 @@ export class WorkspaceService extends EventEmitter {
     this.spawnProcess = spawnProcess
     this.gatewayRuntime = new Map()
     // sessionId -> Set of roots the user approved for that thread, this run only.
-    this.threadGrants = new Map()
+    // Every standing answer the user has given. 'always' grants are persisted by
+    // the host; 'session' grants live only as long as this process, because a
+    // "for this session" that survived a restart would be a promise broken.
+    this.grants = Array.isArray(grants) ? grants.filter((grant) => grant?.scope === 'always') : []
+    this.onGrantsChange = onGrantsChange
+    this.approvalProfile = normalizeApprovalProfile(approvalProfile)
+    this.onApprovalProfileChange = onApprovalProfileChange
     // approvalId -> promise of the user's answer, awaited by the provider bridge.
     this.pendingToolDecisions = new Map()
     // Memory-export sessions are deliberately isolated from Ambientic's own
@@ -418,6 +498,27 @@ export class WorkspaceService extends EventEmitter {
   }
 
   sessionFor (id) { return this.store.list().find((item) => item.id === id) || this.history.get(id) }
+
+  aliasKeyFor (session) {
+    return session?.agent === 'codex' ? `codex:${this.codexThreadId(session)}` : String(session?.id || '')
+  }
+
+  aliasKeysFor (session) {
+    const keys = [this.aliasKeyFor(session), String(session?.id || '')]
+    if (session?.agent === 'codex') {
+      const providerId = this.codexThreadId(session)
+      keys.push(providerId, `codex-desktop:${providerId}`)
+    }
+    return [...new Set(keys.filter(Boolean))]
+  }
+
+  aliasFor (session) {
+    for (const key of this.aliasKeysFor(session)) {
+      const title = String(this.aliases.get(key) || '').trim()
+      if (title) return title
+    }
+    return ''
+  }
 
   providerSessionId (session) {
     if (session.agent === 'codex') return this.codexThreadId(session)
@@ -477,6 +578,27 @@ export class WorkspaceService extends EventEmitter {
     return binding ? { projectId: binding.projectId || '', goalId: binding.goalId || '', taskId: binding.taskId || '' } : {}
   }
 
+  handoverContextFor (sessionOrId) {
+    const session = typeof sessionOrId === 'string' ? this.sessionFor(sessionOrId) : sessionOrId
+    if (!session) return { eligible: false, root: '', reason: 'This thread is no longer available.' }
+    const binding = this.contextEngine?.bindingFor(session.agent, this.providerSessionId(session))
+    const boundRoot = binding?.project?.rootPath || ''
+    const root = handoverProjectRoot({ cwd: session.cwd, boundRoot })
+    if (!root) {
+      return {
+        eligible: false,
+        root: '',
+        reason: 'Choose a specific project folder before handing this thread off.'
+      }
+    }
+    return {
+      eligible: true,
+      root,
+      source: boundRoot && root === resolve(boundRoot) ? 'project-binding' : 'session',
+      projectName: binding?.project?.name || session.project || basename(root)
+    }
+  }
+
   recentProjects (limit = 4) {
     const projects = new Map()
     for (const session of [...this.store.list(), ...this.history.values()].sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))) {
@@ -520,9 +642,8 @@ export class WorkspaceService extends EventEmitter {
         if (existsSync(db)) {
           const rows = await execJson('/usr/bin/sqlite3', ['-readonly', '-json', db, `
             select s.id,
-              coalesce(nullif(s.title, ''), nullif(s.display_name, ''),
-                (select substr(replace(m.content, char(10), ' '), 1, 100) from messages m where m.session_id=s.id and m.role='user' and m.active=1 order by m.timestamp asc limit 1),
-                'Hermes task') as task,
+              coalesce(nullif(s.title, ''), nullif(s.display_name, '')) as provider_title,
+              (select substr(m.content, 1, 8000) from messages m where m.session_id=s.id and m.role='user' and m.active=1 order by m.timestamp asc limit 1) as first_prompt,
               coalesce(s.cwd, '') as cwd,
               coalesce(s.ended_at, s.started_at) * 1000 as updatedAt,
               s.message_count as messageCount
@@ -532,7 +653,7 @@ export class WorkspaceService extends EventEmitter {
             id: row.id, agent: 'hermes', project: basename(row.cwd || '') || 'Hermes', cwd: row.cwd || '',
             // The fallback column is the first user message, which carries the
             // same injected-context machinery as every other provider.
-            task: threadTitle(row.task) || fallbackTitle(PROVIDER_LABELS.hermes, basename(row.cwd || '')),
+            task: threadTitle(row.provider_title) || threadTitle(row.first_prompt) || fallbackTitle(PROVIDER_LABELS.hermes, basename(row.cwd || '')),
             summary: `${row.messageCount || 0} messages`,
             updatedAt: Number(row.updatedAt) || 0, state: 'history', history: true
           })))
@@ -554,7 +675,7 @@ export class WorkspaceService extends EventEmitter {
       })
     }
     const sessions = [...merged.values()].map((session) => {
-      const alias = this.aliases.get(session.id)
+      const alias = this.aliasFor(session)
       return alias ? { ...session, task: alias, taskSource: 'user' } : session
     }).sort((left, right) => (right.updatedAt || right.lastSeen || 0) - (left.updatedAt || left.lastSeen || 0))
     this.contextEngine?.backfillProjects(sessions.filter((session) => {
@@ -572,7 +693,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   baseSnapshot (session) {
-    const title = this.aliases.get(session.id) ||
+    const title = this.aliasFor(session) ||
       threadTitle(session.task) ||
       this.placeholderTitle(session)
     return {
@@ -587,7 +708,8 @@ export class WorkspaceService extends EventEmitter {
       messages: [], artifacts: [], approvals: [], running: false, error: '',
       turnStateKnown: false,
       nativeAvailable: Boolean(session.deepLink || session.tty),
-      managed: ['codex', 'claude', 'hermes'].includes(session.agent)
+      managed: ['codex', 'claude', 'hermes'].includes(session.agent),
+      handover: this.handoverContextFor(session)
     }
   }
 
@@ -595,13 +717,10 @@ export class WorkspaceService extends EventEmitter {
     snapshot.artifacts = [...new Map(snapshot.messages.flatMap((entry) => (entry.files || []).map((path) => [path, { path, name: basename(path), kind: 'file' }]))).values()]
     snapshot.approvals = [...this.pendingApprovals.values()]
       .filter((approval) => approval.sessionId === snapshot.id)
-      .map(({ rpc: _rpc, resolve: _resolve, timer: _timer, requestId: _requestId, suggestions: _suggestions, ...approval }) => approval)
-    // State has one owner. Callers set `error`/`messages`; `running` and the
-    // state are always derived here so live snapshots and list()/read() cannot
-    // diverge. Deriving `running` too is what keeps the typing indicator and
-    // the stop button (which read `running`) in step with the state pill (which
-    // reads `state`) — they used to disagree whenever running-ness came from a
-    // hook or a terminal rather than from a turn Ambientic started itself.
+      .map(({ rpc: _rpc, resolve: _resolve, timer: _timer, requestId: _requestId, suggestions: _suggestions, requestParams: _requestParams, ...approval }) => approval)
+    snapshot.handover = this.handoverContextFor(snapshot.id)
+    // State has one owner. Callers set `running`/`error`/`messages`; the state
+    // is always derived here so live snapshots and list()/read() cannot diverge.
     snapshot.state = this.effectiveState(this.sessionFor(snapshot.id), snapshot)
     snapshot.running = snapshot.state === 'running'
     this.snapshots.set(snapshot.id, snapshot)
@@ -628,6 +747,7 @@ export class WorkspaceService extends EventEmitter {
     const id = session?.id ?? snapshot?.id
     if (snapshot?.error) return 'attention'
     if (this.hasPendingApproval(id)) return 'attention'
+    if (session?.externalSource === 'codex-desktop' && !this.activeTurns.has(id)) return session.state || 'idle'
     if (snapshot?.awaitingReply) return 'attention'
     if (session?.state === 'attention' || session?.state === 'waiting') return session.state
     // A provider-native turn/read result is authoritative. Discovery and hooks
@@ -665,7 +785,7 @@ export class WorkspaceService extends EventEmitter {
   // preferring the latest reported value renamed a thread every time it was
   // read. Only the placeholder still gives way to a provider title.
   resolveTitle (id, providerTitle, current) {
-    const alias = this.aliases.get(id)
+    const alias = this.aliasFor(this.sessionFor(id))
     if (alias) return alias
     if (current && current !== this.placeholderTitle(this.sessionFor(id))) return current
     return threadTitle(providerTitle) || current
@@ -676,7 +796,12 @@ export class WorkspaceService extends EventEmitter {
     if (!session) throw new Error('This thread is no longer available.')
     const title = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80)
     if (!title) throw new Error('Enter a thread name.')
-    this.aliases.set(id, title)
+    const aliasKey = this.aliasKeyFor(session)
+    this.aliases.set(aliasKey, title)
+    // Remove legacy variants after migration so a stale prefixed Codex alias
+    // can never compete with the provider-stable canonical key.
+    for (const key of this.aliasKeysFor(session)) if (key !== aliasKey) this.aliases.delete(key)
+    this.store.hydrateAliases?.(Object.fromEntries(this.aliases))
     this.store.updateTask(id, title, '', 'user')
     this.onAliasesChange?.(Object.fromEntries(this.aliases))
     const snapshot = this.snapshots.get(id)
@@ -697,19 +822,20 @@ export class WorkspaceService extends EventEmitter {
         const result = await rpc.request('thread/read', { threadId: this.codexThreadId(session), includeTurns: true })
         snapshot.messages = codexThreadMessages(result.thread)
         snapshot.title = this.resolveTitle(id, result.thread?.name || result.thread?.preview, snapshot.title)
-        snapshot.running = codexStatusIsRunning(result.thread?.status)
+        const external = session.externalSource === 'codex-desktop' && !this.activeTurns.has(id)
+        snapshot.running = external ? session.state === 'running' : codexStatusIsRunning(result.thread?.status)
         snapshot.awaitingReply = !snapshot.running && codexAwaitsReply(result.thread)
-        snapshot.turnStateKnown = true
+        snapshot.turnStateKnown = !external
         const activeTurnId = codexActiveTurnId(result.thread)
-        if (snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
+        if (!external && snapshot.running && activeTurnId) this.activeTurns.set(id, activeTurnId)
         else if (!snapshot.running) this.activeTurns.delete(id)
         // Reading dormant history must not promote it onto the live hardware
         // surface. A genuinely active provider turn is promoted immediately;
         // existing live sessions are also corrected back to idle — unless
         // Codex ended its last turn by asking the user a question, which
         // still needs a reply to move forward.
-        if (snapshot.running) this.ingestLifecycle(id, 'tool')
-        else if (!session.history && !session.tty) {
+        if (!external && snapshot.running) this.ingestLifecycle(id, 'tool')
+        else if (!external && !session.history && !session.tty) {
           this.ingestLifecycle(id, snapshot.awaitingReply ? 'notification' : 'stop_idle')
         }
       } else if (session.agent === 'claude') {
@@ -749,7 +875,10 @@ export class WorkspaceService extends EventEmitter {
         this.codexStartedThreads.clear()
       })
       rpc.start()
-      await rpc.request('initialize', { clientInfo: { name: 'ambientic', title: 'Ambientic', version: '0.8.1' } })
+      await rpc.request('initialize', {
+        clientInfo: { name: 'ambientic', title: 'Ambientic', version: '0.8.1' },
+        capabilities: { experimentalApi: true, requestAttestation: false }
+      })
       rpc.notify('initialized')
       this.codex = rpc
       return rpc
@@ -857,13 +986,24 @@ export class WorkspaceService extends EventEmitter {
   providerApproval (provider, rpc, request) {
     const providerSessionId = request.params?.sessionId || request.params?.threadId || request.params?.conversationId || ''
     const sessionId = this.uiSessionId(provider, providerSessionId)
+    const session = this.sessionFor(sessionId)
+    if (provider === 'hermes') {
+      const automatic = hermesAutoApproval(this.approvalProfile, request, session?.cwd || '')
+      if (automatic) {
+        rpc.respond(request.id, { outcome: automatic })
+        return
+      }
+    }
     const id = `${provider}:${request.id}`
+    const scopes = provider === 'codex' ? codexApprovalScopes(request) : ['once']
     const approval = {
       id, provider, sessionId, method: request.method,
       title: request.params?.reason || request.params?.toolCall?.title || request.params?.command || 'Permission requested',
       detail: request.params?.command || request.params?.toolCall?.rawInput || request.params?.reason || '',
       options: request.params?.options || [],
-      canRemember: provider === 'codex'
+      scopes,
+      canRemember: scopes.length > 1,
+      requestParams: request.params || {}
     }
     this.pendingApprovals.set(id, { ...approval, rpc, requestId: request.id })
     this.ingestLifecycle(sessionId, 'notification')
@@ -876,7 +1016,7 @@ export class WorkspaceService extends EventEmitter {
     const providerSessionId = explicitSessionId || event.session_id || ''
     const sessionId = this.uiSessionId(provider, providerSessionId)
     const session = this.sessionFor(sessionId)
-    if (!session) return Promise.resolve(null)
+    if (!session || !this.isManagedThread(session)) return Promise.resolve(null)
     const id = `${provider}:${randomUUID()}`
     const suggestions = Array.isArray(event.permission_suggestions) ? event.permission_suggestions : []
     const toolInput = event.tool_input && typeof event.tool_input === 'object' ? event.tool_input : {}
@@ -890,6 +1030,7 @@ export class WorkspaceService extends EventEmitter {
       tool: String(event.tool_name || ''),
       detail,
       options: [],
+      scopes: claudeApprovalScopes(suggestions),
       canRemember: suggestions.length > 0
     }
     return new Promise((resolve) => {
@@ -928,6 +1069,7 @@ export class WorkspaceService extends EventEmitter {
       destructive: permission === 'destructive',
       detail: args,
       options: [],
+      scopes: permission === 'destructive' ? ['once'] : ['once', 'session'],
       canRemember: permission !== 'destructive'
     }
     return new Promise((resolve) => {
@@ -961,8 +1103,39 @@ export class WorkspaceService extends EventEmitter {
   // for as long as the app is running. Nothing here is written to disk: a
   // standing grant is a decision the user should make deliberately, not one
   // that accumulates from clicking through prompts.
-  rememberedRoots (sessionId) {
-    return [...(this.threadGrants.get(sessionId) || [])]
+  grantsFor (sessionId) {
+    return applicableGrants(this.grants, sessionId)
+  }
+
+  addGrant (grant) {
+    if (!grant) return null
+    this.grants = [...this.grants, grant]
+    if (grant.scope === 'always') this.onGrantsChange?.(persistableGrants(this.grants))
+    return grant
+  }
+
+  revokeGrant (grantId) {
+    const next = this.grants.filter((grant) => grant.id !== grantId)
+    if (next.length === this.grants.length) return false
+    this.grants = next
+    this.onGrantsChange?.(persistableGrants(this.grants))
+    return true
+  }
+
+  listGrants () {
+    return this.grants.map((grant) => ({ ...grant }))
+  }
+
+  getApprovalProfile () {
+    return this.approvalProfile
+  }
+
+  setApprovalProfile (value) {
+    const profile = normalizeApprovalProfile(value)
+    if (profile === this.approvalProfile) return profile
+    this.approvalProfile = profile
+    this.onApprovalProfileChange?.(profile)
+    return profile
   }
 
   // Keeps the session store's approval flag in step with what is actually
@@ -974,7 +1147,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   isManagedThread (session) {
-    return Boolean(session) && !session.tty && !session.history
+    return Boolean(session) && this.activeTurns.has(session.id) && !session.tty && session.externalSource !== 'codex-desktop'
   }
 
   // One entry point for every provider's "may I?" question. Returns null when
@@ -989,8 +1162,10 @@ export class WorkspaceService extends EventEmitter {
       input,
       cwd: cwd || session.cwd || '',
       projectRoots: this.discoverableProjects(cwd || session.cwd || '').map((item) => item.cwd),
-      remembered: this.rememberedRoots(sessionId)
+      grants: this.grantsFor(sessionId),
+      approvalProfile: this.approvalProfile
     })
+    if (verdict.decision === 'defer') return null
     if (verdict.decision !== 'ask') return { decision: verdict.decision, reason: verdict.reason }
 
     const id = `tool:${randomUUID()}`
@@ -1002,9 +1177,11 @@ export class WorkspaceService extends EventEmitter {
       method: 'ToolPermission',
       title: describeApprovalRequest(tool, input),
       tool: String(tool || ''),
+      cwd: cwd || session.cwd || '',
       detail: verdict.reason,
       scope: verdict.scope,
       options: [],
+      scopes: verdict.scope ? ['once', 'session', 'always'] : ['once'],
       canRemember: Boolean(verdict.scope)
     }
     // Answered in two steps on purpose. This call returns at once, so a caller
@@ -1036,19 +1213,29 @@ export class WorkspaceService extends EventEmitter {
     return this.pendingToolDecisions.get(id) || Promise.resolve(null)
   }
 
+  // `remember` is either a boolean (older callers: false = once, true = this
+  // thread) or one of 'once' | 'session' | 'always'. The string form is what the
+  // approval card sends, so the user's three choices survive the trip intact
+  // instead of collapsing into a yes/no.
   async resolveApproval (approvalId, allow, remember = false) {
     const approval = this.pendingApprovals.get(approvalId)
     if (!approval) return false
+    const requestedScope = remember === true ? 'session' : (remember === false ? 'once' : String(remember || 'once'))
+    const supportedScopes = Array.isArray(approval.scopes) && approval.scopes.length ? approval.scopes : (approval.canRemember ? ['once', 'session'] : ['once'])
+    const scope = supportedScopes.includes(requestedScope) ? requestedScope : 'once'
     if (approval.kind === 'tool-permission') {
       if (approval.timer) clearTimeout(approval.timer)
-      // Remembering grants the containing folder, not the single file: the next
-      // file in that folder is the same decision, and asking again for it is
-      // what makes people stop reading these prompts.
-      if (allow && remember && approval.scope) {
-        const root = statSyncKind(approval.scope) === 'folder' ? approval.scope : dirname(approval.scope)
-        const grants = this.threadGrants.get(approval.sessionId) || new Set()
-        grants.add(root)
-        this.threadGrants.set(approval.sessionId, grants)
+      if (allow && scope !== 'once') {
+        this.addGrant(grantForRequest({
+          tool: approval.tool,
+          // An opaque tool's scope is the folder it runs in, not a file it
+          // named, so it must anchor a tool grant rather than a path grant.
+          paths: approval.scope && approval.scope !== (approval.cwd || '') ? [approval.scope] : [],
+          cwd: approval.cwd || '',
+          scope,
+          threadId: approval.sessionId,
+          isDirectory: (path) => statSyncKind(path) === 'folder'
+        }))
       }
       approval.resolve({
         decision: allow ? 'allow' : 'deny',
@@ -1062,19 +1249,20 @@ export class WorkspaceService extends EventEmitter {
     }
     if (approval.provider === 'ambientic') {
       if (approval.timer) clearTimeout(approval.timer)
-      approval.resolve({ allowed: Boolean(allow), remember: Boolean(allow && remember && !approval.destructive), outcome: allow ? 'approved' : 'rejected' })
+      approval.resolve({ allowed: Boolean(allow), remember: Boolean(allow && scope === 'session' && !approval.destructive), outcome: allow ? 'approved' : 'rejected' })
     } else if (approval.provider === 'hermes') {
       const option = approval.options.find((item) => allow ? /allow|approve/i.test(`${item.kind} ${item.name}`) : /reject|deny/i.test(`${item.kind} ${item.name}`)) || approval.options[allow ? 0 : approval.options.length - 1]
       approval.rpc.respond(approval.requestId, { outcome: option ? { outcome: 'selected', optionId: option.optionId } : { outcome: 'cancelled' } })
     } else if (approval.provider === 'claude') {
       if (approval.timer) clearTimeout(approval.timer)
+      const updatedPermissions = allow ? claudePermissionsForScope(approval.suggestions, scope) : []
       const decision = allow
         ? {
             hookSpecificOutput: {
               hookEventName: 'PermissionRequest',
               decision: {
                 behavior: 'allow',
-                ...(remember && approval.suggestions?.length ? { updatedPermissions: approval.suggestions } : {})
+                ...(updatedPermissions.length ? { updatedPermissions } : {})
               }
             }
           }
@@ -1089,7 +1277,7 @@ export class WorkspaceService extends EventEmitter {
           }
       approval.resolve(decision)
     } else {
-      approval.rpc.respond(approval.requestId, { decision: allow ? (remember ? 'acceptForSession' : 'accept') : 'decline' })
+      approval.rpc.respond(approval.requestId, codexApprovalResult(approval, allow, scope))
     }
     this.pendingApprovals.delete(approvalId)
     this.ingestLifecycle(approval.sessionId, ((approval.provider === 'claude' || approval.provider === 'ambientic') && allow) || this.activeTurns.has(approval.sessionId) ? 'tool' : 'stop_idle')
@@ -1102,12 +1290,21 @@ export class WorkspaceService extends EventEmitter {
     if (!this.history.size) await this.list()
     const session = this.sessionFor(id)
     if (!session) throw new Error('This session is no longer available.')
+    // Managed turns do not pass through the terminal hook that normally names
+    // a task. Give the first substantive user prompt the same one-time,
+    // context-free Ambientic title before any provider read can expose its raw
+    // assembled prompt as a name.
+    if (namesThread(text, session.task || this.aliasFor(session))) {
+      const title = humanThreadTitle(text)
+      if (typeof this.store.updateTask === 'function') this.store.updateTask(id, title, '', 'local')
+      else session.task = title
+    }
     const contextSuppressed = Boolean(options.skipAmbienticContext || this.contextSuppressedSessions.has(id))
     if (contextSuppressed) this.contextSuppressedSessions.add(id)
     const newCodexThread = session.agent === 'codex' && this.codexStartedThreads.has(this.codexThreadId(session)) && !this.activeTurns.has(id)
     // Codex cannot serve includeTurns between thread/start and the first
     // turn/start. Building the empty local snapshot here prevents that normal
-    // pre-turn state from being emitted as a fatal managed-workflow error.
+    // pre-turn state from being emitted as a fatal managed-session error.
     const snapshot = newCodexThread
       ? { ...this.baseSnapshot(session), ...(this.snapshots.get(id) || {}), messages: [], error: '', running: false, turnStateKnown: false }
       : await this.read(id)
@@ -1129,9 +1326,7 @@ export class WorkspaceService extends EventEmitter {
     // thread so the broker does not turn around and ask permission for the very
     // thing they just handed over.
     for (const root of additionalToolRoots(cwd, promptOptions.attachments)) {
-      const grants = this.threadGrants.get(id) || new Set()
-      grants.add(root)
-      this.threadGrants.set(id, grants)
+      this.addGrant({ id: randomUUID(), scope: 'session', threadId: id, tool: '', root, write: true })
     }
     const pending = message('user', text, {
       pendingProvider: true,
@@ -1140,6 +1335,10 @@ export class WorkspaceService extends EventEmitter {
     })
     snapshot.messages = [...snapshot.messages, pending]
     snapshot.running = true
+    // The message being sent is the answer, so the question no longer stands.
+    // `awaitingReply` outranks `running` in effectiveState, so leaving it set
+    // keeps a thread red for the whole turn the user just started.
+    snapshot.awaitingReply = false
     snapshot.turnStateKnown = true
     snapshot.updatedAt = Date.now()
     this.ingestLifecycle(id, 'prompt')
@@ -1161,6 +1360,7 @@ export class WorkspaceService extends EventEmitter {
   // the turn did not start; send() is responsible for unwinding the snapshot.
   async startProviderTurn (session, { text, pending, promptOptions, context, hasConversation }) {
     const id = session.id
+    const cwd = session.cwd || homedir()
     if (session.agent === 'codex') {
       const rpc = await this.codexClient()
       const threadId = this.codexThreadId(session)
@@ -1187,10 +1387,12 @@ export class WorkspaceService extends EventEmitter {
           input
         })
       } else {
+        const approvalSettings = codexApprovalSettings(this.approvalProfile, { cwd, mode: promptOptions.mode })
         const result = await rpc.request('turn/start', {
           threadId,
           input,
           clientUserMessageId: pending.id,
+          ...approvalSettings,
           ...(collaborationMode
             ? { collaborationMode }
             : {
@@ -1229,8 +1431,10 @@ export class WorkspaceService extends EventEmitter {
       const rpc = await this.codexClient()
       const normalized = normalizePromptOptions({ model, effort, mode }, provider)
       const context = skipAmbienticContext ? null : this.prepareContext({ provider, providerSessionId: `pending:${randomUUID()}`, cwd: workingDirectory, prompt, contextBinding, gatewayScopes })
+      const approvalSettings = codexApprovalSettings(this.approvalProfile, { cwd: workingDirectory, mode: normalized.mode, thread: true })
       const result = await rpc.request('thread/start', {
         cwd: workingDirectory,
+        ...approvalSettings,
         ...(normalized.model ? { model: normalized.model } : {}),
         ...(context?.binding?.capsuleText ? { developerInstructions: context.binding.capsuleText } : {}),
         ...(context?.mcp ? { config: { mcp_servers: { ambientic: context.mcp } } } : {})
@@ -1276,7 +1480,7 @@ export class WorkspaceService extends EventEmitter {
     // found with session ID" and exits non-zero ("Claude exited with code 1").
     const claudeId = this.claudeSessionId(session)
     const started = Boolean(this.claudeTranscriptFor(session))
-    const permissionMode = mode === 'build' ? 'acceptEdits' : 'plan'
+    const permissionMode = claudePermissionMode(this.approvalProfile, mode)
     const args = ['-p', prompt, '--output-format', 'stream-json', '--include-partial-messages', '--verbose', '--permission-mode', permissionMode]
     if (!this.contextSuppressedSessions.has(session.id)) context ||= this.ensureContext(session, { prompt })
     if (context?.capsulePath) args.push('--append-system-prompt-file', context.capsulePath)
@@ -1291,13 +1495,22 @@ export class WorkspaceService extends EventEmitter {
     this.activeTurns.set(session.id, child)
     let buffer = ''
     child.stdout.on('data', (chunk) => {
+      if (this.activeTurns.get(session.id) !== child) return
       buffer += chunk.toString()
       const lines = buffer.split('\n'); buffer = lines.pop() || ''
       for (const line of lines) this.claudeEvent(session.id, line)
     })
     let stderr = ''
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-8000) })
+    child.on('error', (error) => {
+      if (this.activeTurns.get(session.id) !== child) return
+      this.claudeAttempts.delete(session.id)
+      this.fail(session.id, error)
+    })
     child.on('exit', (code) => {
+      // An interrupted child may exit after a new turn has started in the
+      // same session. Its output/completion must not finish that newer turn.
+      if (this.activeTurns.get(session.id) !== child) return
       const attempt = this.claudeAttempts.get(session.id) || {}
       const errorText = attempt.resultError || (code !== 0 ? (stderr.trim() || `Claude exited with code ${code}`) : '')
       if (!errorText) { this.claudeAttempts.delete(session.id); return this.finish(session.id) }
@@ -1310,6 +1523,9 @@ export class WorkspaceService extends EventEmitter {
       // A failed turn is the single most common bug report ("chat just fails"),
       // and the binary plus Claude's own error text are what make it diagnosable.
       console.error(`[claude] turn failed (exit ${code}) via ${path}: ${String(errorText).slice(0, 500)}`)
+      if (isClaudeLimitRejection(errorText)) {
+        this.emit('provider-limit', { provider: 'claude', error: String(errorText), observedAt: Date.now(), sessionId: session.id })
+      }
       this.fail(session.id, new Error(this.claudeResultError(session.id, errorText)))
     })
   }
@@ -1317,6 +1533,13 @@ export class WorkspaceService extends EventEmitter {
   claudeEvent (id, line) {
     let event
     try { event = JSON.parse(line) } catch { return }
+    // Usage is account-wide, not per-thread, so report it before the snapshot
+    // guard: a turn on a thread the UI is not currently showing still carries
+    // the account's current limits.
+    if (event.type === 'rate_limit_event') {
+      this.emit('provider-usage', { provider: 'claude', event, observedAt: Date.now(), sessionId: id })
+      return
+    }
     const snapshot = this.snapshots.get(id)
     if (!snapshot) return
     if (event.type === 'assistant') {
@@ -1396,6 +1619,14 @@ export class WorkspaceService extends EventEmitter {
   // Claude Code does, so point the user at the ways forward.
   claudeResultError (id, result) {
     const text = String(result || 'Claude returned an error')
+    // Claude Code reports an exhausted subscription window through whichever
+    // fallback it just failed to reach, so the user is told about usage credits
+    // or an organization administrator when the real event is simply that the
+    // 5-hour window is full and this account has no paid overflow. Say that
+    // plainly; keep the provider's own sentence so nothing is hidden.
+    if (/out of usage credits|organization has disabled claude subscription access/i.test(text)) {
+      return `Claude Code refused this turn: the subscription window is used up and this account has no extra usage to fall back on, so Claude offered an API key or an admin as the alternative. Nothing is wrong with your organization or your login. Wait for the window to reset, switch this thread to a smaller Claude model, or hand it off to another provider.\n\nClaude Code said: ${text}`
+    }
     if (/prompt is too long|too many tokens|context (?:window|length|too long)/i.test(text)) {
       const cwd = this.sessionFor(id)?.cwd || ''
       return `This conversation is too long for Claude to resume — its history exceeds the model's context window, and non-interactive turns can't compact it. Start a new task${cwd ? ` in ${cwd}` : ''}, or resume it in a terminal (\`claude --resume ${id}\`) and run /compact, then continue here.`
@@ -1490,8 +1721,8 @@ export class WorkspaceService extends EventEmitter {
     const rows = await execJson('/usr/bin/sqlite3', ['-json', db, `select id,role,content,tool_name,tool_calls,timestamp from messages where session_id='${escaped}' and active=1 order by timestamp asc limit 300`])
     return rows.map((row) => row.tool_name
       ? message('activity', row.content || row.tool_calls || '', { id: `hermes:${row.id}`, kind: 'tool', title: row.tool_name })
-      : message(row.role === 'assistant' ? 'assistant' : 'user', row.role === 'assistant' ? (row.content || '') : stripAmbienticContext(row.content || ''), { id: `hermes:${row.id}` }))
-      .filter((entry) => entry.role === 'activity' || entry.text.trim())
+      : ['assistant', 'user'].includes(row.role) ? message(row.role, row.role === 'assistant' ? (row.content || '') : visibleUserText(stripAmbienticContext(row.content || '')), { id: `hermes:${row.id}` }) : null)
+      .filter((entry) => entry && (entry.role === 'activity' || entry.text.trim()))
   }
 
   interrupt (id) {
@@ -1536,6 +1767,11 @@ export class WorkspaceService extends EventEmitter {
         } catch (error) {
           console.error('[ambientic] Codex transcript reconciliation failed:', error.message)
         }
+      } else {
+        // Every other provider ends its turn in the snapshot, where the last
+        // assistant message carries the same signal.
+        awaitingReply = snapshotAwaitsReply(snapshot)
+        snapshot.awaitingReply = awaitingReply
       }
       for (const entry of snapshot.messages) delete entry.streaming
       snapshot.updatedAt = Date.now()
@@ -1556,6 +1792,7 @@ export class WorkspaceService extends EventEmitter {
       this.ingestLifecycle(id, this.hasPendingApproval(id) || awaitingReply ? 'notification' : 'stop')
       this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true })
     }
+    this.emit('turn-completed', { sessionId: id })
     return true
   }
 
@@ -1564,6 +1801,7 @@ export class WorkspaceService extends EventEmitter {
     this.ingestLifecycle(id, 'notification')
     const snapshot = this.snapshots.get(id)
     if (snapshot) this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true, error: error.message })
+    this.emit('turn-completed', { sessionId: id, error: error.message })
   }
 
   stop () {
