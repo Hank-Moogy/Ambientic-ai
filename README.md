@@ -192,3 +192,10 @@ Verification: 306 regression tests, 304 passed, 2 intentional skips; production 
 - Overview now starts with a prominent Show Native / Show Ambientic control. The selected option is highlighted, keyboard accessible, and saved through the same pad preference used by Hardware settings. It applies to physical and on-screen pads.
 - Saving disables repeat clicks; failures show an inline retry message. Existing native-unavailable and Ambientic-owned approval fallback remains in effect.
 - Verification: production build and pad-navigation regression test passed. In the relaunched development app, both homepage options were clicked and their selected state and explanatory text verified; restored Native afterward. Layout visually checked at the current window size. Physical pad end-to-end acceptance remains open.
+
+## Cross-Mac release handoff — 2026-11-06
+
+- The six local implementation/documentation commits through `31225ed` are prepared for GitHub review against `478229a`; signing-Mac integration and distribution are the current work.
+- [Cross-Mac handoff](docs/MAC_RELEASE_HANDOFF.md) records commit dependencies, compatibility-sensitive behavior, receiving-Mac requirements, and the signing/download checklist.
+- Reverified with Node.js 22.23.4: 312 local-release tests (310 passed, 2 skipped), production build, and Electron SQLite/FTS5 smoke passed. The local-release test command excludes the simulated Claude OAuth callback lifecycle test.
+- This receiving Mac is arm64 on macOS 27.0. It has no installed Ambientic.app or valid signing certificate. Next: review integration on the signing Mac, complete provider/physical APC acceptance, and produce a verified signed download; no packaged or notarized release was produced here.
