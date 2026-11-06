@@ -112,6 +112,6 @@ For real work, use the context repository's existing readout validator, publicat
 
 The implementation is in the Ambientic repository and uses existing dependencies. Include the service, gateway/schema changes, runtime lifecycle events, tests, and this runbook together. A service file alone is not a connected implementation.
 
-The branch is `codex/orchestration-pilot`, based on the existing `codex/mac-handoff-provider-pads` work. Push it with `git push -u origin codex/orchestration-pilot` when ready. For an incremental review before the earlier branch merges, use that branch as the PR base; otherwise compare against the updated `main` and review the complete diff. Do not silently omit the earlier dependency commits.
+The implementation was developed on `codex/orchestration-pilot` and is now included in [draft PR #9](https://github.com/Hank-Moogy/Ambientic-ai/pull/9), on `codex/mac-handoff-provider-pads` against `main`. Fetch/check out PR #9 for the complete provider-pad and orchestration changes. No separate orchestration PR is required. Preserve all dependency commits when integrating with the signing Mac’s local work.
 
 On the signing Mac: follow `docs/MAC_RELEASE_HANDOFF.md`, preserve local work, run the complete regression suite plus socket-enabled orchestration checks, build, and execute `npm run release:local`. Confirm installed build identity and `/health`. This development Mac currently has no valid signing identity; no signed-install acceptance is claimed.

@@ -208,7 +208,7 @@ Verification: 306 regression tests, 304 passed, 2 intentional skips; production 
 
 ## Cross-Mac release handoff — 2026-11-06
 
-- The six local implementation/documentation commits through `31225ed` are prepared for GitHub review against `478229a`; signing-Mac integration and distribution are the current work.
+- [Draft PR #9](https://github.com/Hank-Moogy/Ambientic-ai/pull/9) includes the original six commits through `31225ed`, orchestration implementation `ccdd0f4`, and verification record `3ba6803`, against base `478229a`. Signing-Mac integration and distribution are the current work.
 - [Cross-Mac handoff](docs/MAC_RELEASE_HANDOFF.md) records commit dependencies, compatibility-sensitive behavior, receiving-Mac requirements, and the signing/download checklist.
-- Reverified with Node.js 22.23.4: 312 local-release tests (310 passed, 2 skipped), production build, and Electron SQLite/FTS5 smoke passed. The local-release test command excludes the simulated Claude OAuth callback lifecycle test.
+- Latest orchestration verification: all 324 socket-enabled tests passed with no skips, production build and Electron SQLite/FTS5 smoke passed, and eight Electron queue tests passed. The PR consolidation changes documentation only and retains the implementation chat’s recorded verification; live specialist acceptance remains open.
 - This receiving Mac is arm64 on macOS 27.0. It has no installed Ambientic.app or valid signing certificate. Next: review integration on the signing Mac, complete provider/physical APC acceptance, and produce a verified signed download; no packaged or notarized release was produced here.
