@@ -107,10 +107,11 @@ The canonical installed-app milestone gate is `npm run release:local`. It rebuil
 
 ## Current status
 
-Last updated: 2026-09-02
+Last updated: 2026-11-06
 
 Implemented:
 
+- Codex-to-Claude orchestration pilot through the authenticated Ambientic MCP gateway: durable SQLite jobs, verified specialist registration, versioned request deduplication, explicit dispatch, result validation, publication acknowledgement, cancellation, and restart/timeout reconciliation. See [pilot runbook](docs/ORCHESTRATION_PILOT.md).
 - Unified Overview and Threads across Claude Code, Codex, and Hermes.
 - Managed turns, approvals, interruption, provider login, usage, artifacts, previews, and handovers.
 - Goals, project binding, context capsules, reviewed memory, scoped gateway tools, connected MCP servers, and local audit.
@@ -126,6 +127,7 @@ Implemented:
 
 Next:
 
+- Sam creates and verifies the experiment-analysis and development specialists; then run the synthetic live handoff from a Codex thread launched through Ambientic. Both specialists remain disabled until registered. Production scheduling and automatic coordinator wake-up are not enabled by the pilot.
 - Run a full installed-app acceptance pass across Claude Code, Codex, Hermes, and one real external MCP server.
 - Complete physical APC validation for two-view navigation, confirmations, voice input, and RGB state restoration.
 - Improve artifact review, thread-to-goal evidence linking, source visibility, and cross-device supervision.
@@ -141,6 +143,16 @@ Verification on 2026-09-02:
 - Physical APC smoke remains outstanding.
 
 The durable visual direction is defined in [ART_DIRECTION.md](ART_DIRECTION.md), the product contract in [PRODUCT.md](PRODUCT.md), and the forward architecture in [PRODUCT_DIRECTION.md](PRODUCT_DIRECTION.md).
+
+## Orchestration pilot — 2026-11-06
+
+- Added `ambientic_orchestration` for Codex sessions bound to a real Ambientic project. Claude workers cannot call it. Mutations use existing approvals; credentials remain provider-owned.
+- New private `orchestration.db` is separate from existing context/Goals data. Requests are snapshotted before dispatch; completion and incorporation are distinct. Ambiguous work is never automatically retried. Workers use the existing Claude adapter and appear in Threads.
+- Added first-run fixture and [coordinator instructions](docs/orchestration/coordinator-prompt.md), plus a [portable setup and GitHub handoff runbook](docs/ORCHESTRATION_PILOT.md). Specialist configuration is local to each Mac, not checked into Git.
+- Fixed stale Claude process output/exit handling and reported spawn failures so an older process cannot complete a newer worker turn.
+- Verification: Node 22 `AMBIENTIC_SOCKET_TESTS=1 npm test` passed all 324 tests with no skips, including the actual Unix socket/MCP bridge and OAuth callback fixture. `npm run build` passed. The initial sandboxed run timed out in the OAuth fixture; the complete run with local transport permissions passed.
+- Current work: specialist creation/tool verification and first live synthetic run remain open. No production analysis, provider inference, canonical context publication, or schedule migration was performed by these tests. An independently launched Codex desktop chat does not inherit this gateway; launch the pilot coordinator through Ambientic.
+- Release preflight: this Mac reports zero valid signing identities. Signed installation, installed-build health, and real specialist/provider acceptance remain outstanding; use the signing-Mac handoff before claiming release readiness.
 
 ## Fresh-checkout verification — 2026-11-05
 

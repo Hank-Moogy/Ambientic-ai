@@ -1531,13 +1531,22 @@ export class WorkspaceService extends EventEmitter {
     this.activeTurns.set(session.id, child)
     let buffer = ''
     child.stdout.on('data', (chunk) => {
+      if (this.activeTurns.get(session.id) !== child) return
       buffer += chunk.toString()
       const lines = buffer.split('\n'); buffer = lines.pop() || ''
       for (const line of lines) this.claudeEvent(session.id, line)
     })
     let stderr = ''
     child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-8000) })
+    child.on('error', (error) => {
+      if (this.activeTurns.get(session.id) !== child) return
+      this.claudeAttempts.delete(session.id)
+      this.fail(session.id, error)
+    })
     child.on('exit', (code) => {
+      // An interrupted child may exit after a new turn has started in the
+      // same session. Its output/completion must not finish that newer turn.
+      if (this.activeTurns.get(session.id) !== child) return
       const attempt = this.claudeAttempts.get(session.id) || {}
       const errorText = attempt.resultError || (code !== 0 ? (stderr.trim() || `Claude exited with code ${code}`) : '')
       if (!errorText) { this.claudeAttempts.delete(session.id); return this.finish(session.id) }
@@ -1793,6 +1802,7 @@ export class WorkspaceService extends EventEmitter {
     // A finished turn is only "needs you" when the agent is actually blocked on
     // a pending approval, or Codex ended the turn by asking a clarifying
     // question; otherwise it is simply idle/done, not red.
+    this.emit('turn-completed', { sessionId: id })
     return true
   }
 
@@ -1801,6 +1811,7 @@ export class WorkspaceService extends EventEmitter {
     this.ingestLifecycle(id, 'notification')
     const snapshot = this.snapshots.get(id)
     if (snapshot) this.emitSnapshot({ ...snapshot, running: false, turnStateKnown: true, error: error.message })
+    this.emit('turn-completed', { sessionId: id, error: error.message })
   }
 
   stop () {

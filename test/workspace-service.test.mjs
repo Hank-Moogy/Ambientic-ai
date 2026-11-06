@@ -1,9 +1,54 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkspaceService, claudeApprovalScopes, claudePermissionsForScope, codexApprovalScopes, createPrivateTaskWorkspace, describeApprovalRequest, claudeMessages } from '../src/main/workspace-service.mjs'
+
+test('late Claude output and exit cannot complete a newer turn in the same session', () => {
+  const children = []
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], {
+    spawnProcess: () => {
+      const child = new EventEmitter()
+      child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+      children.push(child)
+      return child
+    }
+  })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  const finished = []; const events = []
+  service.finish = (id) => finished.push(id)
+  service.claudeEvent = (...args) => events.push(args)
+  service.runClaude(session, 'First', {})
+  service.activeTurns.delete(session.id)
+  service.runClaude(session, 'Second', {})
+  children[0].stdout.emit('data', '{"type":"result"}\n')
+  children[0].emit('exit', 0)
+  assert.equal(events.length, 0)
+  assert.equal(finished.length, 0)
+  assert.equal(service.activeTurns.get(session.id), children[1])
+  children[1].emit('exit', 0)
+  assert.equal(finished.length, 1)
+})
+
+test('Claude spawn failures report completion errors instead of crashing the runtime', () => {
+  const child = new EventEmitter()
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter()
+  const session = { id: 'thread-1', agent: 'claude', cwd: '/tmp/project' }
+  const service = new WorkspaceService({ list: () => [session], ingest: () => {} }, () => [], { spawnProcess: () => child })
+  service.claudeTranscriptFor = () => ''
+  service.ensureContext = () => null
+  service.ingestLifecycle = () => {}
+  const completed = []
+  service.on('turn-completed', (event) => completed.push(event))
+  service.runClaude(session, 'Start', {})
+  child.emit('error', new Error('spawn ENOENT'))
+  assert.equal(service.activeTurns.size, 0)
+  assert.deepEqual(completed, [{ sessionId: 'thread-1', error: 'spawn ENOENT' }])
+})
 
 test('managed tasks reject unsafe or unavailable explicit project folders', async () => {
   const service = new WorkspaceService({ list: () => [], ingest: () => {} }, () => [])

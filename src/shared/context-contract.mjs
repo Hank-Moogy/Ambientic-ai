@@ -7,6 +7,29 @@ export const CAPSULE_MAX_TOKENS = 1200
 
 export const AMBIENTIC_TOOL_SCHEMAS = Object.freeze([
   {
+    name: 'ambientic_orchestration',
+    description: 'Codex coordinator: register verified Claude specialists, queue versioned Markdown requests, explicitly run a job, inspect results, and acknowledge publication. No automatic dispatch. Scoped to the bound project; mutations require Ambientic approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'get', 'register', 'enqueue', 'run', 'collect', 'incorporate', 'cancel'] },
+        specialist: { type: 'string', enum: ['experiment-analyst', 'development'] },
+        cwd: { type: 'string' },
+        instructionsPath: { type: 'string' },
+        sessionId: { type: 'string' },
+        enabled: { type: 'boolean' },
+        toolsVerified: { type: 'boolean' },
+        requestId: { type: 'string' },
+        revision: { type: 'string' },
+        requestPath: { type: 'string' },
+        jobId: { type: 'string' },
+        receipt: { type: 'string', description: 'Published review path and commit or publication ID; acknowledge only after the context publication succeeds.' }
+      },
+      required: ['action'],
+      additionalProperties: false
+    }
+  },
+  {
     name: 'ambientic_context_get',
     description: 'Read the Ambientic project, goal, task, and frozen context bound to this agent session.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }

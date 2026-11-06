@@ -23,6 +23,7 @@ import { connectorState, openAgentSetup, openAgentTerminal, pendingConnectorStat
 import { createVoiceInput } from './voice-input.mjs'
 import { WorkspaceService } from './workspace-service.mjs'
 import { HandoverService } from './handover-service.mjs'
+import { OrchestrationService } from './orchestration-service.mjs'
 import { ClaudeAuthService } from './claude-auth-service.mjs'
 import { normalizeExternalUrl } from './external-url.mjs'
 import { ensureEnhancedPath } from './env-path.mjs'
@@ -114,6 +115,7 @@ let pendingCodexLogin = ''
 const providerAuthState = new Map()
 let recentHardwareThreads = []
 let workspace = null
+let orchestration = null
 let handovers = null
 let consumptionLedger = null
 let claudeAuth = null
@@ -1590,6 +1592,12 @@ app.whenReady().then(() => {
     gatewayExecutable: process.execPath,
     gatewayShimPath: app.isPackaged ? join(process.resourcesPath, 'ambientic-mcp-shim.mjs') : join(app.getAppPath(), 'resources', 'ambientic-mcp-shim.mjs')
   })
+  try {
+    orchestration = new OrchestrationService({ file: join(app.getPath('userData'), 'orchestration.db'), workspace })
+    if (capabilityGateway) capabilityGateway.orchestration = orchestration
+  } catch (error) {
+    console.error(`[ambientic] orchestration unavailable; queue preserved: ${error.message}`)
+  }
   if (contextEngine) {
     memoryBootstrap = createMemoryBootstrapService({ workspace, contextEngine, contextStore, connectors: () => connectors })
     memoryBootstrap.on('change', (state) => sendToWindows('memory-bootstrap', state))
@@ -1698,4 +1706,4 @@ app.on('second-instance', () => {
 })
 app.on('window-all-closed', (e) => { e.preventDefault?.() })
 app.on('activate', () => showWorkspace())
-app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); workspace?.stop(); capabilityGateway?.stop(); contextStore?.close(); claudeAuth?.stop(); companions.stop(); usage.stop() })
+app.on('before-quit', () => { app.isQuitting = true; stopPointerResize(); if (workspaceListTimer) clearTimeout(workspaceListTimer); ambientMode?.stop(); discovery?.stop(); voiceInput?.dispose(); midiController?.stop(); orchestration?.close(); workspace?.stop(); capabilityGateway?.stop(); contextStore?.close(); claudeAuth?.stop(); companions.stop(); usage.stop() })
