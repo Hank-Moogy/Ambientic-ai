@@ -151,8 +151,9 @@ The durable visual direction is defined in [ART_DIRECTION.md](ART_DIRECTION.md),
 - Added first-run fixture and [coordinator instructions](docs/orchestration/coordinator-prompt.md), plus a [portable setup and GitHub handoff runbook](docs/ORCHESTRATION_PILOT.md). Specialist configuration is local to each Mac, not checked into Git.
 - Fixed stale Claude process output/exit handling and reported spawn failures so an older process cannot complete a newer worker turn.
 - Verification: Node 22 `AMBIENTIC_SOCKET_TESTS=1 npm test` passed all 324 tests with no skips, including the actual Unix socket/MCP bridge and OAuth callback fixture. `npm run build` passed. The initial sandboxed run timed out in the OAuth fixture; the complete run with local transport permissions passed.
+- Electron verification: `npm run rebuild:sqlite`, `npm run test:sqlite` (SQLite + FTS5), and `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron --test test/orchestration.test.mjs` passed (8/8 queue tests). The local dependency is left built for Electron; `npm test` restores Node's ABI when needed.
 - Current work: specialist creation/tool verification and first live synthetic run remain open. No production analysis, provider inference, canonical context publication, or schedule migration was performed by these tests. An independently launched Codex desktop chat does not inherit this gateway; launch the pilot coordinator through Ambientic.
-- Release preflight: this Mac reports zero valid signing identities. Signed installation, installed-build health, and real specialist/provider acceptance remain outstanding; use the signing-Mac handoff before claiming release readiness.
+- Canonical release gate: `AMBIENTIC_SOCKET_TESTS=1 npm run release:local` reran all 324 tests successfully from clean commit `ccdd0f4`, then stopped at the required signing identity check (zero valid identities on this Mac). No app was replaced. Signed installation, installed-build health, and real specialist/provider acceptance remain outstanding; use the signing-Mac handoff before claiming release readiness.
 
 ## Fresh-checkout verification — 2026-11-05
 
